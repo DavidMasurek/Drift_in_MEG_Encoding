@@ -24,7 +24,13 @@ pop_code_dynamics = load_pop_code_dynamics(subject=["2"],
                                         event_type="fixation", 
                                         s_freq=500, 
                                         masked=False, 
-                                        take_norm=True
+                                        take_norm=False
                     )
+# Comments to function load_pop_code_dynamics
+
+# docstring says subject should be subject ID as int but function attempts to slice it with [0] and converts it to int --> seems to require list?
+
+# There seems to be a function missing or misquoted in "population_code_tools"/"avs_pop_code_tools": The function "lock_population_code_to_fixation_offset" does not exist in the repository
+# AttributeError: module 'avs_machine_room.prepro.source_reconstruction.population_code_tools' has no attribute 'lock_population_code_to_fixation_offset'
 
 print(f"pop_code_dynamics.keys(): {pop_code_dynamics.keys()}")
