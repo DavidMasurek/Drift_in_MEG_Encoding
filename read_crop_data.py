@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import json
 
-crop_csv_path = "as02_crops_metadata.csv"
+crop_csv_path = "/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as02_crops_metadata.csv"
 
 # Read data from csv and set index to crop identifier (filename before .png)
 df = pd.read_csv(crop_csv_path, index_col = 'crop_identifier')
@@ -60,9 +60,9 @@ print("Done creating data_dict.")
 print(data_dict)
 
 # Export dict to json 
-json_file_name = 'crop_dict.json'
+json_file_path = 'data_files/timepoint_dict_crops.json'
 
-with open(json_file_name, 'w') as file:
+with open(json_file_path, 'w') as file:
     # Serialize and save the dictionary to the file
     json.dump(data_dict, file, indent=4)
 
