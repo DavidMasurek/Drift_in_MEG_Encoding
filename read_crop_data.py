@@ -54,7 +54,7 @@ for nr_session in range(1,num_sessions+1):
             # Fill in crop identifier value (here the index) in main data dict for this timepoint
             data_dict["sessions"][nr_session]["trials"][nr_trial]["timepoints"][timepoint]["crop_identifier"] = timepoint_df.index.tolist()[0]  # slice with [0] to get single element instead of string
 
-            data_dict["sessions"][nr_session]["trials"][nr_trial]["timepoints"][timepoint]["meg"] = None
+            data_dict["sessions"][nr_session]["trials"][nr_trial]["timepoints"][timepoint]["meg"] = {}
 
 print("Done creating data_dict.")
 print(data_dict)
@@ -65,14 +65,3 @@ json_file_path = 'data_files/timepoint_dict_crops.json'
 with open(json_file_path, 'w') as file:
     # Serialize and save the dictionary to the file
     json.dump(data_dict, file, indent=4)
-
-
-
-
-# Debugging/Drawing
-
-#crop = data_dict["sessions"]["1"]["trials"]["1"]["timepoint"]["0.55"]["crop"]
-
-#vs.
-
-#crop = data_dict["session_1"]["trial_1"]["timepoint_0.55"]["crop"]
