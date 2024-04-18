@@ -1,8 +1,14 @@
 import sys
 import os
+from pathlib import Path
 import importlib.util
 import json
 import h5py
+
+# Add parent folder of src to path and change cwd
+__location__ = Path(__file__).parent.parent
+sys.path.append(str(__location__))
+os.chdir(__location__)
 
 # Params
 

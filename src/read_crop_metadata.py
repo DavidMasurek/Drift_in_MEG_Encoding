@@ -1,6 +1,14 @@
+from pathlib import Path
+import sys
+import os
 import numpy as np
 import pandas as pd
 import json
+
+# Add parent folder of src to path and change cwd
+__location__ = Path(__file__).parent.parent
+sys.path.append(str(__location__))
+os.chdir(__location__)
 
 subject_id = "02"
 
