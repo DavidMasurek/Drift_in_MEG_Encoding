@@ -4,6 +4,8 @@ import importlib.util
 import json
 import h5py
 
+# Params
+
 
 # Add AVS directory to sys.path to allow import
 avs_project_root_path = "/share/klab/camme/camme/dmasurek/AVS-machine-room-copy/"
@@ -50,7 +52,7 @@ def insert_meg_into_crop_dict(timepoint_dict_crops: dict, meg_data: dict, num_ep
         print(f"Filling in meg data for session {session_id}")
         for trial_id in timepoint_dict_crops["sessions"][session_id]["trials"].keys():
             for timepoint_id in timepoint_dict_crops["sessions"][session_id]["trials"][trial_id]["timepoints"].keys():
-                # Stop if meg data from file is 
+                # Stop if meg data from file is completely extracted
                 if total_index >= num_epochs:
                     return timepoint_dict_crops
 
@@ -59,11 +61,16 @@ def insert_meg_into_crop_dict(timepoint_dict_crops: dict, meg_data: dict, num_ep
 
                 # Fill in meg data for timepoint (convert numpy array to list for json serialization)
                 # grad
-                timepoint_dict_crops["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["meg"]["grad"] = meg_data["grad"][total_index][:][:].tolist()
+                timepoint_dict_crops["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["meg"]["grad"] = meg_data["grad"][total_index][:][:]  #.tolist()
                 # meg
-                timepoint_dict_crops["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["meg"]["mag"] = meg_data["mag"][total_index][:][:].tolist()
+                timepoint_dict_crops["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["meg"]["mag"] = meg_data["mag"][total_index][:][:]  #.tolist()
 
                 total_index += 1
+
+# Define globals
+meg_data = {}
+num_epochs = None
+meg_crops_by_timepoints = {}
 
 # Read .h5 file
 with h5py.File(os.path.join(path_to_meg_data, meg_data_file), "r") as f:
@@ -84,24 +91,20 @@ with h5py.File(os.path.join(path_to_meg_data, meg_data_file), "r") as f:
     # we have 2875 (2874 starting from 0) epochs in session a, those belong to 2874 different crops/time_in_trials
     # so I have to go through the dict in the order of creation to map crops to meg epochs?
 
-    global meg_data = {}
-    meg_data["grad"] = f['grad']['onset']
-    meg_data["mag"] = f['mag']['onset']
-    global num_epochs = f['grad']['onset'].shape[0]
+    meg_data["grad"] = f['grad']['onset']  #(2874, 204, 601)
+    meg_data["mag"] = f['mag']['onset']  #(2874, 102, 601)
+    num_epochs = f['grad']['onset'].shape[0]
 
     print(f"num_epochs: {num_epochs}")
 
-    global meg_crops_by_timepoints = insert_meg_into_crop_dict(timepoint_dict_crops, meg_data, num_epochs)
+    #combined_meg = np.concatenate([meg_data["grad"], meg_data["mag"]], axis=1) #(2874, 306, 601)
+
+    #meg_crops_by_timepoints = insert_meg_into_crop_dict(timepoint_dict_crops, meg_data, num_epochs)
 
 
 print("Done filling meg data in dict.")
 
-# Export dict to json 
-json_file_path = 'data_files/meg_crops_by_timepoints.json'
-
-with open(json_file_path, 'w') as file:
-    # Serialize and save the dictionary to the file
-    json.dump(meg_crops_by_timepoints, file, indent=4)
+# No export yet, datatype to be debated
 
 print("Done exporting meg data.")
 
