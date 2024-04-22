@@ -65,8 +65,7 @@ with h5py.File(os.path.join(path_to_meg_data, meg_data_file), "r") as f:
     # Combine grad and mag data
     combined_meg = np.concatenate([meg_data["grad"], meg_data["mag"]], axis=1) #(2874, 306, 601)
 
-
-# Train-test split based on scene ids
+    # Train-test split based on scene ids
 
 
 
