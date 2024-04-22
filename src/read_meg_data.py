@@ -9,8 +9,16 @@ import h5py
 import numpy as np
 
 # Choose dataset params
-participant_id = "02"
+subject_id = "02"
 session_id_letter = "a"
+
+# Map letter session_id to number
+letters = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
+session_mapping = {}
+for num in range(1,11):
+    letter = letters[num-1]
+    session_mapping[letter] = str(num)
+session_id_num = session_mapping[session_id_letter]
 
 # Add parent folder of src to path and change cwd
 __location__ = Path(__file__).parent.parent
@@ -25,13 +33,13 @@ sys.path.insert(0, avs_project_root_path)
 from avs_machine_room.dataloader.load_population_codes.load_h5 import norm_per_voxel
 
 # Read timepoint_dict_crop from json
-timepoint_dict_crops_file = open("data_files/timepoint_dict_crops.json")
+timepoint_dict_crops_file = open(f"data_files/timepoint_dict_crops_subject_{subject_id}.json")
 timepoint_dict_crops_string = timepoint_dict_crops_file.read()
 timepoint_dict_crops = json.loads(timepoint_dict_crops_string)
 
 # Load and inspect MEG data
-path_to_meg_data = f"/share/klab/datasets/avs/population_codes/as{participant_id}/sensor/filter_0.2_200"
-meg_data_file = f"as{participant_id}{session_id_letter}_population_codes_fixation_500hz_masked_False.h5"
+path_to_meg_data = f"/share/klab/datasets/avs/population_codes/as{subject_id}/sensor/filter_0.2_200"
+meg_data_file = f"as{subject_id}{session_id_letter}_population_codes_fixation_500hz_masked_False.h5"
 
 # Define globals
 meg_data = {}
@@ -66,6 +74,33 @@ with h5py.File(os.path.join(path_to_meg_data, meg_data_file), "r") as f:
     combined_meg = np.concatenate([meg_data["grad"], meg_data["mag"]], axis=1) #(2874, 306, 601)
 
     # Train-test split based on scene ids
+
+    # Count number of scenes in session
+    sceneIDs = {}
+    trialIDs = {}
+    for trial_id in timepoint_dict_crops["sessions"][session_id_num]["trials"]:
+        trialIDs.append = trial_id
+        for timepoint in timepoint_dict_crops["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
+            # get sceneID of current timepoint
+            sceneID_current = timepoint_dict_crops["sessions"][session_id_num]["trials"][trial_id]["timepoints"][timepoint]["sceneID"]
+            if sceneID_current not in sceneIDs.keys():
+                sceneIDs.append = sceneID_current
+    num_scenes = len(sceneIDs)  # subject 2, session a: 300 
+
+    if num_scenes != len(trialIDs):
+        raise ValueError("Number of trials and number of scenes is not identical. Doubled scenes need to be considered")
+
+    # Split 80/20
+    num_scenes_train = int(num_scenes*0.8)
+    num_scenes_test = num_scenes - num_scenes_train
+
+    train_scenes = sceneIDs[:]
+
+    for num in range (0,10):
+        print(num)
+
+    print(f"num_scenes_train: {num_scenes_train}")
+    print(f"num_scenes_test: {num_scenes_test}")
 
 
 
