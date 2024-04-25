@@ -75,41 +75,83 @@ with h5py.File(os.path.join(path_to_meg_data, meg_data_file), "r") as f:
 
     # Train-test split based on scene ids
 
-    # Count number of scenes in session
-    sceneIDs = {}
-    trialIDs = {}
+    # Save sceneIDs in session for split
+    sceneIDs = []
+    trialIDs = []
     for trial_id in timepoint_dict_crops["sessions"][session_id_num]["trials"]:
-        trialIDs.append = trial_id
+        trialIDs.append(trial_id)
         for timepoint in timepoint_dict_crops["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
             # get sceneID of current timepoint
             sceneID_current = timepoint_dict_crops["sessions"][session_id_num]["trials"][trial_id]["timepoints"][timepoint]["sceneID"]
-            if sceneID_current not in sceneIDs.keys():
-                sceneIDs.append = sceneID_current
+            if sceneID_current not in sceneIDs:
+                sceneIDs.append(sceneID_current)
+
+    assert len(sceneIDs) == len(set(sceneIDs))
+
     num_scenes = len(sceneIDs)  # subject 2, session a: 300 
 
     if num_scenes != len(trialIDs):
         raise ValueError("Number of trials and number of scenes is not identical. Doubled scenes need to be considered")
 
-    # Split 80/20
+
+    # Choose sceneIds for 80/20 split
     num_scenes_train = int(num_scenes*0.8)
     num_scenes_test = num_scenes - num_scenes_train
 
-    train_scenes = sceneIDs[:]
+    train_scenes = sceneIDs[:num_scenes_train]
+    test_scenes = sceneIDs[num_scenes_train:]
 
-    for num in range (0,10):
-        print(num)
+    print(f"test_scenes: {test_scenes}")
 
-    print(f"num_scenes_train: {num_scenes_train}")
-    print(f"num_scenes_test: {num_scenes_test}")
-
-
+    print(f"len train_scenes: {len(train_scenes)}")
+    print(f"len test_scenes: {len(test_scenes)}")
 
 
-print("Done filling meg data in dict.")
+    # Iterate over metadata dict and store meg data from respective index in train or test set
+    def create_meg_dataset(timepoint_dict_crops, train_scenes, test_scenes):
+        train_ds = []
+        test_ds = []
 
-# No export yet, datatype to be debated
+        index = 0
+        for trial_id in timepoint_dict_crops["sessions"][session_id_num]["trials"]:
+            for timepoint in timepoint_dict_crops["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
+                if index >= 2874:
+                    return train_ds, test_ds
+                
+                # get sceneID of current timepoint
+                sceneID_current = timepoint_dict_crops["sessions"][session_id_num]["trials"][trial_id]["timepoints"][timepoint]["sceneID"]
+                if sceneID_current in train_scenes:
+                    train_ds.append(combined_meg[index])
+                if sceneID_current in test_scenes:
+                    print("adding to test_ds")
+                    test_ds.append(combined_meg[index])
+                if sceneID_current == "113810.0":
+                    print("found")
+                #else:
+                #    raise ValueError(f"SceneID {sceneID_current} does not belong to train or test set.")
 
-print("Done exporting meg data.")
+                # Advance index
+                index += 1
+
+    train_ds, test_ds = create_meg_dataset(timepoint_dict_crops, train_scenes, test_scenes)
+        
+    train_ds = np.array(train_ds)
+    test_ds = np.array(test_ds)
+
+    # Debug
+    print(f"train_ds.shape: {train_ds.shape}")
+    print(f"test_ds.shape: {test_ds.shape}")
+
+    # Export numpy array to .npz
+    for split in ["train", "test"]:
+        if split == "train":
+            ds = train_ds
+        else:
+            ds = test_ds
+        np_save_path = f"data_files/meg_data/meg_{split}_ds_subj_{subject_id}_sess_{session_id_num}.npy"
+        np.save(np_save_path, ds)
+
+print("Done creating meg dataset.")
 
 
 
