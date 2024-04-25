@@ -56,15 +56,15 @@ def normalize_array(data):
 
 # Read .h5 file
 with h5py.File(os.path.join(path_to_meg_data, meg_data_file), "r") as f:
-    # Debugging: meg file info
-    print(f"num timepoints: {len(f.attrs['times'])}") # participant 2, session a: 2874
-
     # session 1 trial 1 starts at 5350
     # we have 2875 (2874 starting from 0) epochs in session a, those belong to 2874 different crops/time_in_trials
 
     meg_data["grad"] = f['grad']['onset']  # participant 2, session a (2874, 204, 601)
     meg_data["mag"] = f['mag']['onset']  # participant 2, session a (2874, 102, 601)
     num_epochs = f['grad']['onset'].shape[0]
+
+    # Get meg (grad) shape
+    print(f"meg_data['grad'].shape: {meg_data['grad'].shape}")
 
     # Normalize grad and mag independently
     meg_data["grad"] = normalize_array(np.array(meg_data['grad']))
@@ -76,8 +76,10 @@ with h5py.File(os.path.join(path_to_meg_data, meg_data_file), "r") as f:
     # Train-test split based on scene ids
 
     # Save sceneIDs in session for split
+    num_crop_datapoints = 0
     sceneIDs = []
     trialIDs = []
+    scene_freq = {}
     for trial_id in timepoint_dict_crops["sessions"][session_id_num]["trials"]:
         trialIDs.append(trial_id)
         for timepoint in timepoint_dict_crops["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
@@ -85,6 +87,15 @@ with h5py.File(os.path.join(path_to_meg_data, meg_data_file), "r") as f:
             sceneID_current = timepoint_dict_crops["sessions"][session_id_num]["trials"][trial_id]["timepoints"][timepoint]["sceneID"]
             if sceneID_current not in sceneIDs:
                 sceneIDs.append(sceneID_current)
+
+            # Count total datapoints/timepoints/fixations
+            num_crop_datapoints += 1
+
+            # Count occurances of sceneIDs
+            if sceneID_current not in scene_freq.keys():
+                scene_freq[sceneID_current] = 1
+            else:
+                scene_freq[sceneID_current] += 1
 
     assert len(sceneIDs) == len(set(sceneIDs))
 
@@ -98,13 +109,27 @@ with h5py.File(os.path.join(path_to_meg_data, meg_data_file), "r") as f:
     num_scenes_train = int(num_scenes*0.8)
     num_scenes_test = num_scenes - num_scenes_train
 
-    train_scenes = sceneIDs[:num_scenes_train]
-    test_scenes = sceneIDs[num_scenes_train:]
-
-    print(f"test_scenes: {test_scenes}")
+    test_scenes = sceneIDs[:num_scenes_test]
+    train_scenes = sceneIDs[num_scenes_test:]
 
     print(f"len train_scenes: {len(train_scenes)}")
     print(f"len test_scenes: {len(test_scenes)}")
+
+    # Debugging: Calculate sum of datapoints that should be in test_scenes
+    sum_datapoints_train = 0
+    sum_datapoints_test = 0
+    for sceneID in scene_freq.keys():
+        if sceneID in train_scenes:
+            sum_datapoints_train += scene_freq[sceneID]
+        elif sceneID in test_scenes:
+            sum_datapoints_test += scene_freq[sceneID]
+        else:
+            raise ValueError("Found ID that is neither in train nor test set.")
+
+    print(f"num of datapoints that should be in train_ds: {sum_datapoints_train}")
+    print(f"num of datapoints that should be in test_ds: {sum_datapoints_test}")
+
+    print(f"num_crop_datapoints: {num_crop_datapoints}")
 
 
     # Iterate over metadata dict and store meg data from respective index in train or test set
@@ -123,7 +148,6 @@ with h5py.File(os.path.join(path_to_meg_data, meg_data_file), "r") as f:
                 if sceneID_current in train_scenes:
                     train_ds.append(combined_meg[index])
                 if sceneID_current in test_scenes:
-                    print("adding to test_ds")
                     test_ds.append(combined_meg[index])
                 if sceneID_current == "113810.0":
                     print("found")
