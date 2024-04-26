@@ -31,8 +31,10 @@ def create_metadata_dict(df, num_sessions):
         # Create dict for this session
         data_dict["sessions"][nr_session] = {}
 
-        # Filter dataframe by session
+        # Filter dataframe by session 
         session_df = df[df["session"] == nr_session]
+        # Filter dataframe by type of recording (we are only interested in scene recordings, in the meg file I am using there is no data for caption of microphone recordings (or "nothing" recordings))
+        session_df = session_df[session_df["recording"] == "scene"]
 
         # Get list of all trials in this session
         trial_numbers = list(map(int, set(session_df["trial"].tolist())))

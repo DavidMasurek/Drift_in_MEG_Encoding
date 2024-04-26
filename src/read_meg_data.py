@@ -53,6 +53,8 @@ def normalize_array(data):
 
     return normalized_data
 
+# Read meg metadata to match meg epochs to scenes and fixations
+meg_metadata_path = 
 
 # Read .h5 file
 with h5py.File(os.path.join(path_to_meg_data, meg_data_file), "r") as f:
@@ -166,14 +168,23 @@ with h5py.File(os.path.join(path_to_meg_data, meg_data_file), "r") as f:
     print(f"train_ds.shape: {train_ds.shape}")
     print(f"test_ds.shape: {test_ds.shape}")
 
-    # Export numpy array to .npz
+    num_meg_datapoints = train_ds.shape[0] + test_ds.shape[0]
+    print(f"num_meg_datapoints: {num_meg_datapoints}")
+
+    # Export meg numpy array and split based on sceneIDs to .npz
     for split in ["train", "test"]:
         if split == "train":
             ds = train_ds
+            scenes = train_scenes
         else:
             ds = test_ds
-        np_save_path = f"data_files/meg_data/meg_{split}_ds_subj_{subject_id}_sess_{session_id_num}.npy"
-        np.save(np_save_path, ds)
+            scenes = test_scenes
+        # Save meg
+        meg_save_path = f"data_files/meg_data/meg_{split}_ds_subj_{subject_id}_sess_{session_id_num}.npy"
+        np.save(meg_save_path, ds)
+        # save scene split
+        split_save_path = f"data_files/split/sceneIDs_{split}_subj_{subject_id}_sess_{session_id_num}.npy"
+        np.save(split_save_path, scenes)
 
 print("Done creating meg dataset.")
 
