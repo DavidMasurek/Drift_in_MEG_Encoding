@@ -39,14 +39,20 @@ def recursive_defaultdict():
     return defaultdict(recursive_defaultdict)
 
 combined_metadata = recursive_defaultdict()
+meg_index = 0
 for trial_id in meg_metadata["trials"]:
     for timepoint_id in meg_metadata["trials"][trial_id]["timepoints"]:
         # For each timepoint in the meg metadata: Check if this timepoint is in the crop metadata
         try:
-            crop_identifier = crop_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"][timepoint_id]["crop_identifier"]
+            crop_identifier = crop_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"][timepoint_id].get("crop_identifier", None)
+            sceneID = crop_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"][timepoint_id].get("sceneID", None)
             combined_metadata["trials"][trial_id]["timepoints"][timepoint_id]["crop_identifier"] = crop_identifier
+            combined_metadata["trials"][trial_id]["timepoints"][timepoint_id]["sceneID"] = sceneID
+            combined_metadata["trials"][trial_id]["timepoints"][timepoint_id]["meg_index"] = meg_index
         except:
-            continue
+            pass
+        meg_index += 1
+        
 
 # Export dict to json 
 json_file_path = f'data_files/metadata/combined_metadata_subject_{subject_id}_session_{session_id_num}.json'
