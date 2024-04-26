@@ -82,7 +82,7 @@ data_dict = create_metadata_dict(df=df, num_sessions=num_sessions)
 print("Done creating data_dict.")
 
 # Export dict to json 
-json_file_path = f'data_files/timepoint_dict_crops_subject_{subject_id}.json'
+json_file_path = f'data_files/metadata/crop_metadata_subject_{subject_id}.json'
 
 with open(json_file_path, 'w') as file:
     # Serialize and save the dictionary to the file
