@@ -184,7 +184,7 @@ with h5py.File(os.path.join(path_to_meg_data, meg_data_file), "r") as f:
         # Save meg
         meg_save_path = f"data_files/meg_data/meg_{split}_ds_subj_{subject_id}_sess_{session_id_num}.npy"
         np.save(meg_save_path, ds)
-        # save scene split
+        # save trial split based on scenes
         split_save_path = f"data_files/split/trials_{split}_subj_{subject_id}_sess_{session_id_num}.npy"
         np.save(split_save_path, trials)
 
