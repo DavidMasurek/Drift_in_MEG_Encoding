@@ -21,7 +21,7 @@ for num in range(1,11):
 session_id_num = session_mapping[session_id_letter]
 
 # Add parent folder of src to path and change cwd
-__location__ = Path(__file__).parent.parent
+__location__ = Path(__file__).parent.parent.parent
 sys.path.append(str(__location__))
 os.chdir(__location__)
 
@@ -167,8 +167,8 @@ with h5py.File(os.path.join(path_to_meg_data, meg_data_file), "r") as f:
     test_ds = np.array(test_ds)
 
     # Debug
-    print(f"train_ds.shape: {train_ds.shape}")
-    print(f"test_ds.shape: {test_ds.shape}")
+    print(f"train_ds.shape: {train_ds.shape}")  #(2269, 408, 601)
+    print(f"test_ds.shape: {test_ds.shape}")  #(556, 408, 601)
 
     num_meg_datapoints = train_ds.shape[0] + test_ds.shape[0]
     print(f"num_meg_datapoints: {num_meg_datapoints}")

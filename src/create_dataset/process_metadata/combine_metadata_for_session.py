@@ -7,7 +7,7 @@ import json
 from collections import defaultdict
 
 # Add parent folder of src to path and change cwd
-__location__ = Path(__file__).parent.parent
+__location__ = Path(__file__).parent.parent.parent.parent
 sys.path.append(str(__location__))
 os.chdir(__location__)
 
