@@ -1,10 +1,11 @@
 import pandas as pd
 import numpy as np
+import json
 import os
 from collections import defaultdict
 
 class metadata_helper:
-    def __init__(self, subject_id:str = "02"):
+    def __init__(self, subject_id: str = "02"):
         self.subject_id = subject_id
         
         self.session_ids_num = [session_id for session_id in range(1,11)]
@@ -15,15 +16,14 @@ class metadata_helper:
 
 
     def recursive_defaultdict(self) -> dict:
-        return defaultdict(recursive_defaultdict)
+        return defaultdict(self.recursive_defaultdict)
 
 
-    def map_session_letter_id_to_num(self, session_id_letter:char) -> str:
+    def map_session_letter_id_to_num(self, session_id_letter: str) -> str:
         # Create mapping
-        session_id_letters = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
         session_mapping = {}
         for num in range(1,11):
-            letter = session_id_letters[num-1]
+            letter = self.session_ids_char[num-1]
             session_mapping[letter] = str(num)
         # Map letter to num
         session_id_num = session_mapping[session_id_letter]
@@ -37,11 +37,11 @@ class metadata_helper:
         """
 
         # Read crop metadata from json
-        crop_metadata_file = open(f"data_files/metadata/crop_metadata/subject_{subject_id}/crop_metadata_dict.json")
+        crop_metadata_file = open(f"data_files/metadata/crop_metadata/subject_{self.subject_id}/crop_metadata_dict.json")
         crop_metadata_string = crop_metadata_file.read()
         crop_metadata = json.loads(crop_metadata_string)
         # Read meg metadata from json
-        meg_metadata_file = open(f"data_files/metadata/meg_metadata/subject_{subject_id}/meg_metadata_dict.json")
+        meg_metadata_file = open(f"data_files/metadata/meg_metadata/subject_{self.subject_id}/meg_metadata_dict.json")
         meg_metadata_string = meg_metadata_file.read()
         meg_metadata = json.loads(meg_metadata_string)
 
@@ -53,7 +53,7 @@ class metadata_helper:
         meg_index = 0
         for session_id in meg_metadata["sessions"]:
             for trial_id in meg_metadata["sessions"][session_id]["trials"]:
-                for timepoint_id in meg_metadata["trials"][trial_id]["timepoints"]:
+                for timepoint_id in meg_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
                     # For each timepoint in the meg metadata: Check if this timepoint is in the crop metadata and if so store it
                     try:
                         crop_identifier = crop_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id].get("crop_identifier", None)
@@ -84,7 +84,7 @@ class metadata_helper:
 
         data_dict = {"sessions": {}}
         # Read metadata for each session from csv
-        for session_id_letter in session_id_letters:
+        for session_id_letter in self.session_ids_char:
             # Build path to session metadata file
             meg_metadata_file = f"as{self.subject_id}{session_id_letter}_et_epochs_metadata_fixation.csv"
             meg_metadata_path = os.path.join(self.meg_metadata_folder, meg_metadata_file)
