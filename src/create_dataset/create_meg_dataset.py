@@ -70,13 +70,19 @@ with h5py.File(os.path.join(path_to_meg_data, meg_data_file), "r") as f:
 
     # Debugging: print meg (grad) shape
     print(f"meg_data['grad'].shape: {meg_data['grad'].shape}")
+    print(f"meg_data['mag'].shape: {meg_data['mag'].shape}")
 
     # Normalize grad and mag independently
     meg_data["grad"] = normalize_array(np.array(meg_data['grad']))
-    meg_data["mag"] = normalize_array(np.array(meg_data['grad']))
+    meg_data["mag"] = normalize_array(np.array(meg_data['mag']))
+
+    print(f"noramlized meg_data['grad'].shape: {meg_data['grad'].shape}")
+    print(f"noramlized meg_data['mag'].shape: {meg_data['mag'].shape}")
 
     # Combine grad and mag data
     combined_meg = np.concatenate([meg_data["grad"], meg_data["mag"]], axis=1) #(2874, 306, 601)
+
+    print(f"combined_meg.shape: {combined_meg.shape}")
 
     # Train-test split based on scene ids
 
