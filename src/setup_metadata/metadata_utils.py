@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+from collections import defaultdict
 
 class metadata_helper:
     def __init__(self, subject_id:str = "02"):
@@ -11,6 +12,11 @@ class metadata_helper:
 
         self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{subject_id}_crops_metadata.csv"
         self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{subject_id}/sensor/filter_0.2_200"
+
+
+    def recursive_defaultdict(self) -> dict:
+        return defaultdict(recursive_defaultdict)
+
 
     def map_session_letter_id_to_num(self, session_id_letter:char) -> str:
         # Create mapping
@@ -25,10 +31,57 @@ class metadata_helper:
         return session_id_num
 
 
+    def create_combined_metadata_dict(self) -> None:
+        """
+        Creates the combined metadata dict with timepoints that can be found in both meg and crop metadata for the respective session and trial.
+        """
+
+        # Read crop metadata from json
+        crop_metadata_file = open(f"data_files/metadata/crop_metadata/subject_{subject_id}/crop_metadata_dict.json")
+        crop_metadata_string = crop_metadata_file.read()
+        crop_metadata = json.loads(crop_metadata_string)
+        # Read meg metadata from json
+        meg_metadata_file = open(f"data_files/metadata/meg_metadata/subject_{subject_id}/meg_metadata_dict.json")
+        meg_metadata_string = meg_metadata_file.read()
+        meg_metadata = json.loads(meg_metadata_string)
+
+        # Store information about timepoints that are present in both meg and crop data
+
+        # Use defaultdict to automatically create missing keys
+        combined_metadata_dict = self.recursive_defaultdict()
+
+        meg_index = 0
+        for session_id in meg_metadata["sessions"]:
+            for trial_id in meg_metadata["sessions"][session_id]["trials"]:
+                for timepoint_id in meg_metadata["trials"][trial_id]["timepoints"]:
+                    # For each timepoint in the meg metadata: Check if this timepoint is in the crop metadata and if so store it
+                    try:
+                        crop_identifier = crop_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id].get("crop_identifier", None)
+                        sceneID = crop_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id].get("sceneID", None)
+                        combined_metadata_dict["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["crop_identifier"] = crop_identifier
+                        combined_metadata_dict["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["sceneID"] = sceneID
+                        combined_metadata_dict["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["meg_index"] = meg_index
+                    except:
+                        pass
+                    meg_index += 1
+        
+        # Export dict to json 
+        storage_folder = f'data_files/metadata/combined_metadata/subject_{self.subject_id}'
+        if not os.path.exists(storage_folder):
+            os.makedirs(storage_folder)
+        json_storage_file = "combined_metadata_dict.json"
+        json_storage_path = os.path.join(storage_folder, json_storage_file)
+
+        with open(json_storage_path, 'w') as file:
+            # Serialize and save the dictionary to the file
+            json.dump(combined_metadata_dict, file, indent=4)
+
+
     def create_meg_metadata_dict(self) -> None:
         """
         Creates the meg metadata dict for the participant and stores it.
         """
+
         data_dict = {"sessions": {}}
         # Read metadata for each session from csv
         for session_id_letter in session_id_letters:
@@ -73,6 +126,7 @@ class metadata_helper:
         """
         Creates the crop metadata dict for the participant and stores it.
         """
+
         # Read data from csv and set index to crop identifier (filename before .png)
         df = pd.read_csv(self.crop_metadata_path, index_col = 'crop_identifier')
 

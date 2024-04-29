@@ -25,3 +25,4 @@ metadata_helper.create_crop_metadata_dict()
 metadata_helper.create_meg_metadata_dict()
 
 # Combine meg and crop metadata over all sessions
+metadata_helper.create_combined_metadata_dict()
