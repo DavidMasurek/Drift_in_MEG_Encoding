@@ -4,9 +4,52 @@ import json
 import os
 from collections import defaultdict
 
-class metadata_helper:
+class BasicOperationsHelper:
     def __init__(self, subject_id: str = "02"):
         self.subject_id = subject_id
+
+    def read_dict_from_json(self, type_of_content: str) -> dict:
+        """
+        Helper function to read json files into dicts.
+
+        Allowed Parameters: "combined_metadata", "meg_metadata", "crop_metadata"
+        """
+        valid_types = ["combined_metadata", "meg_metadata", "crop_metadata"]
+        if type_of_content not in valid_types:
+            raise ValueError(f"Function read_dict_from_json called with unrecognized type {type_of_content}.")
+
+        file_path = f"data_files/metadata/{type_of_content}/subject_{self.subject_id}/{type_of_content}_dict.json"
+        try:
+            with open(file_path, 'r') as metadata_file:
+                metadata_dict = json.load(metadata_file)
+            return metadata_dict
+        except FileNotFoundError:
+            raise FileNotFoundError(f"In Function read_dict_from_json: The file {file_path} does not exist.")
+
+        return metadata_dict
+
+
+    def save_dict_as_json(self, type_of_content: str, metadata_dict: dict) -> None:
+        """
+        Helper function to store dicts as json files.
+
+        Allowed Parameters: "combined_metadata", "meg_metadata", "crop_metadata"
+        """
+        storage_folder = f'data_files/metadata/{type_of_content}/subject_{self.subject_id}'
+        if not os.path.exists(storage_folder):
+            os.makedirs(storage_folder)
+        json_storage_file = f"{type_of_content}_dict.json"
+        json_storage_path = os.path.join(storage_folder, json_storage_file)
+
+        with open(json_storage_path, 'w') as file:
+            # Serialize and save the dictionary to the file
+            json.dump(metadata_dict, file, indent=4)
+
+class MetadataHelper(BasicOperationsHelper):
+    def __init__(self, subject_id: str = "02"):
+        super().__init__(subject_id)
+        self.session_ids_num = list(range(1, 11))
+        self.session_ids_char = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
         
         self.session_ids_num = [session_id for session_id in range(1,11)]
         self.session_ids_char = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
@@ -37,13 +80,9 @@ class metadata_helper:
         """
 
         # Read crop metadata from json
-        crop_metadata_file = open(f"data_files/metadata/crop_metadata/subject_{self.subject_id}/crop_metadata_dict.json")
-        crop_metadata_string = crop_metadata_file.read()
-        crop_metadata = json.loads(crop_metadata_string)
+        crop_metadata = self.read_dict_from_json(type_of_content="crop_metadata")
         # Read meg metadata from json
-        meg_metadata_file = open(f"data_files/metadata/meg_metadata/subject_{self.subject_id}/meg_metadata_dict.json")
-        meg_metadata_string = meg_metadata_file.read()
-        meg_metadata = json.loads(meg_metadata_string)
+        meg_metadata = self.read_dict_from_json(type_of_content="meg_metadata")
 
         # Store information about timepoints that are present in both meg and crop data
 
@@ -66,15 +105,7 @@ class metadata_helper:
                     meg_index += 1
         
         # Export dict to json 
-        storage_folder = f'data_files/metadata/combined_metadata/subject_{self.subject_id}'
-        if not os.path.exists(storage_folder):
-            os.makedirs(storage_folder)
-        json_storage_file = "combined_metadata_dict.json"
-        json_storage_path = os.path.join(storage_folder, json_storage_file)
-
-        with open(json_storage_path, 'w') as file:
-            # Serialize and save the dictionary to the file
-            json.dump(combined_metadata_dict, file, indent=4)
+        self.save_dict_as_json(type_of_content="combined_metadata", metadata_dict=combined_metadata_dict)
 
 
     def create_meg_metadata_dict(self) -> None:
@@ -111,15 +142,7 @@ class metadata_helper:
                 data_dict["sessions"][session_id_num]["trials"][trial_id]["timepoints"][timepoint] = {"meg":True}
 
         # Export dict to json 
-        storage_folder = f'data_files/metadata/meg_metadata/subject_{self.subject_id}'
-        if not os.path.exists(storage_folder):
-            os.makedirs(storage_folder)
-        json_storage_file = "meg_metadata_dict.json"
-        json_storage_path = os.path.join(storage_folder, json_storage_file)
-
-        with open(json_storage_path, 'w') as file:
-            # Serialize and save the dictionary to the file
-            json.dump(data_dict, file, indent=4)
+        self.save_dict_as_json(type_of_content="meg_metadata", metadata_dict=data_dict)
 
 
     def create_crop_metadata_dict(self) -> None:
@@ -184,12 +207,72 @@ class metadata_helper:
                     data_dict["sessions"][nr_session]["trials"][nr_trial]["timepoints"][timepoint]["sceneID"] = sceneID
         
         # Export dict to json 
-        storage_folder = f'data_files/metadata/crop_metadata/subject_{self.subject_id}'
-        if not os.path.exists(storage_folder):
-            os.makedirs(storage_folder)
-        json_storage_file = "crop_metadata_dict.json"
-        json_storage_path = os.path.join(storage_folder, json_storage_file)
+        self.save_dict_as_json(type_of_content="crop_metadata", metadata_dict=data_dict)
 
-        with open(json_storage_path, 'w') as file:
-            # Serialize and save the dictionary to the file
-            json.dump(data_dict, file, indent=4)
+
+class DatasetHelper:
+    def __init__(self, subject_id: str = "02"):
+        self.subject_id = subject_id
+        
+        self.session_ids_num = [session_id for session_id in range(1,11)]
+        self.session_ids_char = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
+
+        self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{subject_id}_crops_metadata.csv"
+        self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{subject_id}/sensor/filter_0.2_200"
+
+
+    def create_crop_dataset(self) -> None:
+        """
+        Creates the crop dataset with all crops in the combined_metadata (crops for which meg data exists)
+        """
+
+        # Read combined metadata from json
+        combined_metadata_file = open(f"data_files/metadata/combined_metadata/_subject_{self.subject_id}/combined_metadata_dict.json")
+        combined_metadata_string = combined_metadata_file.read()
+        combined_metadata = json.loads(combined_metadata_string)
+        
+        for session_id in self.session_ids_num:
+            pass
+
+
+    def create_meg_dataset(self) -> None:
+        """
+        Creates the crop dataset with all crops in the combined_metadata (crops for which meg data exists)
+        """
+
+        # Read combined metadata from json
+        combined_metadata_file = open(f"data_files/metadata/combined_metadata/_subject_{self.subject_id}/combined_metadata_dict.json")
+        combined_metadata_string = combined_metadata_file.read()
+        combined_metadata = json.loads(combined_metadata_string)
+        
+        for session_id in self.session_ids_num:
+            pass
+        
+    
+    def create_train_test_split(self):
+        """
+        Creates train/test split of trials based on sceneIDs.
+        """
+        # Read combined metadata from json
+        combined_metadata_file = open(f"data_files/metadata/combined_metadata/_subject_{self.subject_id}/combined_metadata_dict.json")
+        combined_metadata_string = combined_metadata_file.read()
+        combined_metadata = json.loads(combined_metadata_string)
+
+        num_total_datapoints = 0
+        sceneIDs = {}
+        trialIDs = []
+        for trial_id in combined_metadata["trials"]:
+            trialIDs.append(trial_id)
+            for timepoint in combined_metadata["trials"][trial_id]["timepoints"]:
+                # get sceneID of current timepoint
+                sceneID_current = combined_metadata["trials"][trial_id]["timepoints"][timepoint]["sceneID"]
+                # First occurance of the scene? Store its occurange with the corresonding trial
+                if sceneID_current not in sceneIDs:
+                    sceneIDs[sceneID_current] = {"trials": [trial_id]}
+                # SceneID previously occured in another trial? add current trial to stored data of scene
+                elif trial_id not in sceneIDs[sceneID_current]["trials"]:
+                    sceneIDs[sceneID_current]["trials"].append(trial_id)
+
+                # Count total datapoints/timepoints/fixations in combined metadata
+                num_total_datapoints += 1
+        
