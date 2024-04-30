@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import json
+import h5py
 import os
 import imageio
 
@@ -11,6 +12,21 @@ from typing import Tuple, Dict
 class BasicOperationsHelper:
     def __init__(self, subject_id: str = "02"):
         self.subject_id = subject_id
+        self.session_ids_char = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
+        self.session_ids_num = [str(session_id) for session_id in range(1,11)]
+
+
+    def map_session_letter_id_to_num(self, session_id_letter: str) -> str:
+        # Create mapping
+        session_mapping = {}
+        for num in range(1,11):
+            letter = self.session_ids_char[num-1]
+            session_mapping[letter] = str(num)
+        # Map letter to num
+        session_id_num = session_mapping[session_id_letter]
+
+        return session_id_num
+
 
     def read_metadata_dict_from_json(self, type_of_content: str) -> dict:
         """
@@ -60,9 +76,13 @@ class BasicOperationsHelper:
 
         Parameters: 
             session_id (str): id of session that the arrays belong to
-            type_of_content (str): Type of data in arrays. Allowed values: ["trial_splits", "crop_data"]
+            type_of_content (str): Type of data in arrays. Allowed values: ["trial_splits", "crop_data", "meg_data"]
             np_array (Dict[str, ndarray]): Arrays in format split, array. split is "train" or "test".
         """
+        valid_types = ["trial_splits", "crop_data", "meg_data"]
+        if type_of_content not in valid_types:
+            raise ValueError(f"Function export_split_array_as_npz called with unrecognized type {type_of_content}.")
+
         # Export train/test split arrays to .npz
         for split in array_dict:
             save_folder = f"data_files/{type_of_content}/subject_{self.subject_id}/session_{session_id}/{split}"  
@@ -73,12 +93,21 @@ class BasicOperationsHelper:
 
             np.save(save_path, array_dict[split])
 
+    def normalize_array(self, data):
+        """
+        Helper function to normalize meg data across a session.
+        """
+        data_min = data.min()
+        data_max = data.max()
+        normalized_data = (data - data_min) / (data_max - data_min)
+
+        return normalized_data
+
 
 
 class MetadataHelper(BasicOperationsHelper):
     def __init__(self, subject_id: str = "02"):
         super().__init__(subject_id)
-        self.session_ids_char = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
 
         self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{subject_id}_crops_metadata.csv"
         self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{subject_id}/sensor/filter_0.2_200"
@@ -86,18 +115,6 @@ class MetadataHelper(BasicOperationsHelper):
 
     def recursive_defaultdict(self) -> dict:
         return defaultdict(self.recursive_defaultdict)
-
-
-    def map_session_letter_id_to_num(self, session_id_letter: str) -> str:
-        # Create mapping
-        session_mapping = {}
-        for num in range(1,11):
-            letter = self.session_ids_char[num-1]
-            session_mapping[letter] = str(num)
-        # Map letter to num
-        session_id_num = session_mapping[session_id_letter]
-
-        return session_id_num
 
 
     def create_combined_metadata_dict(self) -> None:
@@ -240,10 +257,6 @@ class MetadataHelper(BasicOperationsHelper):
 class DatasetHelper(BasicOperationsHelper):
     def __init__(self, subject_id: str = "02"):
         super().__init__(subject_id)
-        self.subject_id = subject_id
-        
-        self.session_ids_num = [str(session_id) for session_id in range(1,11)]
-        self.session_ids_char = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
 
         self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{subject_id}_crops_metadata.csv"
         self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{subject_id}/sensor/filter_0.2_200"
@@ -307,13 +320,67 @@ class DatasetHelper(BasicOperationsHelper):
         Creates the crop dataset with all crops in the combined_metadata (crops for which meg data exists)
         """
 
-        # Read combined metadata from json
+        # Read combined and meg metadata from json
         combined_metadata = self.read_metadata_dict_from_json(type_of_content="combined_metadata")
-        
-        for session_id in self.session_ids_num:
-            pass
-        
+        meg_metadata = self.read_metadata_dict_from_json(type_of_content="meg_metadata")
+
+        meg_data_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
+
+        for session_id_char in self.session_ids_char:
+            session_id_num = self.map_session_letter_id_to_num(session_id_char)
+            # Load session MEG data from .h5
+            meg_data_file = f"as{self.subject_id}{session_id_char}_population_codes_fixation_500hz_masked_False.h5"
+            with h5py.File(os.path.join(meg_data_folder, meg_data_file), "r") as f:
+                meg_data = {}
+                meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a (2874, 204, 601)
+                meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a (2874, 102, 601)
     
+                # Normalize grad and mag independently
+                meg_data["grad"] = self.normalize_array(np.array(meg_data['grad']))
+                meg_data["mag"] = self.normalize_array(np.array(meg_data['mag']))
+
+                # Combine grad and mag data
+                combined_meg = np.concatenate([meg_data["grad"], meg_data["mag"]], axis=1) #(2874, 306, 601)
+    
+                # Split meg data 
+                # Get train/test split based on trials (based on scenes)
+                trials_split_dict = {}
+                for split in ["train", "test"]:
+                    # Load trial array
+                    split_trials_path = f"data_files/trial_splits/subject_{self.subject_id}/session_{session_id_num}/{split}/trial_splits.npy"  
+                    trials_split = np.load(split_trials_path)
+                    trials_split_dict[split] = trials_split
+
+                meg_split = {"train": [], "test": []}
+                # Iterate through meg metadata for simplicity with indexing
+                index = 0
+                for trial_id in meg_metadata["sessions"][session_id_num]["trials"]:
+                    if trial_id in trials_split_dict["train"]:
+                        trial_type = "train"
+                    elif trial_id in trials_split_dict["test"]:
+                        trial_type = "test"
+                    else:
+                        # Raise error if the trial is in neither split, but is in the combined metadata (in this case it should be there)
+                        if trial_id in combined_metadata["sessions"][session_id_num]["trials"]:
+                            raise ValueError(f"Session {session_id_num}: Trial_id {trial_id} neither in train nor test split.")
+                        # Otherwise skip this trial
+                        else:
+                            index += 1
+                            continue
+                    for timepoint in meg_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
+                        # Check if there is both crop and metadata for the timepoint
+                        if timepoint in combined_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
+                            # Assign to split
+                            meg_split[trial_type].append(combined_meg[index])
+                        # Advance index
+                        index += 1
+
+                # Export meg dataset arrays to .npz
+                self.export_split_array_as_npz(session_id=session_id_num, 
+                                            type_of_content="meg_data",
+                                            array_dict=meg_split)
+
+
     def create_train_test_split(self):
         """
         Creates train/test split of trials based on scene_ids.

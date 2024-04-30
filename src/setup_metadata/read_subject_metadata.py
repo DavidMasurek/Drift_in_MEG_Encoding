@@ -15,7 +15,7 @@ os.chdir(__location__)
 # Choose Parameters
 subject_id = "02"
 create_metadata = False
-create_dataset = True
+create_dataset = False
 
 ##### Process metadata for subject #####
 if create_metadata:
@@ -37,12 +37,13 @@ if create_dataset:
     dataset_helper = DatasetHelper(subject_id=subject_id)
 
     # Create train/test split based on sceneIDs (based on trial_ids)
-    #dataset_helper.create_train_test_split()
+    dataset_helper.create_train_test_split()
 
     # Create crop dataset based on split
-    #dataset_helper.create_crop_dataset()
+    dataset_helper.create_crop_dataset()
 
     # Create meg dataset based on split
+    dataset_helper.create_meg_dataset()
 
-Print("Pipeline completed.")
+print("Pipeline completed.")
 
