@@ -54,6 +54,9 @@ if extract_features:
     # Initialize extraction helper
     extraction_helper = ExtractionHelper(subject_id=subject_id)
 
+    # Extract features
+    extraction_helper.extract_features()
+
 
 print("Pipeline completed.")
 

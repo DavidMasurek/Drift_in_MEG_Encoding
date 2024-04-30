@@ -75,27 +75,34 @@ class BasicOperationsHelper:
             json.dump(metadata_dict, file, indent=4)
 
 
-    def export_split_data_as_file(self, session_id: str, type_of_content: str, array_dict: Dict[str, np.ndarray]) -> None:
+    def export_split_data_as_file(self, session_id: str, type_of_content: str, array_dict: Dict[str, np.ndarray], ann_model: str = None, module: str = None) -> None:
         """
         Helper function to export train/test numpy arrays as .npz or .pt files.
 
         Parameters: 
             session_id (str): id of session that the arrays belong to
-            type_of_content (str): Type of data in arrays. Allowed values: ["trial_splits", "crop_data", "meg_data", "torch_dataset"]
+            type_of_content (str): Type of data in arrays. Allowed values: ["trial_splits", "crop_data", "meg_data", "torch_dataset", "ann_features"]
             np_array (Dict[str, ndarray]): Arrays in format split, array. split is "train" or "test".
         """
-        valid_types = ["trial_splits", "crop_data", "meg_data", "torch_dataset"]
+        valid_types = ["trial_splits", "crop_data", "meg_data", "torch_dataset", "ann_features"]
         if type_of_content not in valid_types:
             raise ValueError(f"Function export_split_data_as_file called with unrecognized type {type_of_content}.")
 
+        # Set file type
         if type_of_content == "torch_dataset":
             file_type = ".pt"
         else:
             file_type = ".npy"
+        
+        # Add additional folder for model type and extraction layer for ann_features
+        if type_of_content == "ann_features":
+            additional_folders = f"/{ann_model}/{module}/"
+        else:
+            additional_folders = "/"
 
         # Export train/test split arrays to .npz
         for split in array_dict:
-            save_folder = f"data_files/{type_of_content}/subject_{self.subject_id}/session_{session_id}/{split}"  
+            save_folder = f"data_files/{type_of_content}{additional_folders}subject_{self.subject_id}/session_{session_id}/{split}"  
             save_file = f"{type_of_content}{file_type}"
             if not os.path.exists(save_folder):
                 os.makedirs(save_folder)
@@ -108,23 +115,31 @@ class BasicOperationsHelper:
 
 
     
-    def load_split_array_from_npz(self, session_id_num: str, type_of_content: str):
+    def load_split_data_from_file(self, session_id_num: str, type_of_content: str):
         """
         Helper function to load the split for a given session.
 
         Parameters: 
             session_id_num (str): id of session that the arrays belong to
-            type_of_content (str): Type of data in arrays. Allowed values: ["trial_splits", "crop_data"]
+            type_of_content (str): Type of data in arrays. Allowed values: ["trial_splits", "crop_data", "torch_dataset"]
         """
-        valid_types = ["trial_splits", "crop_data"]
+        valid_types = ["trial_splits", "crop_data", "torch_dataset"]
         if type_of_content not in valid_types:
-            raise ValueError(f"Function load_split_array_from_npz called with unrecognized type {type_of_content}.")
+            raise ValueError(f"Function load_split_data_from_file called with unrecognized type {type_of_content}.")
+
+        if type_of_content == "torch_dataset":
+            file_type = ".pt"
+        else:
+            file_type = ".npy"
 
         split_dict = {}
         for split in ["train", "test"]:
             # Load split trial array
-            split_path = f"data_files/{type_of_content}/subject_{self.subject_id}/session_{session_id_num}/{split}/{type_of_content}.npy"  
-            split_data = np.load(split_path)
+            split_path = f"data_files/{type_of_content}/subject_{self.subject_id}/session_{session_id_num}/{split}/{type_of_content}{file_type}"  
+            if file_type == ".npy":
+                split_data = np.load(split_path)
+            else:
+                split_data = torch.load(split_path)
             split_dict[split] = split_data
 
         return split_dict
@@ -313,7 +328,7 @@ class DatasetHelper(BasicOperationsHelper):
         # For each session: create crop datasets based on respective splits
         for session_id in self.session_ids_num:
             # Get train/test split based on trials (based on scenes)
-            trials_split_dict = self.load_split_array_from_npz(session_id_num=session_id, type_of_content="trial_splits")
+            trials_split_dict = self.load_split_data_from_file(session_id_num=session_id, type_of_content="trial_splits")
 
             crop_split = {"train": [], "test": []}
             for trial_id in combined_metadata["sessions"][session_id]["trials"]:
@@ -373,7 +388,7 @@ class DatasetHelper(BasicOperationsHelper):
     
                 # Split meg data 
                 # Get train/test split based on trials (based on scenes)
-                trials_split_dict = self.load_split_array_from_npz(session_id_num=session_id, type_of_content="trial_splits")
+                trials_split_dict = self.load_split_data_from_file(session_id_num=session_id, type_of_content="trial_splits")
 
                 meg_split = {"train": [], "test": []}
                 # Iterate through meg metadata for simplicity with indexing
@@ -484,7 +499,7 @@ class DatasetHelper(BasicOperationsHelper):
         
         for session_id_num in self.session_ids_num:
             # Load numpy datasets for session
-            crop_ds = self.load_split_array_from_npz(session_id_num=session_id_num, type_of_content="crop_data")
+            crop_ds = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="crop_data")
 
             # Create torch datasets with helper 
             torch_dataset = {}
@@ -526,23 +541,53 @@ class DatasetHelper(BasicOperationsHelper):
 
 
 class ExtractionHelper(BasicOperationsHelper):
-    def __init__(self, subject_id: str = "02", ann_model: str = "Resnet50", batch_size: int = 32):
+    def __init__(self, subject_id: str = "02", ann_model: str = "Resnet50", module_name : str = "fc", batch_size: int = 32):
         super().__init__(subject_id)
 
         self.ann_model = ann_model
+        self.module_name = module_name  # Name of Layer to extract features from
         self.batch_size = batch_size
-        self.NumpyImageDataset
 
     
     def extract_features(self):
         """
         Extracts features from crop datasets over all sessions for a subject.
         """
+        # Load model
+        model_name = f'{self.ann_model}_ecoset'
+        source = 'custom'
+        device = 'cuda'
+
+        extractor = get_extractor(
+            model_name=model_name,
+            source=source,
+            device=device,
+            pretrained=True
+        )
+
         for session_id_num in self.session_ids_num:
             # Load torch datasets for session
-            crop_ds = self.load_split_array_from_npz(session_id_num=session_id_num, type_of_content="crop_data")
+            torch_crop_ds = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="torch_dataset")
 
             # Create a DataLoader to handle batching
-            train_dataloader = DataLoader(train_ds, batch_size=self.batch_size, shuffle=False)
-            test_dataloader = DataLoader(test_ds, batch_size=self.batch_size, shuffle=False)
+            model_input = {}
+            model_input["train"] =  DataLoader(torch_crop_ds["train"], batch_size=self.batch_size, shuffle=False)
+            model_input["test"] = DataLoader(torch_crop_ds["test"], batch_size=self.batch_size, shuffle=False)
     
+            features_split = {}
+            for split in ["train", "test"]:
+                # Extract features
+                features_split[split] = extractor.extract_features(
+                    batches=model_input[split],
+                    module_name=self.module_name,
+                    flatten_acts=True  # flatten 2D feature maps from convolutional layer
+                )
+
+                # Debugging
+                if session_id_num == "1":
+                    print(f"{split}_features.shape: {features_split[split].shape}")
+
+            # Export numpy array to .npz
+            self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features", array_dict=features_split, ann_model=self.ann_model, module=self.module_name)
+
+
