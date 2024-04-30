@@ -2,13 +2,17 @@ import pandas as pd
 import numpy as np
 import json
 import os
+import imageio
+
 from collections import defaultdict
+from typing import Tuple, Dict
+
 
 class BasicOperationsHelper:
     def __init__(self, subject_id: str = "02"):
         self.subject_id = subject_id
 
-    def read_dict_from_json(self, type_of_content: str) -> dict:
+    def read_metadata_dict_from_json(self, type_of_content: str) -> dict:
         """
         Helper function to read json files into dicts.
 
@@ -16,7 +20,7 @@ class BasicOperationsHelper:
         """
         valid_types = ["combined_metadata", "meg_metadata", "crop_metadata"]
         if type_of_content not in valid_types:
-            raise ValueError(f"Function read_dict_from_json called with unrecognized type {type_of_content}.")
+            raise ValueError(f"Function read_metadata_dict_from_json called with unrecognized type {type_of_content}.")
 
         file_path = f"data_files/metadata/{type_of_content}/subject_{self.subject_id}/{type_of_content}_dict.json"
         try:
@@ -24,17 +28,21 @@ class BasicOperationsHelper:
                 metadata_dict = json.load(metadata_file)
             return metadata_dict
         except FileNotFoundError:
-            raise FileNotFoundError(f"In Function read_dict_from_json: The file {file_path} does not exist.")
+            raise FileNotFoundError(f"In Function read_metadata_dict_from_json: The file {file_path} does not exist.")
 
         return metadata_dict
 
 
-    def save_dict_as_json(self, type_of_content: str, metadata_dict: dict) -> None:
+    def save_metadata_dict_as_json(self, type_of_content: str, metadata_dict: dict) -> None:
         """
         Helper function to store dicts as json files.
 
         Allowed Parameters: "combined_metadata", "meg_metadata", "crop_metadata"
         """
+        valid_types = ["combined_metadata", "meg_metadata", "crop_metadata"]
+        if type_of_content not in valid_types:
+            raise ValueError(f"Function save_metadata_dict_as_json called with unrecognized type {type_of_content}.")
+
         storage_folder = f'data_files/metadata/{type_of_content}/subject_{self.subject_id}'
         if not os.path.exists(storage_folder):
             os.makedirs(storage_folder)
@@ -45,13 +53,31 @@ class BasicOperationsHelper:
             # Serialize and save the dictionary to the file
             json.dump(metadata_dict, file, indent=4)
 
+
+    def export_split_array_as_npz(self, session_id: str, type_of_content: str, array_dict: Dict[str, np.ndarray]) -> None:
+        """
+        Helper function to export train/test numpy arrays as .npz files.
+
+        Parameters: 
+            session_id (str): id of session that the arrays belong to
+            type_of_content (str): Type of data in arrays. Allowed values: ["trial_splits", "crop_data"]
+            np_array (Dict[str, ndarray]): Arrays in format split, array. split is "train" or "test".
+        """
+        # Export train/test split arrays to .npz
+        for split in array_dict:
+            save_folder = f"data_files/{type_of_content}/subject_{self.subject_id}/session_{session_id}/{split}"  
+            save_file = f"{type_of_content}.npy"
+            if not os.path.exists(save_folder):
+                os.makedirs(save_folder)
+            save_path = os.path.join(save_folder, save_file)
+
+            np.save(save_path, array_dict[split])
+
+
+
 class MetadataHelper(BasicOperationsHelper):
     def __init__(self, subject_id: str = "02"):
         super().__init__(subject_id)
-        self.session_ids_num = list(range(1, 11))
-        self.session_ids_char = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
-        
-        self.session_ids_num = [session_id for session_id in range(1,11)]
         self.session_ids_char = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
 
         self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{subject_id}_crops_metadata.csv"
@@ -80,9 +106,9 @@ class MetadataHelper(BasicOperationsHelper):
         """
 
         # Read crop metadata from json
-        crop_metadata = self.read_dict_from_json(type_of_content="crop_metadata")
+        crop_metadata = self.read_metadata_dict_from_json(type_of_content="crop_metadata")
         # Read meg metadata from json
-        meg_metadata = self.read_dict_from_json(type_of_content="meg_metadata")
+        meg_metadata = self.read_metadata_dict_from_json(type_of_content="meg_metadata")
 
         # Store information about timepoints that are present in both meg and crop data
 
@@ -105,7 +131,7 @@ class MetadataHelper(BasicOperationsHelper):
                     meg_index += 1
         
         # Export dict to json 
-        self.save_dict_as_json(type_of_content="combined_metadata", metadata_dict=combined_metadata_dict)
+        self.save_metadata_dict_as_json(type_of_content="combined_metadata", metadata_dict=combined_metadata_dict)
 
 
     def create_meg_metadata_dict(self) -> None:
@@ -142,7 +168,7 @@ class MetadataHelper(BasicOperationsHelper):
                 data_dict["sessions"][session_id_num]["trials"][trial_id]["timepoints"][timepoint] = {"meg":True}
 
         # Export dict to json 
-        self.save_dict_as_json(type_of_content="meg_metadata", metadata_dict=data_dict)
+        self.save_metadata_dict_as_json(type_of_content="meg_metadata", metadata_dict=data_dict)
 
 
     def create_crop_metadata_dict(self) -> None:
@@ -207,14 +233,16 @@ class MetadataHelper(BasicOperationsHelper):
                     data_dict["sessions"][nr_session]["trials"][nr_trial]["timepoints"][timepoint]["sceneID"] = sceneID
         
         # Export dict to json 
-        self.save_dict_as_json(type_of_content="crop_metadata", metadata_dict=data_dict)
+        self.save_metadata_dict_as_json(type_of_content="crop_metadata", metadata_dict=data_dict)
 
 
-class DatasetHelper:
+        
+class DatasetHelper(BasicOperationsHelper):
     def __init__(self, subject_id: str = "02"):
+        super().__init__(subject_id)
         self.subject_id = subject_id
         
-        self.session_ids_num = [session_id for session_id in range(1,11)]
+        self.session_ids_num = [str(session_id) for session_id in range(1,11)]
         self.session_ids_char = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
 
         self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{subject_id}_crops_metadata.csv"
@@ -227,12 +255,51 @@ class DatasetHelper:
         """
 
         # Read combined metadata from json
-        combined_metadata_file = open(f"data_files/metadata/combined_metadata/_subject_{self.subject_id}/combined_metadata_dict.json")
-        combined_metadata_string = combined_metadata_file.read()
-        combined_metadata = json.loads(combined_metadata_string)
-        
+        combined_metadata = self.read_metadata_dict_from_json(type_of_content="combined_metadata")
+
+        # Define path to read crops from
+        crop_folder_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/crops/as{self.subject_id}"
+
+        # For each session: create crop datasets based on respective splits
         for session_id in self.session_ids_num:
-            pass
+            # Get train/test split based on trials (based on scenes)
+            trials_split_dict = {}
+            for split in ["train", "test"]:
+                # Load trial array
+                split_trials_path = f"data_files/trial_splits/subject_{self.subject_id}/session_{session_id}/{split}/trial_splits.npy"  
+                trials_split = np.load(split_trials_path)
+                trials_split_dict[split] = trials_split
+
+            train_trials = trials_split_dict["train"]
+            test_trials = trials_split_dict["test"]
+
+            crop_split = {"train": [], "test": []}
+            for trial_id in combined_metadata["sessions"][session_id]["trials"]:
+                # Check if trial belongs to train or test split
+                if trial_id in train_trials:
+                    trial_type = "train"
+                elif trial_id in test_trials:
+                    trial_type = "test"
+                else:
+                    raise ValueError(f"Trial_id {trial_id} neither in train nor test split.")
+                for timepoint_id in combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
+                    # Extract image for every epoch/fixation (if there is both crop and metadata for the timepoint)
+                    if timepoint_id in combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
+                        # Get crop path
+                        crop_filename = ''.join([combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["crop_identifier"], ".png"])
+                        crop_path = os.path.join(crop_folder_path, crop_filename)
+
+                        # Read crop as array and concat
+                        crop = imageio.imread(crop_path)
+                        crop_split[trial_type].append(crop)
+            # Convert to numpy array
+            for split in crop_split:
+                crop_split[split] = np.stack(crop_split[split], axis=0)
+
+            # Export numpy array to .npz
+            self.export_split_array_as_npz(session_id=session_id, 
+                                        type_of_content="crop_data",
+                                        array_dict=crop_split)
 
 
     def create_meg_dataset(self) -> None:
@@ -241,9 +308,7 @@ class DatasetHelper:
         """
 
         # Read combined metadata from json
-        combined_metadata_file = open(f"data_files/metadata/combined_metadata/_subject_{self.subject_id}/combined_metadata_dict.json")
-        combined_metadata_string = combined_metadata_file.read()
-        combined_metadata = json.loads(combined_metadata_string)
+        combined_metadata = self.read_metadata_dict_from_json(type_of_content="combined_metadata")
         
         for session_id in self.session_ids_num:
             pass
@@ -251,28 +316,71 @@ class DatasetHelper:
     
     def create_train_test_split(self):
         """
-        Creates train/test split of trials based on sceneIDs.
+        Creates train/test split of trials based on scene_ids.
         """
         # Read combined metadata from json
-        combined_metadata_file = open(f"data_files/metadata/combined_metadata/_subject_{self.subject_id}/combined_metadata_dict.json")
-        combined_metadata_string = combined_metadata_file.read()
-        combined_metadata = json.loads(combined_metadata_string)
+        combined_metadata = self.read_metadata_dict_from_json(type_of_content="combined_metadata")
 
-        num_total_datapoints = 0
-        sceneIDs = {}
-        trialIDs = []
-        for trial_id in combined_metadata["trials"]:
-            trialIDs.append(trial_id)
-            for timepoint in combined_metadata["trials"][trial_id]["timepoints"]:
-                # get sceneID of current timepoint
-                sceneID_current = combined_metadata["trials"][trial_id]["timepoints"][timepoint]["sceneID"]
-                # First occurance of the scene? Store its occurange with the corresonding trial
-                if sceneID_current not in sceneIDs:
-                    sceneIDs[sceneID_current] = {"trials": [trial_id]}
-                # SceneID previously occured in another trial? add current trial to stored data of scene
-                elif trial_id not in sceneIDs[sceneID_current]["trials"]:
-                    sceneIDs[sceneID_current]["trials"].append(trial_id)
+        # Prepare splits for all sessions: count scenes
+        scene_ids = {session_id: {} for session_id in combined_metadata["sessions"]}
+        trial_ids = {session_id: [] for session_id in combined_metadata["sessions"]}
+        num_datapoints = {session_id: 0 for session_id in combined_metadata["sessions"]}
+        for session_id in combined_metadata["sessions"]:
+            for trial_id in combined_metadata["sessions"][session_id]["trials"]:
+                # Store trials in session for comparison with scenes
+                trial_ids[session_id].append(trial_id)
+                for timepoint in combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
+                    # get sceneID of current timepoint
+                    scene_id_current = combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint]["sceneID"]
+                    # First occurance of the scene? Store its occurange with the corresonding trial
+                    if scene_id_current not in scene_ids[session_id]:
+                        scene_ids[session_id][scene_id_current] = {"trials": [trial_id]}
+                    # SceneID previously occured in another trial, but this trial is not stored yet: store it under the scene_id aswell
+                    elif trial_id not in scene_ids[session_id][scene_id_current]["trials"]:
+                        scene_ids[session_id][scene_id_current]["trials"].append(trial_id)
 
-                # Count total datapoints/timepoints/fixations in combined metadata
-                num_total_datapoints += 1
-        
+                    # Count total datapoints/timepoints/fixations in combined metadata in session
+                    num_datapoints[session_id] += 1
+
+        # Create splits for each session
+        for session_id in combined_metadata["sessions"]:
+            # Debugging: Identical number of trials and scenes in this session?
+            num_scenes = len(scene_ids[session_id])  # subject 2, session a: 300 
+            num_trials = len(trial_ids[session_id])
+            assert num_scenes == num_trials, f"Session {session_id}: Number of trials and number of scenes is not identical. Doubled scenes need to be considered"
+
+            # Choose scene_ids for 80/20 split
+            num_trials_train = int(num_trials*0.8)
+            num_trials_test = num_trials - num_trials_train
+
+            # Split based on scene ids, but trial information is sufficient to identify datapoint
+            train_split_trials = []
+            test_split_trials = []
+            # Create split sceneID (by ordering the trials by scenes, trials that belong to the same scene will most likely be in the same split)
+            index = 0
+            for scene_id in scene_ids[session_id]:
+                for trial_id in scene_ids[session_id][scene_id]["trials"]:
+                    # Each unique combination is one point in the dataset
+                    if index < num_trials_train:
+                        train_split_trials.append(trial_id)
+                    else:
+                        test_split_trials.append(trial_id)
+                    index += 1
+
+            # To-do: Make sure that scenes only double in the same split
+
+            # Debugging
+            """
+            if session_id == "1":
+                print(f"Session {session_id}: len train_split_trials: {len(train_split_trials)}")
+                print(f"Session {session_id}: len test_split_trials: {len(test_split_trials)}")
+                print(f"Session {session_id}: Total number of trials in train+test dataset: {len(train_split_trials) + len(test_split_trials)}")
+                print(f"Session {session_id}: Total number of trials in session: {num_trials}")
+                print(f"Session {session_id}: Total number of datapoints in session: {num_datapoints[session_id]}")
+            """
+
+            # Export trial_split arrays to .npz
+            split_dict = {"train": train_split_trials, "test": test_split_trials}
+            self.export_split_array_as_npz(session_id=session_id, 
+                                        type_of_content="trial_splits",
+                                        array_dict=split_dict)
