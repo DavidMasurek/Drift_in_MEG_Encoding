@@ -8,6 +8,11 @@ import imageio
 from collections import defaultdict
 from typing import Tuple, Dict
 
+# ANN specific imports
+import torch
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+from thingsvision import get_extractor
 
 class BasicOperationsHelper:
     def __init__(self, subject_id: str = "02"):
@@ -70,28 +75,60 @@ class BasicOperationsHelper:
             json.dump(metadata_dict, file, indent=4)
 
 
-    def export_split_array_as_npz(self, session_id: str, type_of_content: str, array_dict: Dict[str, np.ndarray]) -> None:
+    def export_split_data_as_file(self, session_id: str, type_of_content: str, array_dict: Dict[str, np.ndarray]) -> None:
         """
-        Helper function to export train/test numpy arrays as .npz files.
+        Helper function to export train/test numpy arrays as .npz or .pt files.
 
         Parameters: 
             session_id (str): id of session that the arrays belong to
-            type_of_content (str): Type of data in arrays. Allowed values: ["trial_splits", "crop_data", "meg_data"]
+            type_of_content (str): Type of data in arrays. Allowed values: ["trial_splits", "crop_data", "meg_data", "torch_dataset"]
             np_array (Dict[str, ndarray]): Arrays in format split, array. split is "train" or "test".
         """
-        valid_types = ["trial_splits", "crop_data", "meg_data"]
+        valid_types = ["trial_splits", "crop_data", "meg_data", "torch_dataset"]
         if type_of_content not in valid_types:
-            raise ValueError(f"Function export_split_array_as_npz called with unrecognized type {type_of_content}.")
+            raise ValueError(f"Function export_split_data_as_file called with unrecognized type {type_of_content}.")
+
+        if type_of_content == "torch_dataset":
+            file_type = ".pt"
+        else:
+            file_type = ".npy"
 
         # Export train/test split arrays to .npz
         for split in array_dict:
             save_folder = f"data_files/{type_of_content}/subject_{self.subject_id}/session_{session_id}/{split}"  
-            save_file = f"{type_of_content}.npy"
+            save_file = f"{type_of_content}{file_type}"
             if not os.path.exists(save_folder):
                 os.makedirs(save_folder)
             save_path = os.path.join(save_folder, save_file)
 
-            np.save(save_path, array_dict[split])
+            if file_type == ".npy":
+                np.save(save_path, array_dict[split])
+            else:
+                torch.save(array_dict[split], save_path)
+
+
+    
+    def load_split_array_from_npz(self, session_id_num: str, type_of_content: str):
+        """
+        Helper function to load the split for a given session.
+
+        Parameters: 
+            session_id_num (str): id of session that the arrays belong to
+            type_of_content (str): Type of data in arrays. Allowed values: ["trial_splits", "crop_data"]
+        """
+        valid_types = ["trial_splits", "crop_data"]
+        if type_of_content not in valid_types:
+            raise ValueError(f"Function load_split_array_from_npz called with unrecognized type {type_of_content}.")
+
+        split_dict = {}
+        for split in ["train", "test"]:
+            # Load split trial array
+            split_path = f"data_files/{type_of_content}/subject_{self.subject_id}/session_{session_id_num}/{split}/{type_of_content}.npy"  
+            split_data = np.load(split_path)
+            split_dict[split] = split_data
+
+        return split_dict
+
 
     def normalize_array(self, data):
         """
@@ -276,22 +313,14 @@ class DatasetHelper(BasicOperationsHelper):
         # For each session: create crop datasets based on respective splits
         for session_id in self.session_ids_num:
             # Get train/test split based on trials (based on scenes)
-            trials_split_dict = {}
-            for split in ["train", "test"]:
-                # Load trial array
-                split_trials_path = f"data_files/trial_splits/subject_{self.subject_id}/session_{session_id}/{split}/trial_splits.npy"  
-                trials_split = np.load(split_trials_path)
-                trials_split_dict[split] = trials_split
-
-            train_trials = trials_split_dict["train"]
-            test_trials = trials_split_dict["test"]
+            trials_split_dict = self.load_split_array_from_npz(session_id_num=session_id, type_of_content="trial_splits")
 
             crop_split = {"train": [], "test": []}
             for trial_id in combined_metadata["sessions"][session_id]["trials"]:
                 # Check if trial belongs to train or test split
-                if trial_id in train_trials:
+                if trial_id in trials_split_dict["train"]:
                     trial_type = "train"
-                elif trial_id in test_trials:
+                elif trial_id in trials_split_dict["test"]:
                     trial_type = "test"
                 else:
                     raise ValueError(f"Trial_id {trial_id} neither in train nor test split.")
@@ -310,7 +339,7 @@ class DatasetHelper(BasicOperationsHelper):
                 crop_split[split] = np.stack(crop_split[split], axis=0)
 
             # Export numpy array to .npz
-            self.export_split_array_as_npz(session_id=session_id, 
+            self.export_split_data_as_file(session_id=session_id, 
                                         type_of_content="crop_data",
                                         array_dict=crop_split)
 
@@ -344,12 +373,7 @@ class DatasetHelper(BasicOperationsHelper):
     
                 # Split meg data 
                 # Get train/test split based on trials (based on scenes)
-                trials_split_dict = {}
-                for split in ["train", "test"]:
-                    # Load trial array
-                    split_trials_path = f"data_files/trial_splits/subject_{self.subject_id}/session_{session_id_num}/{split}/trial_splits.npy"  
-                    trials_split = np.load(split_trials_path)
-                    trials_split_dict[split] = trials_split
+                trials_split_dict = self.load_split_array_from_npz(session_id_num=session_id, type_of_content="trial_splits")
 
                 meg_split = {"train": [], "test": []}
                 # Iterate through meg metadata for simplicity with indexing
@@ -376,7 +400,7 @@ class DatasetHelper(BasicOperationsHelper):
                         index += 1
 
                 # Export meg dataset arrays to .npz
-                self.export_split_array_as_npz(session_id=session_id_num, 
+                self.export_split_data_as_file(session_id=session_id_num, 
                                             type_of_content="meg_data",
                                             array_dict=meg_split)
 
@@ -448,6 +472,77 @@ class DatasetHelper(BasicOperationsHelper):
 
             # Export trial_split arrays to .npz
             split_dict = {"train": train_split_trials, "test": test_split_trials}
-            self.export_split_array_as_npz(session_id=session_id, 
+            self.export_split_data_as_file(session_id=session_id, 
                                         type_of_content="trial_splits",
                                         array_dict=split_dict)
+
+
+    def create_pytorch_dataset(self):
+        """
+        Creates pytorch datasets from numpy image datasets.
+        """
+        
+        for session_id_num in self.session_ids_num:
+            # Load numpy datasets for session
+            crop_ds = self.load_split_array_from_npz(session_id_num=session_id_num, type_of_content="crop_data")
+
+            # Create torch datasets with helper 
+            torch_dataset = {}
+            torch_dataset["train"] = DatasetHelper.TorchDatasetHelper(crop_ds['train'])
+            torch_dataset["test"] = DatasetHelper.TorchDatasetHelper(crop_ds['test'])
+
+            # Store datasets
+            self.export_split_data_as_file(session_id=session_id_num, type_of_content="torch_dataset", array_dict=torch_dataset)
+
+
+    class TorchDatasetHelper(Dataset):
+        """
+        Inner class to create Pytorch dataset from numpy arrays (images).
+        """
+        def __init__(self, numpy_array, transform=None):
+            """
+            Args:
+                numpy_array (numpy.ndarray): A Numpy array of images (should be in CHW format if channels are present)
+                transform (callable, optional): Optional transform to be applied on a sample.
+            """
+            self.numpy_array = numpy_array
+            if transform is None:
+                self.transform = transforms.Compose([transforms.ToTensor(),])  # Convert numpy arrays to torch tensors
+            else:
+                self.transform = transform
+
+        def __len__(self):
+            return len(self.numpy_array)
+
+        def __getitem__(self, idx):
+            image = self.numpy_array[idx]
+
+            if self.transform:
+                image = self.transform(image)
+
+            # Since no labels are associated, we only return the image
+            return image
+
+
+
+class ExtractionHelper(BasicOperationsHelper):
+    def __init__(self, subject_id: str = "02", ann_model: str = "Resnet50", batch_size: int = 32):
+        super().__init__(subject_id)
+
+        self.ann_model = ann_model
+        self.batch_size = batch_size
+        self.NumpyImageDataset
+
+    
+    def extract_features(self):
+        """
+        Extracts features from crop datasets over all sessions for a subject.
+        """
+        for session_id_num in self.session_ids_num:
+            # Load torch datasets for session
+            crop_ds = self.load_split_array_from_npz(session_id_num=session_id_num, type_of_content="crop_data")
+
+            # Create a DataLoader to handle batching
+            train_dataloader = DataLoader(train_ds, batch_size=self.batch_size, shuffle=False)
+            test_dataloader = DataLoader(test_ds, batch_size=self.batch_size, shuffle=False)
+    

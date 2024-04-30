@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import json
 from collections import defaultdict
-from utils import MetadataHelper, DatasetHelper
+from utils import MetadataHelper, DatasetHelper, ExtractionHelper
 
 # Add parent folder of src to path and change cwd
 __location__ = Path(__file__).parent.parent.parent
@@ -16,6 +16,7 @@ os.chdir(__location__)
 subject_id = "02"
 create_metadata = False
 create_dataset = False
+extract_features = True
 
 ##### Process metadata for subject #####
 if create_metadata:
@@ -39,11 +40,20 @@ if create_dataset:
     # Create train/test split based on sceneIDs (based on trial_ids)
     dataset_helper.create_train_test_split()
 
-    # Create crop dataset based on split
+    # Create crop numpy dataset based on split
     dataset_helper.create_crop_dataset()
+
+    # Create torch dataset based on numpy datasets
+    dataset_helper.create_pytorch_dataset()
 
     # Create meg dataset based on split
     dataset_helper.create_meg_dataset()
+
+##### Extract features from crops #####
+if extract_features:
+    # Initialize extraction helper
+    extraction_helper = ExtractionHelper(subject_id=subject_id)
+
 
 print("Pipeline completed.")
 
