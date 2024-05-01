@@ -57,17 +57,20 @@ class BasicOperationsHelper:
         return metadata_dict
 
 
-    def save_metadata_dict_as_json(self, type_of_content: str, metadata_dict: dict) -> None:
+    def save_dict_as_json(self, type_of_content: str, dict_to_store: dict) -> None:
         """
         Helper function to store dicts as json files.
 
-        Allowed Parameters: "combined_metadata", "meg_metadata", "crop_metadata"
+        Allowed Parameters: ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses"]
         """
-        valid_types = ["combined_metadata", "meg_metadata", "crop_metadata"]
+        valid_types = ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses"]
         if type_of_content not in valid_types:
-            raise ValueError(f"Function save_metadata_dict_as_json called with unrecognized type {type_of_content}.")
+            raise ValueError(f"Function save_dict_as_json called with unrecognized type {type_of_content}.")
 
-        storage_folder = f'data_files/metadata/{type_of_content}/subject_{self.subject_id}'
+        if type_of_content == "mse_losses":
+            storage_folder = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}"
+        else:
+            storage_folder = f'data_files/metadata/{type_of_content}/subject_{self.subject_id}'
         if not os.path.exists(storage_folder):
             os.makedirs(storage_folder)
         json_storage_file = f"{type_of_content}_dict.json"
@@ -75,7 +78,7 @@ class BasicOperationsHelper:
 
         with open(json_storage_path, 'w') as file:
             # Serialize and save the dictionary to the file
-            json.dump(metadata_dict, file, indent=4)
+            json.dump(dict_to_store, file, indent=4)
 
 
     def export_split_data_as_file(self, session_id: str, type_of_content: str, array_dict: Dict[str, np.ndarray], ann_model: str = None, module: str = None) -> None:
@@ -209,7 +212,7 @@ class MetadataHelper(BasicOperationsHelper):
                     meg_index += 1
         
         # Export dict to json 
-        self.save_metadata_dict_as_json(type_of_content="combined_metadata", metadata_dict=combined_metadata_dict)
+        self.save_dict_as_json(type_of_content="combined_metadata", metadata_dict=combined_metadata_dict)
 
 
     def create_meg_metadata_dict(self) -> None:
@@ -246,7 +249,7 @@ class MetadataHelper(BasicOperationsHelper):
                 data_dict["sessions"][session_id_num]["trials"][trial_id]["timepoints"][timepoint] = {"meg":True}
 
         # Export dict to json 
-        self.save_metadata_dict_as_json(type_of_content="meg_metadata", metadata_dict=data_dict)
+        self.save_dict_as_json(type_of_content="meg_metadata", metadata_dict=data_dict)
 
 
     def create_crop_metadata_dict(self) -> None:
@@ -311,7 +314,7 @@ class MetadataHelper(BasicOperationsHelper):
                     data_dict["sessions"][nr_session]["trials"][nr_trial]["timepoints"][timepoint]["sceneID"] = sceneID
         
         # Export dict to json 
-        self.save_metadata_dict_as_json(type_of_content="crop_metadata", metadata_dict=data_dict)
+        self.save_dict_as_json(type_of_content="crop_metadata", metadata_dict=data_dict)
 
 
         
@@ -638,18 +641,14 @@ class GLMHelper(ExtractionHelper):
         
     def predict_from_mapping(self):
         """
-        Predicts MEG data over all sessions based on ann features and the trained ridge regression model.
+        Based on the trained mapping for each session, predicts MEG data over all sessions from their respective test features.
         """
-        for session_id_num in self.session_ids_num:
-            # Get ANN features and MEG data for session
-            ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
-            meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data")
-
-            X_test, Y_test = ann_features['test'], meg_data['test']
-
-            # Get ridge regression model for this session
+        mse_session_losses = {"session_mapping": {}}
+        for session_id_model in self.session_ids_num:
+            mse_session_losses["session_mapping"][session_id_model] = {"session_pred": {}}
+            # Get trained ridge regression model for this session
             # Load ridge model
-            storage_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/session_{session_id_num}"  
+            storage_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/session_{session_id_model}"  
             storage_file = "GLM_models.pkl"
             storage_path = os.path.join(storage_folder, storage_file)
             with open(storage_path, 'rb') as file:
@@ -658,13 +657,27 @@ class GLMHelper(ExtractionHelper):
             # Initialize MultiDim GLM class with stored models
             ridge_model = GLMHelper.MultiDimensionalRidge(alpha=0.5, models=ridge_models)
 
-            # Generate predictions for test features and evaluate them 
-            predictions = ridge_model.predict(X_test)
+            # Generate predictions for test features over all sessions and evaluate them 
+            for session_id_pred in self.session_ids_num:
+                # Get ANN features and MEG data for session where predictions are to be evaluated
+                ann_features = self.load_split_data_from_file(session_id_num=session_id_pred, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
+                meg_data = self.load_split_data_from_file(session_id_num=session_id_pred, type_of_content="meg_data")
+                X_test, Y_test = ann_features['test'], meg_data['test']
 
-            # Calculate the mean squared error across all flattened features and timepoints
-            mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
+                # Generate predictions
+                predictions = ridge_model.predict(X_test)
 
-            # Store loss
+                # Calculate the mean squared error across all flattened features and timepoints
+                mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
+
+                # Save loss
+                mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = mse
+                
+        # Store loss dict
+        self.save_dict_as_json(type_of_content="mse_losses", dict_to_store=mse_session_losses)
+
+        # Debugging 
+        print(f"mse_session_losses: {mse_session_losses}")
 
     class MultiDimensionalRidge:
         """
