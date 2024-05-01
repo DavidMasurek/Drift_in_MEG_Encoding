@@ -47,7 +47,7 @@ print(f"Y_test.shape: {Y_test.shape}")
 # Train GLM on train set
 # Create Wrapper for multidimensional ridge regression over timepoints
 class MultiDimensionalRidge:
-    def __init__(self, alpha=0.5, random_weights=False):
+    def __init__(self, alpha=0.5, models=None, random_weights=False):
         self.alpha = alpha
         self.models = []
         self.random_weights = random_weights

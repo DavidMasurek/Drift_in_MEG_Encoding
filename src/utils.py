@@ -1,10 +1,10 @@
-import pandas as pd
-import numpy as np
+import os
 import json
 import h5py
-import os
+import pickle
+import pandas as pd
+import numpy as np
 import imageio
-
 from collections import defaultdict
 from typing import Tuple, Dict
 
@@ -13,6 +13,9 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from thingsvision import get_extractor
+
+from sklearn.linear_model import Ridge
+from sklearn.metrics import mean_squared_error
 
 class BasicOperationsHelper:
     def __init__(self, subject_id: str = "02"):
@@ -115,15 +118,15 @@ class BasicOperationsHelper:
 
 
     
-    def load_split_data_from_file(self, session_id_num: str, type_of_content: str):
+    def load_split_data_from_file(self, session_id_num: str, type_of_content: str, ann_model: str = None, module: str = None) -> dict:
         """
         Helper function to load the split for a given session.
 
         Parameters: 
             session_id_num (str): id of session that the arrays belong to
-            type_of_content (str): Type of data in arrays. Allowed values: ["trial_splits", "crop_data", "torch_dataset"]
+            type_of_content (str): Type of data in arrays. Allowed values: ["trial_splits", "crop_data", "meg_data", "torch_dataset", "ann_features"]
         """
-        valid_types = ["trial_splits", "crop_data", "torch_dataset"]
+        valid_types = ["trial_splits", "crop_data", "meg_data", "torch_dataset", "ann_features"]
         if type_of_content not in valid_types:
             raise ValueError(f"Function load_split_data_from_file called with unrecognized type {type_of_content}.")
 
@@ -132,10 +135,16 @@ class BasicOperationsHelper:
         else:
             file_type = ".npy"
 
+        # Add additional folder for model type and extraction layer for ann_features
+        if type_of_content == "ann_features":
+            additional_folders = f"/{ann_model}/{module}/"
+        else:
+            additional_folders = "/"
+
         split_dict = {}
         for split in ["train", "test"]:
             # Load split trial array
-            split_path = f"data_files/{type_of_content}/subject_{self.subject_id}/session_{session_id_num}/{split}/{type_of_content}{file_type}"  
+            split_path = f"data_files/{type_of_content}{additional_folders}subject_{self.subject_id}/session_{session_id_num}/{split}/{type_of_content}{file_type}"  
             if file_type == ".npy":
                 split_data = np.load(split_path)
             else:
@@ -591,3 +600,105 @@ class ExtractionHelper(BasicOperationsHelper):
             self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features", array_dict=features_split, ann_model=self.ann_model, module=self.module_name)
 
 
+
+class GLMHelper(ExtractionHelper):
+    def __init__(self, subject_id: str = "02"):
+        super().__init__(subject_id=subject_id)
+
+
+    def train_mapping(self):
+        """
+        Trains a mapping from ANN features to MEG data over all sessions.
+        """
+        for session_id_num in self.session_ids_num:
+            # Get ANN features for session
+            ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
+
+            # Get MEG data for sesssion
+            meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data")
+
+            X_train, Y_train = ann_features['train'], meg_data['train']
+
+            # Initialize Helper class
+            ridge_model = GLMHelper.MultiDimensionalRidge(alpha=0.5)
+
+            # Fit model on train data
+            ridge_model.fit(X_train, Y_train)
+
+            # Store trained models as pickle
+            save_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/session_{session_id_num}"  
+            save_file = "GLM_models.pkl"
+            if not os.path.exists(save_folder):
+                os.makedirs(save_folder)
+            save_path = os.path.join(save_folder, save_file)
+
+            with open(save_path, 'wb') as file:
+                pickle.dump(ridge_model.models, file)
+
+        
+    def predict_from_mapping(self):
+        """
+        Predicts MEG data over all sessions based on ann features and the trained ridge regression model.
+        """
+        for session_id_num in self.session_ids_num:
+            # Get ANN features and MEG data for session
+            ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
+            meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data")
+
+            X_test, Y_test = ann_features['test'], meg_data['test']
+
+            # Get ridge regression model for this session
+            # Load ridge model
+            storage_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/session_{session_id_num}"  
+            storage_file = "GLM_models.pkl"
+            storage_path = os.path.join(storage_folder, storage_file)
+            with open(storage_path, 'rb') as file:
+                ridge_models = pickle.load(file)
+            
+            # Initialize MultiDim GLM class with stored models
+            ridge_model = GLMHelper.MultiDimensionalRidge(alpha=0.5, models=ridge_models)
+
+            # Generate predictions for test features and evaluate them 
+            predictions = ridge_model.predict(X_test)
+
+            # Calculate the mean squared error across all flattened features and timepoints
+            mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
+
+            # Store loss
+
+    class MultiDimensionalRidge:
+        """
+        Inner class to apply Ridge Regression over all timepoints. Enables training and prediction, as well as initialization of random weights for baseline comparison.
+        """
+        def __init__(self, alpha=0.5, models=[], random_weights=False):
+            self.alpha = alpha
+            self.random_weights = random_weights
+            self.models = models  # Standardly initialized as empty list, otherwise with passed, previously trained models
+
+        def fit(self, X=None, Y=None):
+            n_features = X.shape[1]
+            n_sensors = Y.shape[1]
+            n_timepoints = Y.shape[2]
+            self.models = [Ridge(alpha=self.alpha) for _ in range(n_timepoints)]
+            if self.random_weights:
+                # Randomly initialize weights and intercepts
+                for model in self.models:
+                    model.coef_ = np.random.rand(n_sensors, n_features) - 0.5  # Random weights centered around 0
+                    model.intercept_ = np.random.rand(n_sensors) - 0.5  # Random intercepts centered around 0
+            else:
+                for t in range(n_timepoints):
+                    Y_t = Y[:, :, t]
+                    self.models[t].fit(X, Y_t)
+
+        def predict(self, X):
+            n_samples = X.shape[0]
+            n_sensors = self.models[0].coef_.shape[0]
+            n_timepoints = len(self.models)
+            predictions = np.zeros((n_samples, n_sensors, n_timepoints))
+            for t, model in enumerate(self.models):
+                if self.random_weights:
+                    # Use the random weights and intercept to predict; we are missing configurations implicitly achieved when calling .fit()
+                    predictions[:, :, t] = X @ model.coef_.T + model.intercept_
+                else:
+                    predictions[:, :, t] = model.predict(X)
+            return predictions

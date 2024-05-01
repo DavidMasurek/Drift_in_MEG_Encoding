@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import json
 from collections import defaultdict
-from utils import MetadataHelper, DatasetHelper, ExtractionHelper
+from utils import MetadataHelper, DatasetHelper, ExtractionHelper, GLMHelper
 
 # Add parent folder of src to path and change cwd
 __location__ = Path(__file__).parent.parent
@@ -16,7 +16,9 @@ os.chdir(__location__)
 subject_id = "02"
 create_metadata = False
 create_dataset = False
-extract_features = True
+extract_features = False
+train_GLM = False
+generate_predictions_with_GLM = True
 
 ##### Process metadata for subject #####
 if create_metadata:
@@ -57,6 +59,18 @@ if extract_features:
     # Extract features
     extraction_helper.extract_features()
 
+##### Train GLM from features to meg #####
+if train_GLM or generate_predictions_with_GLM:
+    # Initialize GLM helper
+    glm_helper = GLMHelper(subject_id=subject_id)
+
+if train_GLM:
+    # Train GLM
+    glm_helper.train_mapping()
+
+if generate_predictions_with_GLM:
+    # Generate meg predictions from GLMs
+    glm_helper.predict_from_mapping()
 
 print("Pipeline completed.")
 
