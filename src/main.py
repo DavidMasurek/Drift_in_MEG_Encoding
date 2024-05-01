@@ -75,8 +75,8 @@ if train_GLM or generate_predictions_with_GLM or visualize_results:
 
     if visualize_results:
         # Visualize prediction results
-        glm_helper.visualize_results(separate_plots=False)
-        glm_helper.visualize_results(separate_plots=True)
+        glm_helper.visualize_results(separate_plots=False, only_distance=True)
+        #glm_helper.visualize_results(separate_plots=True)
 
 print("Pipeline completed.")
 

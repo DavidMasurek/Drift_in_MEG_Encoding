@@ -685,7 +685,7 @@ class GLMHelper(ExtractionHelper):
         print(f"mse_session_losses: {mse_session_losses}")
 
 
-    def visualize_results(self, separate_plots:bool = False):
+    def visualize_results(self, separate_plots:bool = False, only_distance: bool = False):
         """
         Visualizes results from predict_from_mapping. 
         """
@@ -698,7 +698,7 @@ class GLMHelper(ExtractionHelper):
         for session in mse_session_losses['session_mapping']:
             self_prediction_mses[session] = mse_session_losses['session_mapping'][session]['session_pred'][session]
             average_prediction_mses[session] = 0
-            
+
         # Calculate average MSE for each session from all other training sessions
         for train_session, data in mse_session_losses['session_mapping'].items():
             for pred_session, mse in data['session_pred'].items():
@@ -733,29 +733,82 @@ class GLMHelper(ExtractionHelper):
                 plt.savefig(plot_path)
                 plt.close()
         else:
-            # Generate a single plot with all training sessions
-            plt.figure(figsize=(12, 8))
-            for train_session, data in mse_session_losses['session_mapping'].items():
-                sessions = list(data['session_pred'].keys())
-                losses = list(data['session_pred'].values())
-                plt.plot(sessions, losses, marker='o', linestyle='-', label=f'Trained on Session {train_session}')
-            plt.plot(self_prediction_mses.keys(), self_prediction_mses.values(), 'r--', label='Self-prediction MSE')
-            plt.plot(average_prediction_mses.keys(), average_prediction_mses.values(), 'g-.', label='Average Non-self-prediction MSE')
-            
-            plt.title('MSE for Predictions Across All Sessions')
-            plt.xlabel('Prediction Session')
-            plt.ylabel('Mean Squared Error')
-            plt.legend()
-            plt.grid(True)
+            if only_distance:
+                # Plot loss as a function of distance of predicted session from "training" session
+                fig, ax1 = plt.subplots(figsize=(12, 8))
 
-            # Save the plot to a file
-            plot_folder = f"data_files/visualizations/seperate_plots_{separate_plots}/subject_{self.subject_id}"
-            if not os.path.exists(plot_folder):
-                os.makedirs(plot_folder)
-            plot_file = f"MSE_plot_all_sessions.png"
-            plot_path = os.path.join(plot_folder, plot_file)
-            plt.savefig(plot_path)
-            plt.close()
+                # Iterate over each training session
+                losses_by_distances = {}
+                for train_session, data in mse_session_losses['session_mapping'].items():
+                    # Calculate distance and collect corresponding losses
+                    for pred_session, mse in data['session_pred'].items():
+                        if train_session != pred_session:
+                            distance = abs(int(train_session) - int(pred_session))
+                            if distance not in losses_by_distances:
+                                losses_by_distances[distance] = {"loss": mse, "num_losses": 1}
+                            else:
+                                losses_by_distances[distance]["loss"] += mse
+                                losses_by_distances[distance]["num_losses"] += 1
+                # Calculate average losses over distances
+                avg_losses = {}
+                num_datapoints = {}
+                for distance in range(1,10):
+                    avg_losses[distance] = losses_by_distances[distance]["loss"] / losses_by_distances[distance]["num_losses"]
+                    num_datapoints[distance] = losses_by_distances[distance]["num_losses"]
+                # Plot
+                ax1.plot(avg_losses.keys(), avg_losses.values(), marker='o', linestyle='-', label=f'Average loss')
+                ax1.set_xlabel('Distance between "train" and "test" Session')
+                ax1.set_ylabel('Mean Squared Error')
+                ax1.tick_params(axis='y', labelcolor='b')
+                ax1.grid(True)
+        
+                # Add secondary y-axis for datapoints
+                ax2 = ax1.twinx()
+                ax2.plot(num_datapoints.keys(), num_datapoints.values(), 'r--', label='Number of datapoints/losses averaged')
+                ax2.set_ylabel('Number of Datapoints', color='r')
+                ax2.tick_params(axis='y', labelcolor='r')
+
+                # Add a legend with all labels
+                lines, labels = ax1.get_legend_handles_labels()
+                lines2, labels2 = ax2.get_legend_handles_labels()
+                ax1.legend(lines + lines2, labels + labels2, loc='upper right')
+                
+                ax1.set_title('MSE vs Distance for Predictions Averaged Across all Sessions')
+                plt.grid(True)
+
+                # Save the plot to a file
+                plot_folder = f"data_files/visualizations/seperate_plots_{separate_plots}/only_distance/subject_{self.subject_id}"
+                if not os.path.exists(plot_folder):
+                    os.makedirs(plot_folder)
+                plot_file = f"MSE_plot_over_distance.png"
+                plot_path = os.path.join(plot_folder, plot_file)
+                plt.savefig(plot_path)
+                plt.close()
+
+            else:
+                # Generate a single plot with all training sessions
+                plt.figure(figsize=(12, 8))
+                for train_session, data in mse_session_losses['session_mapping'].items():
+                    sessions = list(data['session_pred'].keys())
+                    losses = list(data['session_pred'].values())
+                    plt.plot(sessions, losses, marker='o', linestyle='-', label=f'Trained on Session {train_session}')
+                plt.plot(self_prediction_mses.keys(), self_prediction_mses.values(), 'r--', label='Self-prediction MSE')
+                plt.plot(average_prediction_mses.keys(), average_prediction_mses.values(), 'g-.', label='Average Non-self-prediction MSE')
+                
+                plt.title('MSE for Predictions Across All Sessions')
+                plt.xlabel('Prediction Session')
+                plt.ylabel('Mean Squared Error')
+                plt.legend()
+                plt.grid(True)
+
+                # Save the plot to a file
+                plot_folder = f"data_files/visualizations/seperate_plots_{separate_plots}/subject_{self.subject_id}"
+                if not os.path.exists(plot_folder):
+                    os.makedirs(plot_folder)
+                plot_file = f"MSE_plot_all_sessions.png"
+                plot_path = os.path.join(plot_folder, plot_file)
+                plt.savefig(plot_path)
+                plt.close()
 
 
     class MultiDimensionalRidge:
