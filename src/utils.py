@@ -5,6 +5,7 @@ import pickle
 import pandas as pd
 import numpy as np
 import imageio
+import matplotlib.pyplot as plt
 from collections import defaultdict
 from typing import Tuple, Dict
 
@@ -36,25 +37,29 @@ class BasicOperationsHelper:
         return session_id_num
 
 
-    def read_metadata_dict_from_json(self, type_of_content: str) -> dict:
+    def read_dict_from_json(self, type_of_content: str) -> dict:
         """
         Helper function to read json files into dicts.
 
-        Allowed Parameters: "combined_metadata", "meg_metadata", "crop_metadata"
+        Allowed Parameters: ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses"]
         """
-        valid_types = ["combined_metadata", "meg_metadata", "crop_metadata"]
+        valid_types = ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses"]
         if type_of_content not in valid_types:
-            raise ValueError(f"Function read_metadata_dict_from_json called with unrecognized type {type_of_content}.")
+            raise ValueError(f"Function read_dict_from_json called with unrecognized type {type_of_content}.")
 
-        file_path = f"data_files/metadata/{type_of_content}/subject_{self.subject_id}/{type_of_content}_dict.json"
+        if type_of_content == "mse_losses":
+            file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/mse_losses_dict.json"
+        else:
+            file_path = f"data_files/metadata/{type_of_content}/subject_{self.subject_id}/{type_of_content}_dict.json"
+        
         try:
-            with open(file_path, 'r') as metadata_file:
-                metadata_dict = json.load(metadata_file)
-            return metadata_dict
+            with open(file_path, 'r') as data_file:
+                data_dict = json.load(data_file)
+            return data_dict
         except FileNotFoundError:
-            raise FileNotFoundError(f"In Function read_metadata_dict_from_json: The file {file_path} does not exist.")
+            raise FileNotFoundError(f"In Function read_dict_from_json: The file {file_path} does not exist.")
 
-        return metadata_dict
+        return data_dict
 
 
     def save_dict_as_json(self, type_of_content: str, dict_to_store: dict) -> None:
@@ -187,9 +192,9 @@ class MetadataHelper(BasicOperationsHelper):
         """
 
         # Read crop metadata from json
-        crop_metadata = self.read_metadata_dict_from_json(type_of_content="crop_metadata")
+        crop_metadata = self.read_dict_from_json(type_of_content="crop_metadata")
         # Read meg metadata from json
-        meg_metadata = self.read_metadata_dict_from_json(type_of_content="meg_metadata")
+        meg_metadata = self.read_dict_from_json(type_of_content="meg_metadata")
 
         # Store information about timepoints that are present in both meg and crop data
 
@@ -332,7 +337,7 @@ class DatasetHelper(BasicOperationsHelper):
         """
 
         # Read combined metadata from json
-        combined_metadata = self.read_metadata_dict_from_json(type_of_content="combined_metadata")
+        combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
 
         # Define path to read crops from
         crop_folder_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/crops/as{self.subject_id}"
@@ -377,8 +382,8 @@ class DatasetHelper(BasicOperationsHelper):
         """
 
         # Read combined and meg metadata from json
-        combined_metadata = self.read_metadata_dict_from_json(type_of_content="combined_metadata")
-        meg_metadata = self.read_metadata_dict_from_json(type_of_content="meg_metadata")
+        combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
+        meg_metadata = self.read_dict_from_json(type_of_content="meg_metadata")
 
         meg_data_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
 
@@ -437,7 +442,7 @@ class DatasetHelper(BasicOperationsHelper):
         Creates train/test split of trials based on scene_ids.
         """
         # Read combined metadata from json
-        combined_metadata = self.read_metadata_dict_from_json(type_of_content="combined_metadata")
+        combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
 
         # Prepare splits for all sessions: count scenes
         scene_ids = {session_id: {} for session_id in combined_metadata["sessions"]}
@@ -672,12 +677,58 @@ class GLMHelper(ExtractionHelper):
 
                 # Save loss
                 mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = mse
-                
+
         # Store loss dict
         self.save_dict_as_json(type_of_content="mse_losses", dict_to_store=mse_session_losses)
 
         # Debugging 
         print(f"mse_session_losses: {mse_session_losses}")
+
+
+    def visualize_results(self):
+        """
+        Visualizes results from predict_from_mapping. 
+        """
+        # Load loss dict
+        mse_session_losses = self.read_dict_from_json(type_of_content="mse_losses")
+
+        fig, ax = plt.subplots(figsize=(12, 8))
+
+        # Iterate over each training session
+        for train_session, data in mse_session_losses['session_mapping'].items():
+            distances = []
+            losses = []
+            
+            # Calculate distance and collect corresponding losses
+            for pred_session, mse in data['session_pred'].items():
+                distance = abs(int(train_session) - int(pred_session))
+                distances.append(distance)
+                losses.append(mse)
+            
+            # Sort the data by distance for better plotting
+            sorted_indices = np.argsort(distances)
+            sorted_distances = np.array(distances)[sorted_indices]
+            sorted_losses = np.array(losses)[sorted_indices]
+            
+            # Plot
+            ax.plot(sorted_distances, sorted_losses, marker='o', linestyle='-', label=f'Trained on Session {train_session}')
+
+        ax.set_xlabel('Distance to Training Session')
+        ax.set_ylabel('Mean Squared Error')
+        ax.set_title('MSE vs Distance for Predictions Across Different Sessions')
+        ax.legend()
+
+        # Save the plot to a file
+        plot_folder = f"data_files/visualizations/{self.subject_id}"
+        if not os.path.exists(plot_folder):
+            os.makedirs(plot_folder)
+        plot_file = "MSE_vs_Distance_Plot.png"
+        plot_path = os.path.join(plot_folder, plot_file)
+
+        plt.savefig(plot_path)
+        plt.close()
+
+
 
     class MultiDimensionalRidge:
         """

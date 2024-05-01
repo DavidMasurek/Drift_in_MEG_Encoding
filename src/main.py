@@ -18,7 +18,8 @@ create_metadata = False
 create_dataset = False
 extract_features = False
 train_GLM = False
-generate_predictions_with_GLM = True
+generate_predictions_with_GLM = False
+visualize_results = True
 
 ##### Process metadata for subject #####
 if create_metadata:
@@ -60,17 +61,21 @@ if extract_features:
     extraction_helper.extract_features()
 
 ##### Train GLM from features to meg #####
-if train_GLM or generate_predictions_with_GLM:
+if train_GLM or generate_predictions_with_GLM or visualize_results:
     # Initialize GLM helper
     glm_helper = GLMHelper(subject_id=subject_id)
 
-if train_GLM:
-    # Train GLM
-    glm_helper.train_mapping()
+    if train_GLM:
+        # Train GLM
+        glm_helper.train_mapping()
 
-if generate_predictions_with_GLM:
-    # Generate meg predictions from GLMs
-    glm_helper.predict_from_mapping()
+    if generate_predictions_with_GLM:
+        # Generate meg predictions from GLMs
+        glm_helper.predict_from_mapping()
+
+    if visualize_results:
+        # Visualize prediction results
+        glm_helper.visualize_results()
 
 print("Pipeline completed.")
 
