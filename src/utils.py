@@ -685,49 +685,77 @@ class GLMHelper(ExtractionHelper):
         print(f"mse_session_losses: {mse_session_losses}")
 
 
-    def visualize_results(self):
+    def visualize_results(self, separate_plots:bool = False):
         """
         Visualizes results from predict_from_mapping. 
         """
         # Load loss dict
         mse_session_losses = self.read_dict_from_json(type_of_content="mse_losses")
 
-        fig, ax = plt.subplots(figsize=(12, 8))
-
-        # Iterate over each training session
+        # Collect self-prediction MSEs for baseline and prepare average non-self-MSE calculation
+        self_prediction_mses = {}
+        average_prediction_mses = {}
+        for session in mse_session_losses['session_mapping']:
+            self_prediction_mses[session] = mse_session_losses['session_mapping'][session]['session_pred'][session]
+            average_prediction_mses[session] = 0
+            
+        # Calculate average MSE for each session from all other training sessions
         for train_session, data in mse_session_losses['session_mapping'].items():
-            distances = []
-            losses = []
-            
-            # Calculate distance and collect corresponding losses
             for pred_session, mse in data['session_pred'].items():
-                distance = abs(int(train_session) - int(pred_session))
-                distances.append(distance)
-                losses.append(mse)
+                if train_session != pred_session:
+                    average_prediction_mses[pred_session] += mse
+        num_other_sessions = len(self.session_ids_num) - 1
+        for session in average_prediction_mses:
+            average_prediction_mses[session] /= num_other_sessions
+
+        if separate_plots:
+            # Generate separate plots for each training session
+            for train_session, data in mse_session_losses['session_mapping'].items():
+                plt.figure(figsize=(10, 6))
+                sessions = list(data['session_pred'].keys())
+                losses = list(data['session_pred'].values())
+                plt.plot(sessions, losses, marker='o', linestyle='-', label=f'Training Session {train_session}')
+                plt.plot(self_prediction_mses.keys(), self_prediction_mses.values(), 'r--', label='Self-prediction MSE')
+                plt.plot(average_prediction_mses.keys(), average_prediction_mses.values(), 'g-.', label='Average Non-self-prediction MSE')
+
+                plt.title(f'MSE for Predictions from Training Session {train_session}')
+                plt.xlabel('Predicted Session')
+                plt.ylabel('Mean Squared Error')
+                plt.legend()
+                plt.grid(True)
+
+                # Save the plot to a file
+                plot_folder = f"data_files/visualizations/seperate_plots_{separate_plots}/subject_{self.subject_id}"
+                if not os.path.exists(plot_folder):
+                    os.makedirs(plot_folder)
+                plot_file = f"MSE_plot_session{train_session}.png"
+                plot_path = os.path.join(plot_folder, plot_file)
+                plt.savefig(plot_path)
+                plt.close()
+        else:
+            # Generate a single plot with all training sessions
+            plt.figure(figsize=(12, 8))
+            for train_session, data in mse_session_losses['session_mapping'].items():
+                sessions = list(data['session_pred'].keys())
+                losses = list(data['session_pred'].values())
+                plt.plot(sessions, losses, marker='o', linestyle='-', label=f'Trained on Session {train_session}')
+            plt.plot(self_prediction_mses.keys(), self_prediction_mses.values(), 'r--', label='Self-prediction MSE')
+            plt.plot(average_prediction_mses.keys(), average_prediction_mses.values(), 'g-.', label='Average Non-self-prediction MSE')
             
-            # Sort the data by distance for better plotting
-            sorted_indices = np.argsort(distances)
-            sorted_distances = np.array(distances)[sorted_indices]
-            sorted_losses = np.array(losses)[sorted_indices]
-            
-            # Plot
-            ax.plot(sorted_distances, sorted_losses, marker='o', linestyle='-', label=f'Trained on Session {train_session}')
+            plt.title('MSE for Predictions Across All Sessions')
+            plt.xlabel('Prediction Session')
+            plt.ylabel('Mean Squared Error')
+            plt.legend()
+            plt.grid(True)
 
-        ax.set_xlabel('Distance to Training Session')
-        ax.set_ylabel('Mean Squared Error')
-        ax.set_title('MSE vs Distance for Predictions Across Different Sessions')
-        ax.legend()
-
-        # Save the plot to a file
-        plot_folder = f"data_files/visualizations/{self.subject_id}"
-        if not os.path.exists(plot_folder):
-            os.makedirs(plot_folder)
-        plot_file = "MSE_vs_Distance_Plot.png"
-        plot_path = os.path.join(plot_folder, plot_file)
-
-        plt.savefig(plot_path)
-        plt.close()
-
+            # Save the plot to a file
+            plot_folder = f"data_files/visualizations/seperate_plots_{separate_plots}/subject_{self.subject_id}"
+            if not os.path.exists(plot_folder):
+                os.makedirs(plot_folder)
+            plot_file = f"MSE_plot_all_sessions.png"
+            plot_path = os.path.join(plot_folder, plot_file)
+            plt.savefig(plot_path)
+            plt.close()
 
 
     class MultiDimensionalRidge:
