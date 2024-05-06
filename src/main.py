@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import json
 from collections import defaultdict
-from utils import MetadataHelper, DatasetHelper, ExtractionHelper, GLMHelper
+from utils import MetadataHelper, DatasetHelper, ExtractionHelper, GLMHelper, VisualizationHelper
 
 # Add parent folder of src to path and change cwd
 __location__ = Path(__file__).parent.parent
@@ -15,12 +15,12 @@ os.chdir(__location__)
 subject_ids = ["02"]
 
 # Choose Calculations to be performed
-create_metadata = True
-create_dataset = True
-extract_features = True
-train_GLM = True
-generate_predictions_with_GLM = True
-visualize_results = True
+create_metadata = False
+create_dataset = False
+extract_features = False
+train_GLM = False
+generate_predictions_with_GLM = False
+visualization = True
 
 for subject_id in subject_ids:
     print(f"Processing subject {subject_id}")
@@ -57,7 +57,7 @@ for subject_id in subject_ids:
         extraction_helper.extract_features()
 
     ##### Train GLM from features to meg #####
-    if train_GLM or generate_predictions_with_GLM or visualize_results:
+    if train_GLM or generate_predictions_with_GLM:
         glm_helper = GLMHelper(subject_id=subject_id)
 
         # Train GLM
@@ -66,9 +66,13 @@ for subject_id in subject_ids:
         # Generate meg predictions from GLMs
         if generate_predictions_with_GLM:
             glm_helper.predict_from_mapping()
+
+    ##### Visualization #####
+    if visualization:
+        visualization_helper = VisualizationHelper(subject_id=subject_id)
+
         # Visualize prediction results
-        if visualize_results:
-            glm_helper.visualize_results(separate_plots=False, only_distance=True)
+        visualization_helper.visualize_GLM_results(only_distance=True, separate_plots=False)
 
 print("Pipeline completed.")
 
