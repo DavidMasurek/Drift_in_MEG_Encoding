@@ -26,6 +26,10 @@ class BasicOperationsHelper:
 
 
     def map_session_letter_id_to_num(self, session_id_letter: str) -> str:
+        """
+        Helper function to map the character id from a session to its number id.
+        For example: Input "a" will return "1".
+        """
         # Create mapping
         session_mapping = {}
         for num in range(1,11):
