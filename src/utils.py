@@ -175,7 +175,11 @@ class BasicOperationsHelper:
             os.makedirs(plot_folder)
         plot_path = os.path.join(plot_folder, plot_file)
         plt.savefig(plot_path)
-        plt.close()
+        # Lazily add this to handle mne plots, which cannot be closed
+        try:
+            plt.close()
+        except:
+            pass
 
 
     def normalize_array(self, data):
@@ -857,4 +861,32 @@ class VisualizationHelper(GLMHelper):
                 plot_file = f"MSE_plot_all_sessions.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
             
+    
+    def visualize_meg_epochs(self):
+        """
+        Visualizes meg data at various processing steps
+        """
+        for session_id_num in self.session_ids_num:
+            # Load meg data and split into grad and mag
+            meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data")
+            meg_data = meg_data["test"]
+            meg_dict = {"grad": {"meg": meg_data[:,:204,:], "n_sensors": 204}, "mag": {"meg": meg_data[:,204:,:], "n_sensors": 102}}
+            
+
+            print(f"meg_data.shape: {meg_data.shape}")
+            print(f"meg_dict['grad']['meg'].shape: {meg_dict['grad']['meg'].shape}")
+            print(f"meg_dict['mag']['meg'].shape: {meg_dict['mag']['meg'].shape}")
+
+            print(f"len(range(204)): {len(range(204))}")
+
+            for sensor_type in meg_dict:
+                # Read in with mne
+                meg_info = mne.create_info(ch_names=[str(sensor_nr) for sensor_nr in range(meg_dict[sensor_type]["n_sensors"])], sfreq=500, ch_types=sensor_type)  # Create minimal Info objects with default values
+                epochs = mne.EpochsArray(meg_dict[sensor_type]["meg"], meg_info)
+
+                # Plot
+                epochs_plot = epochs.plot()
+                plot_folder = f"data_files/visualizations/meg_data/subject_{self.subject_id}/session_{session_id_num}/{sensor_type}"
+                plot_file = f"{sensor_type}_plot.png"
+                self.save_plot_as_file(plt=epochs_plot, plot_folder=plot_folder, plot_file=plot_file)
 

@@ -71,8 +71,13 @@ for subject_id in subject_ids:
     if visualization:
         visualization_helper = VisualizationHelper(subject_id=subject_id)
 
+        # Visualize meg data
+        visualization_helper.visualize_meg_epochs()
+
         # Visualize prediction results
-        visualization_helper.visualize_GLM_results(only_distance=True, separate_plots=False)
+        #visualization_helper.visualize_GLM_results(only_distance=True, separate_plots=False)
+
+        
 
 print("Pipeline completed.")
 
