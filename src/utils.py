@@ -266,8 +266,8 @@ class MetadataHelper(BasicOperationsHelper):
         Creates the crop metadata dict for the participant and stores it.
         """
 
-        # Read data from csv and set index to crop identifier (filename before .png)
-        df = pd.read_csv(self.crop_metadata_path, index_col = 'crop_identifier')
+        # Read data from csv and set index to crop filename (crop_identifier before .png)
+        df = pd.read_csv(self.crop_metadata_path, index_col = 'crop_filename')
 
         # Remove rows/fixations without crop identifiers
         df = df[df.index.notnull()]
@@ -317,9 +317,9 @@ class MetadataHelper(BasicOperationsHelper):
                     # Create dicts for this timepoint
                     data_dict["sessions"][nr_session]["trials"][nr_trial]["timepoints"][timepoint] = {}
 
-                    # Fill in crop identifier value (here the index) in main data dict for this timepoint, as well as scene id and space for meg data
+                    # Fill in crop identifier value (here the index without ".png") in main data dict for this timepoint, as well as scene id and space for meg data
                     # metadata
-                    data_dict["sessions"][nr_session]["trials"][nr_trial]["timepoints"][timepoint]["crop_identifier"] = timepoint_df.index.tolist()[0]  # slice with [0] to get single element instead of string
+                    data_dict["sessions"][nr_session]["trials"][nr_trial]["timepoints"][timepoint]["crop_identifier"] = timepoint_df.index.tolist()[0][:-4]  # slice with [0] to get single element instead of list, then slice off ".png" at the end
                     data_dict["sessions"][nr_session]["trials"][nr_trial]["timepoints"][timepoint]["sceneID"] = sceneID
         
         # Export dict to json 

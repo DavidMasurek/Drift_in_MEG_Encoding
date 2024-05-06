@@ -15,11 +15,11 @@ os.chdir(__location__)
 subject_ids = ["01", "02", "03", "04", "05"]
 
 # Choose Calculations to be performed
-create_metadata = False
-create_dataset = False
-extract_features = False
-train_GLM = False
-generate_predictions_with_GLM = False
+create_metadata = True
+create_dataset = True
+extract_features = True
+train_GLM = True
+generate_predictions_with_GLM = True
 visualize_results = True
 
 for subject_id in subject_ids:
