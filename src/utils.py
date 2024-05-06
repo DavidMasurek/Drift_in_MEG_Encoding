@@ -221,7 +221,7 @@ class MetadataHelper(BasicOperationsHelper):
                     meg_index += 1
         
         # Export dict to json 
-        self.save_dict_as_json(type_of_content="combined_metadata", metadata_dict=combined_metadata_dict)
+        self.save_dict_as_json(type_of_content="combined_metadata", dict_to_store=combined_metadata_dict)
 
 
     def create_meg_metadata_dict(self) -> None:
@@ -258,7 +258,7 @@ class MetadataHelper(BasicOperationsHelper):
                 data_dict["sessions"][session_id_num]["trials"][trial_id]["timepoints"][timepoint] = {"meg":True}
 
         # Export dict to json 
-        self.save_dict_as_json(type_of_content="meg_metadata", metadata_dict=data_dict)
+        self.save_dict_as_json(type_of_content="meg_metadata", dict_to_store=data_dict)
 
 
     def create_crop_metadata_dict(self) -> None:
@@ -323,7 +323,7 @@ class MetadataHelper(BasicOperationsHelper):
                     data_dict["sessions"][nr_session]["trials"][nr_trial]["timepoints"][timepoint]["sceneID"] = sceneID
         
         # Export dict to json 
-        self.save_dict_as_json(type_of_content="crop_metadata", metadata_dict=data_dict)
+        self.save_dict_as_json(type_of_content="crop_metadata", dict_to_store=data_dict)
 
 
         
@@ -409,7 +409,7 @@ class DatasetHelper(BasicOperationsHelper):
     
                 # Split meg data 
                 # Get train/test split based on trials (based on scenes)
-                trials_split_dict = self.load_split_data_from_file(session_id_num=session_id, type_of_content="trial_splits")
+                trials_split_dict = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="trial_splits")
 
                 meg_split = {"train": [], "test": []}
                 # Iterate through meg metadata for simplicity with indexing

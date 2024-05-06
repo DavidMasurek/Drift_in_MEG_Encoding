@@ -12,7 +12,7 @@ __location__ = Path(__file__).parent.parent
 sys.path.append(str(__location__))
 os.chdir(__location__)
 
-subject_ids = ["01", "02", "03", "04", "05"]
+subject_ids = ["02"]
 
 # Choose Calculations to be performed
 create_metadata = True
