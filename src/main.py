@@ -12,11 +12,14 @@ __location__ = Path(__file__).parent.parent
 sys.path.append(str(__location__))
 os.chdir(__location__)
 
+# Choose params
 subject_ids = ["02"]
+normalizations = ["min_max", "mean_centered_ch_t", "robust_scaling", "no_norm"]
 
 # Choose Calculations to be performed
 create_metadata = False
-create_dataset = False
+create_non_meg_dataset = False
+create_meg_dataset = False
 extract_features = False
 train_GLM = False
 generate_predictions_with_GLM = False
@@ -36,18 +39,28 @@ for subject_id in subject_ids:
         # Combine meg and crop metadata over all sessions
         metadata_helper.create_combined_metadata_dict()
 
-    ##### Create crop and meg dataset based on metadata #####
-    if create_dataset:
-        dataset_helper = DatasetHelper(subject_id=subject_id)
+        print("Metadata created.")
 
-        # Create train/test split based on sceneIDs (based on trial_ids)
-        dataset_helper.create_train_test_split()
-        # Create crop numpy dataset based on split
-        dataset_helper.create_crop_dataset()
-        # Create torch dataset based on numpy datasets
-        dataset_helper.create_pytorch_dataset()
-        # Create meg dataset based on split
-        dataset_helper.create_meg_dataset()
+    ##### Create crop and meg dataset based on metadata #####
+    if create_non_meg_dataset or create_meg_dataset:
+        dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations)
+
+        if create_non_meg_dataset:
+            # Create train/test split based on sceneIDs (based on trial_ids)
+            dataset_helper.create_train_test_split()
+            # Create crop numpy dataset based on split
+            dataset_helper.create_crop_dataset()
+            # Create torch dataset based on numpy datasets
+            dataset_helper.create_pytorch_dataset()
+
+            print("Non-MEG datasets created.")
+
+        if create_meg_dataset:
+            # Create meg dataset based on split
+            dataset_helper.create_meg_dataset()
+
+            print("MEG datasets created.")
+
 
     ##### Extract features from crops #####
     if extract_features:
@@ -56,6 +69,8 @@ for subject_id in subject_ids:
         # Extract features
         extraction_helper.extract_features()
 
+        print("Features extracted.")
+
     ##### Train GLM from features to meg #####
     if train_GLM or generate_predictions_with_GLM:
         glm_helper = GLMHelper(subject_id=subject_id)
@@ -63,20 +78,26 @@ for subject_id in subject_ids:
         # Train GLM
         if train_GLM:
             glm_helper.train_mapping()
+
+            print("GLMs trained.")
+
         # Generate meg predictions from GLMs
         if generate_predictions_with_GLM:
             glm_helper.predict_from_mapping()
+
+            print("Predictions generated.")
 
     ##### Visualization #####
     if visualization:
         visualization_helper = VisualizationHelper(subject_id=subject_id)
 
         # Visualize meg data
-        visualization_helper.visualize_meg_epochs()
+        #visualization_helper.visualize_meg_epochs()
 
         # Visualize prediction results
-        #visualization_helper.visualize_GLM_results(only_distance=True, separate_plots=False)
+        visualization_helper.visualize_GLM_results(only_distance=True, separate_plots=False)
 
+        print("Visualization completed.")
         
 
 print("Pipeline completed.")

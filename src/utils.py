@@ -42,7 +42,7 @@ class BasicOperationsHelper:
         return session_id_num
 
 
-    def read_dict_from_json(self, type_of_content: str) -> dict:
+    def read_dict_from_json(self, type_of_content: str, type_of_norm: str = None) -> dict:
         """
         Helper function to read json files into dicts.
 
@@ -53,7 +53,7 @@ class BasicOperationsHelper:
             raise ValueError(f"Function read_dict_from_json called with unrecognized type {type_of_content}.")
 
         if type_of_content == "mse_losses":
-            file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/mse_losses_dict.json"
+            file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/mse_losses_dict.json"
         else:
             file_path = f"data_files/metadata/{type_of_content}/subject_{self.subject_id}/{type_of_content}_dict.json"
         
@@ -67,7 +67,7 @@ class BasicOperationsHelper:
         return data_dict
 
 
-    def save_dict_as_json(self, type_of_content: str, dict_to_store: dict) -> None:
+    def save_dict_as_json(self, type_of_content: str, dict_to_store: dict, type_of_norm: str = None) -> None:
         """
         Helper function to store dicts as json files.
 
@@ -78,7 +78,7 @@ class BasicOperationsHelper:
             raise ValueError(f"Function save_dict_as_json called with unrecognized type {type_of_content}.")
 
         if type_of_content == "mse_losses":
-            storage_folder = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}"
+            storage_folder = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}"
         else:
             storage_folder = f'data_files/metadata/{type_of_content}/subject_{self.subject_id}'
         if not os.path.exists(storage_folder):
@@ -91,7 +91,7 @@ class BasicOperationsHelper:
             json.dump(dict_to_store, file, indent=4)
 
 
-    def export_split_data_as_file(self, session_id: str, type_of_content: str, array_dict: Dict[str, np.ndarray], ann_model: str = None, module: str = None) -> None:
+    def export_split_data_as_file(self, session_id: str, type_of_content: str, array_dict: Dict[str, np.ndarray], type_of_norm: str = None, ann_model: str = None, module: str = None) -> None:
         """
         Helper function to export train/test numpy arrays as .npz or .pt files.
 
@@ -112,13 +112,18 @@ class BasicOperationsHelper:
         
         # Add additional folder for model type and extraction layer for ann_features
         if type_of_content == "ann_features":
-            additional_folders = f"/{ann_model}/{module}/"
+            additional_model_folders = f"/{ann_model}/{module}/"
         else:
-            additional_folders = "/"
+            additional_model_folders = "/"
+
+        if type_of_content == "meg_data":
+            additional_norm_folder = f"norm_{type_of_norm}/"
+        else:
+            additional_norm_folder = ""
 
         # Export train/test split arrays to .npz
         for split in array_dict:
-            save_folder = f"data_files/{type_of_content}{additional_folders}subject_{self.subject_id}/session_{session_id}/{split}"  
+            save_folder = f"data_files/{type_of_content}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}/session_{session_id}/{split}"  
             save_file = f"{type_of_content}{file_type}"
             if not os.path.exists(save_folder):
                 os.makedirs(save_folder)
@@ -131,7 +136,7 @@ class BasicOperationsHelper:
 
 
     
-    def load_split_data_from_file(self, session_id_num: str, type_of_content: str, ann_model: str = None, module: str = None) -> dict:
+    def load_split_data_from_file(self, session_id_num: str, type_of_content: str, type_of_norm:str = None, ann_model: str = None, module: str = None) -> dict:
         """
         Helper function to load the split for a given session.
 
@@ -150,14 +155,19 @@ class BasicOperationsHelper:
 
         # Add additional folder for model type and extraction layer for ann_features
         if type_of_content == "ann_features":
-            additional_folders = f"/{ann_model}/{module}/"
+            additional_model_folders = f"/{ann_model}/{module}/"
         else:
-            additional_folders = "/"
+            additional_model_folders = "/"
+
+        if type_of_content == "meg_data":
+            additional_norm_folder = f"norm_{type_of_norm}/"
+        else:
+            additional_norm_folder = ""
 
         split_dict = {}
         for split in ["train", "test"]:
             # Load split trial array
-            split_path = f"data_files/{type_of_content}{additional_folders}subject_{self.subject_id}/session_{session_id_num}/{split}/{type_of_content}{file_type}"  
+            split_path = f"data_files/{type_of_content}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}/session_{session_id_num}/{split}/{type_of_content}{file_type}"  
             if file_type == ".npy":
                 split_data = np.load(split_path)
             else:
@@ -167,7 +177,7 @@ class BasicOperationsHelper:
         return split_dict
 
     
-    def save_plot_as_file(self, plt, plot_folder: str, plot_file: str):
+    def save_plot_as_file(self, plt, plot_folder: str, plot_file: str, plot_type: str = None):
         """
         Helper function to save a plot as file.
         """
@@ -175,20 +185,41 @@ class BasicOperationsHelper:
             os.makedirs(plot_folder)
         plot_path = os.path.join(plot_folder, plot_file)
         plt.savefig(plot_path)
-        # Lazily add this to handle mne plots, which cannot be closed
-        try:
+        # Mne plots cannot be closed
+        if plot_type != "mne":
             plt.close()
-        except:
-            pass
 
 
-    def normalize_array(self, data):
+    def normalize_array(self, data: np.ndarray, normalization: str):
         """
-        Helper function to normalize meg data across a session.
+        Helper function to normalize meg
+        normalization options: mean centered per channel and per timepoint, min-max over complete session, robust scaling, no normalization
+                                ["min_max", "mean_centered_ch_t", "robust_scaling", "no_norm"]
         """
-        data_min = data.min()
-        data_max = data.max()
-        normalized_data = (data - data_min) / (data_max - data_min)
+        match normalization:
+
+            case "min_max":
+                data_min = data.min()
+                data_max = data.max()
+                normalized_data = (data - data_min) / (data_max - data_min)
+
+            case "mean_centered_ch_t":
+                means = np.mean(data, axis=0)  # Compute means for each channel and timepoint, averaged over all epochs
+                normalized_data = data - means  # Subtract the mean to center the data
+
+            case "robust_scaling":
+                medians = np.median(data, axis=0)  # Median across epochs
+                q75, q25 = np.percentile(data, [75, 25], axis=0)
+                iqr = q75 - q25
+
+                normalized_data = (data - medians) / iqr  # Subtract medians and divide by IQR
+
+            case "no_norm":
+                normalized_data = data
+
+            case _:
+                raise ValueError(f"normalize_array called with unrecognized type {normalization}")
+
 
         return normalized_data
 
@@ -344,12 +375,12 @@ class MetadataHelper(BasicOperationsHelper):
 
         
 class DatasetHelper(BasicOperationsHelper):
-    def __init__(self, subject_id: str = "02"):
+    def __init__(self, subject_id: str = "02", normalizations:list = ["min_max", "mean_centered_ch_t", "robust_scaling", "no_norm"]):
         super().__init__(subject_id)
 
         self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{subject_id}_crops_metadata.csv"
         self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{subject_id}/sensor/filter_0.2_200"
-
+        self.normalizations = normalizations
 
     def create_crop_dataset(self) -> None:
         """
@@ -416,45 +447,49 @@ class DatasetHelper(BasicOperationsHelper):
                 meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a (2874, 204, 601)
                 meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a (2874, 102, 601)
     
-                # Normalize grad and mag independently
-                meg_data["grad"] = self.normalize_array(np.array(meg_data['grad']))
-                meg_data["mag"] = self.normalize_array(np.array(meg_data['mag']))
 
-                # Combine grad and mag data
-                combined_meg = np.concatenate([meg_data["grad"], meg_data["mag"]], axis=1) #(2874, 306, 601)
-    
-                # Split meg data 
-                # Get train/test split based on trials (based on scenes)
-                trials_split_dict = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="trial_splits")
+                # Create datasets based on passed normalizations
+                for normalization in self.normalizations:
+                    # Normalize grad and mag independently
+                    meg_data["grad"] = self.normalize_array(np.array(meg_data['grad']), normalization=normalization)
+                    meg_data["mag"] = self.normalize_array(np.array(meg_data['mag']), normalization=normalization)
 
-                meg_split = {"train": [], "test": []}
-                # Iterate through meg metadata for simplicity with indexing
-                index = 0
-                for trial_id in meg_metadata["sessions"][session_id_num]["trials"]:
-                    if trial_id in trials_split_dict["train"]:
-                        trial_type = "train"
-                    elif trial_id in trials_split_dict["test"]:
-                        trial_type = "test"
-                    else:
-                        # Raise error if the trial is in neither split, but is in the combined metadata (in this case it should be there)
-                        if trial_id in combined_metadata["sessions"][session_id_num]["trials"]:
-                            raise ValueError(f"Session {session_id_num}: Trial_id {trial_id} neither in train nor test split.")
-                        # Otherwise skip this trial
+                    # Combine grad and mag data
+                    combined_meg = np.concatenate([meg_data["grad"], meg_data["mag"]], axis=1) #(2874, 306, 601)
+        
+                    # Split meg data 
+                    # Get train/test split based on trials (based on scenes)
+                    trials_split_dict = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="trial_splits")
+
+                    meg_split = {"train": [], "test": []}
+                    # Iterate through meg metadata for simplicity with indexing
+                    index = 0
+                    for trial_id in meg_metadata["sessions"][session_id_num]["trials"]:
+                        if trial_id in trials_split_dict["train"]:
+                            trial_type = "train"
+                        elif trial_id in trials_split_dict["test"]:
+                            trial_type = "test"
                         else:
+                            # Raise error if the trial is in neither split, but is in the combined metadata (in this case it should be there)
+                            if trial_id in combined_metadata["sessions"][session_id_num]["trials"]:
+                                raise ValueError(f"Session {session_id_num}: Trial_id {trial_id} neither in train nor test split.")
+                            # Otherwise skip this trial
+                            else:
+                                index += 1
+                                continue
+                        for timepoint in meg_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
+                            # Check if there is both crop and metadata for the timepoint
+                            if timepoint in combined_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
+                                # Assign to split
+                                meg_split[trial_type].append(combined_meg[index])
+                            # Advance index
                             index += 1
-                            continue
-                    for timepoint in meg_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
-                        # Check if there is both crop and metadata for the timepoint
-                        if timepoint in combined_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
-                            # Assign to split
-                            meg_split[trial_type].append(combined_meg[index])
-                        # Advance index
-                        index += 1
 
-                # Export meg dataset arrays to .npz
-                self.export_split_data_as_file(session_id=session_id_num, 
-                                            type_of_content="meg_data",
-                                            array_dict=meg_split)
+                    # Export meg dataset arrays to .npz
+                    self.export_split_data_as_file(session_id=session_id_num, 
+                                                type_of_content="meg_data",
+                                                array_dict=meg_split,
+                                                type_of_norm=normalization)
 
 
     def create_train_test_split(self):
@@ -629,7 +664,7 @@ class ExtractionHelper(BasicOperationsHelper):
 
 
 
-class GLMHelper(ExtractionHelper):
+class GLMHelper(DatasetHelper, ExtractionHelper):
     def __init__(self, subject_id: str = "02"):
         super().__init__(subject_id=subject_id)
 
@@ -639,67 +674,70 @@ class GLMHelper(ExtractionHelper):
         Trains a mapping from ANN features to MEG data over all sessions.
         """
         for session_id_num in self.session_ids_num:
-            # Get ANN features for session
-            ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
+            for normalization in self.normalizations:
+                # Get ANN features for session
+                ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
 
-            # Get MEG data for sesssion
-            meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data")
+                # Get MEG data for sesssion
+                meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
 
-            X_train, Y_train = ann_features['train'], meg_data['train']
+                X_train, Y_train = ann_features['train'], meg_data['train']
 
-            # Initialize Helper class
-            ridge_model = GLMHelper.MultiDimensionalRidge(alpha=0.5)
+                # Initialize Helper class
+                ridge_model = GLMHelper.MultiDimensionalRidge(alpha=0.5)
 
-            # Fit model on train data
-            ridge_model.fit(X_train, Y_train)
+                # Fit model on train data
+                ridge_model.fit(X_train, Y_train)
 
-            # Store trained models as pickle
-            save_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/session_{session_id_num}"  
-            save_file = "GLM_models.pkl"
-            if not os.path.exists(save_folder):
-                os.makedirs(save_folder)
-            save_path = os.path.join(save_folder, save_file)
+                # Store trained models as pickle
+                save_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/session_{session_id_num}"  
+                save_file = "GLM_models.pkl"
+                if not os.path.exists(save_folder):
+                    os.makedirs(save_folder)
+                save_path = os.path.join(save_folder, save_file)
 
-            with open(save_path, 'wb') as file:
-                pickle.dump(ridge_model.models, file)
+                with open(save_path, 'wb') as file:
+                    pickle.dump(ridge_model.models, file)
 
         
     def predict_from_mapping(self):
         """
         Based on the trained mapping for each session, predicts MEG data over all sessions from their respective test features.
         """
-        mse_session_losses = {"session_mapping": {}}
-        for session_id_model in self.session_ids_num:
-            mse_session_losses["session_mapping"][session_id_model] = {"session_pred": {}}
-            # Get trained ridge regression model for this session
-            # Load ridge model
-            storage_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/session_{session_id_model}"  
-            storage_file = "GLM_models.pkl"
-            storage_path = os.path.join(storage_folder, storage_file)
-            with open(storage_path, 'rb') as file:
-                ridge_models = pickle.load(file)
-            
-            # Initialize MultiDim GLM class with stored models
-            ridge_model = GLMHelper.MultiDimensionalRidge(alpha=0.5, models=ridge_models)
 
-            # Generate predictions for test features over all sessions and evaluate them 
-            for session_id_pred in self.session_ids_num:
-                # Get ANN features and MEG data for session where predictions are to be evaluated
-                ann_features = self.load_split_data_from_file(session_id_num=session_id_pred, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
-                meg_data = self.load_split_data_from_file(session_id_num=session_id_pred, type_of_content="meg_data")
-                X_test, Y_test = ann_features['test'], meg_data['test']
+        for normalization in self.normalizations:
+            mse_session_losses = {"session_mapping": {}}
+            for session_id_model in self.session_ids_num:
+                mse_session_losses["session_mapping"][session_id_model] = {"session_pred": {}}
+                # Get trained ridge regression model for this session
+                # Load ridge model
+                storage_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/session_{session_id_model}"  
+                storage_file = "GLM_models.pkl"
+                storage_path = os.path.join(storage_folder, storage_file)
+                with open(storage_path, 'rb') as file:
+                    ridge_models = pickle.load(file)
+                
+                # Initialize MultiDim GLM class with stored models
+                ridge_model = GLMHelper.MultiDimensionalRidge(alpha=0.5, models=ridge_models)
 
-                # Generate predictions
-                predictions = ridge_model.predict(X_test)
+                # Generate predictions for test features over all sessions and evaluate them 
+                for session_id_pred in self.session_ids_num:
+                    # Get ANN features and MEG data for session where predictions are to be evaluated
+                    ann_features = self.load_split_data_from_file(session_id_num=session_id_pred, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
+                    meg_data = self.load_split_data_from_file(session_id_num=session_id_pred, type_of_content="meg_data", type_of_norm=normalization)
+                    X_test, Y_test = ann_features['test'], meg_data['test']
 
-                # Calculate the mean squared error across all flattened features and timepoints
-                mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
+                    # Generate predictions
+                    predictions = ridge_model.predict(X_test)
 
-                # Save loss
-                mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = mse
+                    # Calculate the mean squared error across all flattened features and timepoints
+                    mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
 
-        # Store loss dict
-        self.save_dict_as_json(type_of_content="mse_losses", dict_to_store=mse_session_losses)
+                    # Save loss
+                    mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = mse
+
+            # Store loss dict
+            self.save_dict_as_json(type_of_content="mse_losses", dict_to_store=mse_session_losses, type_of_norm=normalization)
 
 
     class MultiDimensionalRidge:
@@ -750,116 +788,118 @@ class VisualizationHelper(GLMHelper):
         """
         Visualizes results from GLMHelper.predict_from_mapping
         """
-        # Load loss dict
-        mse_session_losses = self.read_dict_from_json(type_of_content="mse_losses")
+        print(f"self.normalizations: {self.normalizations}")
+        for normalization in self.normalizations:
+            # Load loss dict
+            mse_session_losses = self.read_dict_from_json(type_of_content="mse_losses", type_of_norm=normalization)
 
-        if only_distance:
-            # Plot loss as a function of distance of predicted session from "training" session
-            fig, ax1 = plt.subplots(figsize=(12, 8))
+            if only_distance:
+                # Plot loss as a function of distance of predicted session from "training" session
+                fig, ax1 = plt.subplots(figsize=(12, 8))
 
-            # Iterate over each training session
-            losses_by_distances = {}
-            for train_session, data in mse_session_losses['session_mapping'].items():
-                # Calculate distance and collect corresponding losses
-                for pred_session, mse in data['session_pred'].items():
-                    if train_session != pred_session:
-                        distance = abs(int(train_session) - int(pred_session))
-                        if distance not in losses_by_distances:
-                            losses_by_distances[distance] = {"loss": mse, "num_losses": 1}
-                        else:
-                            losses_by_distances[distance]["loss"] += mse
-                            losses_by_distances[distance]["num_losses"] += 1
-
-            # Calculate average losses over distances
-            avg_losses = {}
-            num_datapoints = {}
-            for distance in range(1,10):
-                avg_losses[distance] = losses_by_distances[distance]["loss"] / losses_by_distances[distance]["num_losses"]
-                num_datapoints[distance] = losses_by_distances[distance]["num_losses"]
-
-            # Plot
-            ax1.plot(avg_losses.keys(), avg_losses.values(), marker='o', linestyle='-', label=f'Average loss')
-            ax1.set_xlabel('Distance between "train" and "test" Session')
-            ax1.set_ylabel('Mean Squared Error')
-            ax1.tick_params(axis='y', labelcolor='b')
-            ax1.grid(True)
-    
-            # Add secondary y-axis for datapoints
-            ax2 = ax1.twinx()
-            ax2.plot(num_datapoints.keys(), num_datapoints.values(), 'r--', label='Number of datapoints/losses averaged')
-            ax2.set_ylabel('Number of Datapoints', color='r')
-            ax2.tick_params(axis='y', labelcolor='r')
-
-            # Add a legend with all labels
-            lines, labels = ax1.get_legend_handles_labels()
-            lines2, labels2 = ax2.get_legend_handles_labels()
-            ax1.legend(lines + lines2, labels + labels2, loc='upper right')
-            
-            ax1.set_title('MSE vs Distance for Predictions Averaged Across all Sessions')
-            plt.grid(True)
-
-            # Save the plot to a file
-            plot_folder = f"data_files/visualizations/only_distance/subject_{self.subject_id}"
-            plot_file = f"MSE_plot_over_distance.png"
-            self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
-
-        else:
-            # Collect self-prediction MSEs for baseline and prepare average non-self-MSE calculation
-            self_prediction_mses = {}
-            average_prediction_mses = {}
-            for session in mse_session_losses['session_mapping']:
-                self_prediction_mses[session] = mse_session_losses['session_mapping'][session]['session_pred'][session]
-                average_prediction_mses[session] = 0
-
-            # Calculate average MSE for each session from all other training sessions
-            for train_session, data in mse_session_losses['session_mapping'].items():
-                for pred_session, mse in data['session_pred'].items():
-                    if train_session != pred_session:
-                        average_prediction_mses[pred_session] += mse
-            num_other_sessions = len(self.session_ids_num) - 1
-            for session in average_prediction_mses:
-                average_prediction_mses[session] /= num_other_sessions
-
-            if separate_plots:
-                # Generate separate plots for each training session
+                # Iterate over each training session
+                losses_by_distances = {}
                 for train_session, data in mse_session_losses['session_mapping'].items():
-                    plt.figure(figsize=(10, 6))
-                    sessions = list(data['session_pred'].keys())
-                    losses = list(data['session_pred'].values())
-                    plt.plot(sessions, losses, marker='o', linestyle='-', label=f'Training Session {train_session}')
+                    # Calculate distance and collect corresponding losses
+                    for pred_session, mse in data['session_pred'].items():
+                        if train_session != pred_session:
+                            distance = abs(int(train_session) - int(pred_session))
+                            if distance not in losses_by_distances:
+                                losses_by_distances[distance] = {"loss": mse, "num_losses": 1}
+                            else:
+                                losses_by_distances[distance]["loss"] += mse
+                                losses_by_distances[distance]["num_losses"] += 1
+
+                # Calculate average losses over distances
+                avg_losses = {}
+                num_datapoints = {}
+                for distance in range(1,10):
+                    avg_losses[distance] = losses_by_distances[distance]["loss"] / losses_by_distances[distance]["num_losses"]
+                    num_datapoints[distance] = losses_by_distances[distance]["num_losses"]
+
+                # Plot
+                ax1.plot(avg_losses.keys(), avg_losses.values(), marker='o', linestyle='-', label=f'Average loss')
+                ax1.set_xlabel('Distance between "train" and "test" Session')
+                ax1.set_ylabel('Mean Squared Error')
+                ax1.tick_params(axis='y', labelcolor='b')
+                ax1.grid(True)
+        
+                # Add secondary y-axis for datapoints
+                ax2 = ax1.twinx()
+                ax2.plot(num_datapoints.keys(), num_datapoints.values(), 'r--', label='Number of datapoints/losses averaged')
+                ax2.set_ylabel('Number of Datapoints', color='r')
+                ax2.tick_params(axis='y', labelcolor='r')
+
+                # Add a legend with all labels
+                lines, labels = ax1.get_legend_handles_labels()
+                lines2, labels2 = ax2.get_legend_handles_labels()
+                ax1.legend(lines + lines2, labels + labels2, loc='upper right')
+                
+                ax1.set_title('MSE vs Distance for Predictions Averaged Across all Sessions')
+                plt.grid(True)
+
+                # Save the plot to a file
+                plot_folder = f"data_files/visualizations/only_distance/subject_{self.subject_id}/norm_{normalization}"
+                plot_file = f"MSE_plot_over_distance_{normalization}.png"
+                self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+
+            else:
+                # Collect self-prediction MSEs for baseline and prepare average non-self-MSE calculation
+                self_prediction_mses = {}
+                average_prediction_mses = {}
+                for session in mse_session_losses['session_mapping']:
+                    self_prediction_mses[session] = mse_session_losses['session_mapping'][session]['session_pred'][session]
+                    average_prediction_mses[session] = 0
+
+                # Calculate average MSE for each session from all other training sessions
+                for train_session, data in mse_session_losses['session_mapping'].items():
+                    for pred_session, mse in data['session_pred'].items():
+                        if train_session != pred_session:
+                            average_prediction_mses[pred_session] += mse
+                num_other_sessions = len(self.session_ids_num) - 1
+                for session in average_prediction_mses:
+                    average_prediction_mses[session] /= num_other_sessions
+
+                if separate_plots:
+                    # Generate separate plots for each training session
+                    for train_session, data in mse_session_losses['session_mapping'].items():
+                        plt.figure(figsize=(10, 6))
+                        sessions = list(data['session_pred'].keys())
+                        losses = list(data['session_pred'].values())
+                        plt.plot(sessions, losses, marker='o', linestyle='-', label=f'Training Session {train_session}')
+                        plt.plot(self_prediction_mses.keys(), self_prediction_mses.values(), 'r--', label='Self-prediction MSE')
+                        plt.plot(average_prediction_mses.keys(), average_prediction_mses.values(), 'g-.', label='Average Non-self-prediction MSE')
+
+                        plt.title(f'MSE for Predictions from Training Session {train_session}')
+                        plt.xlabel('Predicted Session')
+                        plt.ylabel('Mean Squared Error')
+                        plt.legend()
+                        plt.grid(True)
+
+                        # Save the plot to a file
+                        plot_folder = f"data_files/visualizations/seperate_plots_{separate_plots}/subject_{self.subject_id}/norm_{normalization}"
+                        plot_file = f"MSE_plot_session{train_session}.png"
+                        self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+                else:
+                    # Generate a single plot with all training sessions
+                    plt.figure(figsize=(12, 8))
+                    for train_session, data in mse_session_losses['session_mapping'].items():
+                        sessions = list(data['session_pred'].keys())
+                        losses = list(data['session_pred'].values())
+                        plt.plot(sessions, losses, marker='o', linestyle='-', label=f'Trained on Session {train_session}')
                     plt.plot(self_prediction_mses.keys(), self_prediction_mses.values(), 'r--', label='Self-prediction MSE')
                     plt.plot(average_prediction_mses.keys(), average_prediction_mses.values(), 'g-.', label='Average Non-self-prediction MSE')
-
-                    plt.title(f'MSE for Predictions from Training Session {train_session}')
-                    plt.xlabel('Predicted Session')
+                    
+                    plt.title('MSE for Predictions Across All Sessions')
+                    plt.xlabel('Prediction Session')
                     plt.ylabel('Mean Squared Error')
                     plt.legend()
                     plt.grid(True)
 
                     # Save the plot to a file
-                    plot_folder = f"data_files/visualizations/seperate_plots_{separate_plots}/subject_{self.subject_id}"
-                    plot_file = f"MSE_plot_session{train_session}.png"
+                    plot_folder = f"data_files/visualizations/seperate_plots_{separate_plots}/subject_{self.subject_id}/norm_{normalization}"
+                    plot_file = f"MSE_plot_all_sessions.png"
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
-            else:
-                # Generate a single plot with all training sessions
-                plt.figure(figsize=(12, 8))
-                for train_session, data in mse_session_losses['session_mapping'].items():
-                    sessions = list(data['session_pred'].keys())
-                    losses = list(data['session_pred'].values())
-                    plt.plot(sessions, losses, marker='o', linestyle='-', label=f'Trained on Session {train_session}')
-                plt.plot(self_prediction_mses.keys(), self_prediction_mses.values(), 'r--', label='Self-prediction MSE')
-                plt.plot(average_prediction_mses.keys(), average_prediction_mses.values(), 'g-.', label='Average Non-self-prediction MSE')
-                
-                plt.title('MSE for Predictions Across All Sessions')
-                plt.xlabel('Prediction Session')
-                plt.ylabel('Mean Squared Error')
-                plt.legend()
-                plt.grid(True)
-
-                # Save the plot to a file
-                plot_folder = f"data_files/visualizations/seperate_plots_{separate_plots}/subject_{self.subject_id}"
-                plot_file = f"MSE_plot_all_sessions.png"
-                self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
             
     
     def visualize_meg_epochs(self):
@@ -888,5 +928,5 @@ class VisualizationHelper(GLMHelper):
                 epochs_plot = epochs.plot()
                 plot_folder = f"data_files/visualizations/meg_data/subject_{self.subject_id}/session_{session_id_num}/{sensor_type}"
                 plot_file = f"{sensor_type}_plot.png"
-                self.save_plot_as_file(plt=epochs_plot, plot_folder=plot_folder, plot_file=plot_file)
+                self.save_plot_as_file(plt=epochs_plot, plot_folder=plot_folder, plot_file=plot_file, plot_type="mne")
 
