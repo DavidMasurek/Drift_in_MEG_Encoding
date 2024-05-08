@@ -26,6 +26,10 @@ class BasicOperationsHelper:
         self.session_ids_num = [str(session_id) for session_id in range(1,11)]
 
 
+    def recursive_defaultdict(self) -> dict:
+        return defaultdict(self.recursive_defaultdict)
+
+
     def map_session_letter_id_to_num(self, session_id_letter: str) -> str:
         """
         Helper function to map the character id from a session to its number id.
@@ -208,12 +212,12 @@ class BasicOperationsHelper:
             case "mean_centered_ch_t":
                 means = np.mean(data, axis=0)  # Compute means for each channel and timepoint, averaged over all epochs
                 normalized_data = data - means  # Subtract the mean to center the data
-                  # divide by 10 to achieve values that are easier to work with 
+                  # multiply by 10 to achieve values that are easier to work with 
 
             case "median_centered_ch_t":
                 median = np.median(data, axis=0)  # Compute median for each channel and timepoint, averaged over all epochs
                 normalized_data = data - median  # Subtract the median to center the data
-                  # divide by 10 to achieve values that are easier to work with 
+                  # multiply by 10 to achieve values that are easier to work with 
 
             case "robust_scaling":
                 medians = np.median(data, axis=0)  # Median across epochs
@@ -240,10 +244,6 @@ class MetadataHelper(BasicOperationsHelper):
 
         self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{subject_id}_crops_metadata.csv"
         self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{subject_id}/sensor/filter_0.2_200"
-
-
-    def recursive_defaultdict(self) -> dict:
-        return defaultdict(self.recursive_defaultdict)
 
 
     def create_combined_metadata_dict(self) -> None:
@@ -944,31 +944,49 @@ class VisualizationHelper(GLMHelper):
         """
         Visualizes meg data at various processing steps
         """
+        # To-do: Combine data from normalizations for the same session and sensor type into one plot
+        # hopefully this is at least somewhat reasonable with the different scales
+
         for session_id_num in self.session_ids_num:
+            # Use defaultdict to automatically create missing keys
+            session_dict = self.recursive_defaultdict()
             for normalization in self.normalizations:
-                # Load meg data and split into grad and mag
-                meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
-                meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
-                meg_dict = {"grad": {"meg": meg_data_complete[:,:204,:], "n_sensors": 204}, "mag": {"meg": meg_data_complete[:,204:,:], "n_sensors": 102}}
-                
-                for sensor_type in meg_dict:
-                    data = meg_dict[sensor_type]["meg"]
+                if normalization != "min_max":
+                    # Load meg data and split into grad and mag
+                    meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
+                    meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
+                    meg_dict = {"grad": {"meg": meg_data_complete[:,:204,:], "n_sensors": 204}, "mag": {"meg": meg_data_complete[:,204:,:], "n_sensors": 102}}
+                    
+                    for sensor_type in meg_dict:
+                        data = meg_dict[sensor_type]["meg"]
 
-                    # Calculate the mean over the epochs and sensors
-                    averaged_data = np.mean(data, axis=(0, 1))
+                        # Calculate the mean over the epochs and sensors
+                        averaged_data = np.mean(data, axis=(0, 1))
+                        #print(f"averaged_data.shape: {averaged_data.shape}")
+                        # Store data in session dict
+                        session_dict["norm"][normalization]["sensor_type"][sensor_type] = averaged_data
+                        #print(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][normalization]['sensor_type'][sensor_type].shape}")
 
-                    timepoints = np.array(list(range(601)))
+            for sensor_type in ["grad", "mag"]:
+                timepoints = np.array(list(range(601)))
+                #print(f"timepoints.shape: {timepoints.shape}")
 
-                    # Plotting
-                    plt.figure(figsize=(10, 6))
-                    plt.plot(timepoints, averaged_data, label=f'Average MEG Signal over Epochs and Sensosrs. Session {session_id_num} Sensor {sensor_type} Normalization {normalization}')
-                    plt.xlabel('Timepoints)')
-                    plt.ylabel('Average MEG Value')
-                    plt.title('ERP-like Plot of MEG Data')
-                    plt.legend()
-                    #plt.show()
+                # Plotting
+                plt.figure(figsize=(10, 6))
+                for norm in self.normalizations:
+                    if norm != "min_max" and norm in session_dict["norm"] and sensor_type in session_dict["norm"][norm]["sensor_type"]:
+                        plt.plot(timepoints, session_dict["norm"][norm]["sensor_type"][sensor_type], label=f'{norm}')
+                        #print(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][norm]['sensor_type'][sensor_type].shape}")
+                    else:
+                        if norm != "min_max":
+                            print(f"Wrong key combination: {norm} and {sensor_type}")
 
-                    # Save plot
-                    plot_folder = f"data_files/visualizations/meg_data/ERP_like/subject_{self.subject_id}/session_{session_id_num}/norm_{normalization}/{sensor_type}"
-                    plot_file = f"Sensor-{sensor_type}_Normalization-{normalization}_plot.png"
-                    self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+                plt.xlabel('Timepoints)')
+                plt.ylabel('Average MEG Value')
+                plt.title(f'ERP-like Average MEG Signal over Epochs and Sensors. Session {session_id_num} Sensor {sensor_type}')
+                plt.legend()
+
+                # Save plot
+                plot_folder = f"data_files/visualizations/meg_data/ERP_like/{sensor_type}_combined-norms"
+                plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_plot.png"
+                self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
