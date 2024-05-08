@@ -14,7 +14,7 @@ os.chdir(__location__)
 
 # Choose params
 subject_ids = ["02"]
-normalizations = ["min_max", "mean_centered_ch_t", "robust_scaling", "no_norm"]
+normalizations = ["min_max", "mean_centered_ch_t", "median_centered_ch_t", "robust_scaling", "no_norm"]
 
 # Choose Calculations to be performed
 create_metadata = False
@@ -91,11 +91,14 @@ for subject_id in subject_ids:
     if visualization:
         visualization_helper = VisualizationHelper(subject_id=subject_id)
 
-        # Visualize meg data
-        #visualization_helper.visualize_meg_epochs()
+        # Visualize meg data with mne
+        #visualization_helper.visualize_meg_epochs_mne()
+
+        # Visualize meg data without mne
+        visualization_helper.visualize_meg_epochs()
 
         # Visualize prediction results
-        visualization_helper.visualize_GLM_results(only_distance=True, separate_plots=False)
+        #visualization_helper.visualize_GLM_results(only_distance=True, separate_plots=False)
 
         print("Visualization completed.")
         

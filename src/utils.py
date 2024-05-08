@@ -190,13 +190,15 @@ class BasicOperationsHelper:
             plt.close()
 
 
-    def normalize_array(self, data: np.ndarray, normalization: str):
+    def normalize_array(self, data: np.ndarray, normalization: str, session_id: str = None):
         """
         Helper function to normalize meg
         normalization options: mean centered per channel and per timepoint, min-max over complete session, robust scaling, no normalization
-                                ["min_max", "mean_centered_ch_t", "robust_scaling", "no_norm"]
+                                ["min_max", "mean_centered_ch_t", "robust_scaling", "no_norm", "median_centered_ch_t"]
         """
-        match normalization:
+        normalized_data = None
+
+        match normalization: # 0.8946406   1.01099488  0.9057941  ...  0.83131723  0.01058103
 
             case "min_max":
                 data_min = data.min()
@@ -206,13 +208,20 @@ class BasicOperationsHelper:
             case "mean_centered_ch_t":
                 means = np.mean(data, axis=0)  # Compute means for each channel and timepoint, averaged over all epochs
                 normalized_data = data - means  # Subtract the mean to center the data
+                  # divide by 10 to achieve values that are easier to work with 
+
+            case "median_centered_ch_t":
+                median = np.median(data, axis=0)  # Compute median for each channel and timepoint, averaged over all epochs
+                normalized_data = data - median  # Subtract the median to center the data
+                  # divide by 10 to achieve values that are easier to work with 
 
             case "robust_scaling":
                 medians = np.median(data, axis=0)  # Median across epochs
                 q75, q25 = np.percentile(data, [75, 25], axis=0)
                 iqr = q75 - q25
-
                 normalized_data = (data - medians) / iqr  # Subtract medians and divide by IQR
+                if normalized_data == data:
+                    raise ValueError(f"normalize_array: data the same before and after norm {normalization}")
 
             case "no_norm":
                 normalized_data = data
@@ -375,7 +384,7 @@ class MetadataHelper(BasicOperationsHelper):
 
         
 class DatasetHelper(BasicOperationsHelper):
-    def __init__(self, subject_id: str = "02", normalizations:list = ["min_max", "mean_centered_ch_t", "robust_scaling", "no_norm"]):
+    def __init__(self, subject_id: str = "02", normalizations:list = ["min_max", "mean_centered_ch_t", "median_centered_ch_t", "robust_scaling", "no_norm"]):
         super().__init__(subject_id)
 
         self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{subject_id}_crops_metadata.csv"
@@ -451,8 +460,8 @@ class DatasetHelper(BasicOperationsHelper):
                 # Create datasets based on passed normalizations
                 for normalization in self.normalizations:
                     # Normalize grad and mag independently
-                    meg_data["grad"] = self.normalize_array(np.array(meg_data['grad']), normalization=normalization)
-                    meg_data["mag"] = self.normalize_array(np.array(meg_data['mag']), normalization=normalization)
+                    meg_data["grad"] = self.normalize_array(np.array(meg_data['grad']), normalization=normalization, session_id=session_id_num)
+                    meg_data["mag"] = self.normalize_array(np.array(meg_data['mag']), normalization=normalization, session_id=session_id_num)
 
                     # Combine grad and mag data
                     combined_meg = np.concatenate([meg_data["grad"], meg_data["mag"]], axis=1) #(2874, 306, 601)
@@ -835,7 +844,7 @@ class VisualizationHelper(GLMHelper):
                 lines2, labels2 = ax2.get_legend_handles_labels()
                 ax1.legend(lines + lines2, labels + labels2, loc='upper right')
                 
-                ax1.set_title('MSE vs Distance for Predictions Averaged Across all Sessions')
+                ax1.set_title(f'MSE vs Distance for Predictions Averaged Across all Sessions with Norm {normalization}')
                 plt.grid(True)
 
                 # Save the plot to a file
@@ -902,7 +911,7 @@ class VisualizationHelper(GLMHelper):
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
             
     
-    def visualize_meg_epochs(self):
+    def visualize_meg_epochs_mne(self):
         """
         Visualizes meg data at various processing steps
         """
@@ -930,3 +939,36 @@ class VisualizationHelper(GLMHelper):
                 plot_file = f"{sensor_type}_plot.png"
                 self.save_plot_as_file(plt=epochs_plot, plot_folder=plot_folder, plot_file=plot_file, plot_type="mne")
 
+
+    def visualize_meg_epochs(self):
+        """
+        Visualizes meg data at various processing steps
+        """
+        for session_id_num in self.session_ids_num:
+            for normalization in self.normalizations:
+                # Load meg data and split into grad and mag
+                meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
+                meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
+                meg_dict = {"grad": {"meg": meg_data_complete[:,:204,:], "n_sensors": 204}, "mag": {"meg": meg_data_complete[:,204:,:], "n_sensors": 102}}
+                
+                for sensor_type in meg_dict:
+                    data = meg_dict[sensor_type]["meg"]
+
+                    # Calculate the mean over the epochs and sensors
+                    averaged_data = np.mean(data, axis=(0, 1))
+
+                    timepoints = np.array(list(range(601)))
+
+                    # Plotting
+                    plt.figure(figsize=(10, 6))
+                    plt.plot(timepoints, averaged_data, label=f'Average MEG Signal over Epochs and Sensosrs. Session {session_id_num} Sensor {sensor_type} Normalization {normalization}')
+                    plt.xlabel('Timepoints)')
+                    plt.ylabel('Average MEG Value')
+                    plt.title('ERP-like Plot of MEG Data')
+                    plt.legend()
+                    #plt.show()
+
+                    # Save plot
+                    plot_folder = f"data_files/visualizations/meg_data/ERP_like/subject_{self.subject_id}/session_{session_id_num}/norm_{normalization}/{sensor_type}"
+                    plot_file = f"Sensor-{sensor_type}_Normalization-{normalization}_plot.png"
+                    self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
