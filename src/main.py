@@ -14,7 +14,7 @@ os.chdir(__location__)
 
 # Choose params
 subject_ids = ["02"]
-normalizations = ["min_max", "mean_centered_ch_t", "median_centered_ch_t", "robust_scaling", "no_norm"]
+normalizations = ["median_centered_ch_t", "no_norm"]  # ["min_max", "mean_centered_ch_t", "median_centered_ch_t", "robust_scaling", "no_norm"]
 
 # Choose Calculations to be performed
 create_metadata = False
@@ -73,7 +73,7 @@ for subject_id in subject_ids:
 
     ##### Train GLM from features to meg #####
     if train_GLM or generate_predictions_with_GLM:
-        glm_helper = GLMHelper(subject_id=subject_id)
+        glm_helper = GLMHelper(norms=normalizations, subject_id=subject_id)
 
         # Train GLM
         if train_GLM:
@@ -89,19 +89,19 @@ for subject_id in subject_ids:
 
     ##### Visualization #####
     if visualization:
-        visualization_helper = VisualizationHelper(subject_id=subject_id)
+        visualization_helper = VisualizationHelper(norms=normalizations, subject_id=subject_id)
 
         # Visualize meg data with mne
         #visualization_helper.visualize_meg_epochs_mne()
 
         # Visualize meg data ERP style
-        #visualization_helper.visualize_meg_ERP_style()
+        #visualization_helper.visualize_meg_ERP_style(plot_norms=["mean_centered_ch_t", "no_norm"])
 
         # Visualize prediction results
-        #visualization_helper.visualize_GLM_results(only_distance=True, separate_plots=False)
+        visualization_helper.visualize_GLM_results(only_distance=True, separate_plots=False)
 
         # Visualize model perspective (values by timepoint)
-        visualization_helper.visualize_model_perspective()
+        #visualization_helper.visualize_model_perspective(plot_norms=["median_centered_ch_t"])  # , "no_norm"
 
         print("Visualization completed.")
         

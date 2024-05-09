@@ -387,7 +387,7 @@ class MetadataHelper(BasicOperationsHelper):
 
         
 class DatasetHelper(BasicOperationsHelper):
-    def __init__(self, subject_id: str = "02", normalizations:list = ["min_max", "mean_centered_ch_t", "median_centered_ch_t", "robust_scaling", "no_norm"]):
+    def __init__(self, normalizations:list, subject_id: str = "02"):
         super().__init__(subject_id)
 
         self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{subject_id}_crops_metadata.csv"
@@ -678,8 +678,9 @@ class ExtractionHelper(BasicOperationsHelper):
 
 
 class GLMHelper(DatasetHelper, ExtractionHelper):
-    def __init__(self, subject_id: str = "02"):
-        super().__init__(subject_id=subject_id)
+    def __init__(self, norms: list, subject_id: str = "02"):
+        DatasetHelper.__init__(self, normalizations=norms, subject_id=subject_id)
+        ExtractionHelper.__init__(self, subject_id=subject_id)
 
 
     def train_mapping(self):
@@ -795,8 +796,8 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
 
 class VisualizationHelper(GLMHelper):
-    def __init__(self, subject_id: str = "02"):
-        super().__init__(subject_id=subject_id)
+    def __init__(self, norms:list, subject_id: str = "02"):
+        super().__init__(norms=norms, subject_id=subject_id)
 
 
     def visualize_GLM_results(self, only_distance: bool = False, separate_plots:bool = False):
@@ -946,7 +947,7 @@ class VisualizationHelper(GLMHelper):
                 self.save_plot_as_file(plt=epochs_plot, plot_folder=plot_folder, plot_file=plot_file, plot_type="mne")
 
 
-    def visualize_meg_ERP_style(self):
+    def visualize_meg_ERP_style(self, plot_norms: list = ["mean_centered_ch_t"]):
         """
         Visualizes meg data in ERP fashion, averaged over sessions and channels.
         """
@@ -956,22 +957,21 @@ class VisualizationHelper(GLMHelper):
         for session_id_num in self.session_ids_num:
             # Use defaultdict to automatically create missing keys
             session_dict = self.recursive_defaultdict()
-            for normalization in self.normalizations:
-                if normalization != "min_max" :  # omitted because of range difference
-                    # Load meg data and split into grad and mag
-                    meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
-                    meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
-                    meg_dict = {"grad": {"meg": meg_data_complete[:,:204,:], "n_sensors": 204}, "mag": {"meg": meg_data_complete[:,204:,:], "n_sensors": 102}}
-                    
-                    for sensor_type in meg_dict:
-                        data = meg_dict[sensor_type]["meg"]
+            for normalization in plot_norms:
+                # Load meg data and split into grad and mag
+                meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
+                meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
+                meg_dict = {"grad": {"meg": meg_data_complete[:,:204,:], "n_sensors": 204}, "mag": {"meg": meg_data_complete[:,204:,:], "n_sensors": 102}}
+                
+                for sensor_type in meg_dict:
+                    data = meg_dict[sensor_type]["meg"]
 
-                        # Calculate the mean over the epochs and sensors
-                        averaged_data = np.mean(data, axis=(0, 1))
-                        #print(f"averaged_data.shape: {averaged_data.shape}")
-                        # Store data in session dict
-                        session_dict["norm"][normalization]["sensor_type"][sensor_type] = averaged_data
-                        #print(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][normalization]['sensor_type'][sensor_type].shape}")
+                    # Calculate the mean over the epochs and sensors
+                    averaged_data = np.mean(data, axis=(0, 1))
+                    #print(f"averaged_data.shape: {averaged_data.shape}")
+                    # Store data in session dict
+                    session_dict["norm"][normalization]["sensor_type"][sensor_type] = averaged_data
+                    #print(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][normalization]['sensor_type'][sensor_type].shape}")
 
             for sensor_type in ["grad", "mag"]:
                 timepoints = np.array(list(range(601)))
@@ -979,13 +979,12 @@ class VisualizationHelper(GLMHelper):
 
                 # Plotting
                 plt.figure(figsize=(10, 6))
-                for norm in self.normalizations:
-                    if norm != "min_max" and norm in session_dict["norm"] and sensor_type in session_dict["norm"][norm]["sensor_type"]:
+                for norm in plot_norms:
+                    if sensor_type in session_dict["norm"][norm]["sensor_type"]:
                         plt.plot(timepoints, session_dict["norm"][norm]["sensor_type"][sensor_type], label=f'{norm}')
                         #print(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][norm]['sensor_type'][sensor_type].shape}")
                     else:
-                        if norm != "min_max":
-                            print(f"Wrong key combination: {norm} and {sensor_type}")
+                        print(f"Wrong key combination: {norm} and {sensor_type}")
 
                 plt.xlabel('Timepoints)')
                 plt.ylabel('Average MEG Value')
@@ -997,28 +996,27 @@ class VisualizationHelper(GLMHelper):
                 plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_plot.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
-    def visualize_model_perspective(self):
+    def visualize_model_perspective(self, plot_norms: list = ["mean_centered_ch_t"]):
         """
         Visualizes meg data from the regression models perspective. This means, we plot the values over the epochs for each timepoint, averaged over the sensors.
         """
         for session_id_num in self.session_ids_num:
             # Use defaultdict to automatically create missing keys
             session_dict = self.recursive_defaultdict()
-            for normalization in self.normalizations:
-                if normalization != "min_max" and normalization != "median_centered_ch_t" and normalization != "robust_scaling":  # omitted because of range difference
-                    # Load meg data and split into grad and mag
-                    meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
-                    meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
-                    meg_dict = {"grad": {"meg": meg_data_complete[:,:204,:], "n_sensors": 204}, "mag": {"meg": meg_data_complete[:,204:,:], "n_sensors": 102}}
-                    
-                    for sensor_type in meg_dict:
-                        data = meg_dict[sensor_type]["meg"]
+            for normalization in plot_norms:
+                # Load meg data and split into grad and mag
+                meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
+                meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
+                meg_dict = {"grad": {"meg": meg_data_complete[:,:204,:], "n_sensors": 204}, "mag": {"meg": meg_data_complete[:,204:,:], "n_sensors": 102}}
+                
+                for sensor_type in meg_dict:
+                    data = meg_dict[sensor_type]["meg"]
 
-                        # Calculate the mean over the epochs and sensors
-                        averaged_data = np.mean(data, axis=1)  # (epochs, timepoints)
-                        # Store data in session dict
-                        session_dict["norm"][normalization]["sensor_type"][sensor_type] = averaged_data
-                        #print(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][normalization]['sensor_type'][sensor_type].shape}")
+                    # Calculate the mean over sensors for each timepoint and epoch
+                    averaged_data = np.mean(data, axis=1)  # (epochs, timepoints)
+                    # Store data in session dict
+                    session_dict["norm"][normalization]["sensor_type"][sensor_type] = averaged_data
+                    #print(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][normalization]['sensor_type'][sensor_type].shape}")
 
             for sensor_type in ["grad", "mag"]:
                 timepoints = np.array(list(range(601)))
@@ -1026,7 +1024,7 @@ class VisualizationHelper(GLMHelper):
 
                 # Select timepoints to plot (f.e. 10 total, every 60th)
                 plot_timepoints = []
-                timepoint_plot_interval = 600
+                timepoint_plot_interval = 60
                 for timepoint in range(1, 601, timepoint_plot_interval):
                     plot_timepoints.append(timepoint)
 
@@ -1036,32 +1034,28 @@ class VisualizationHelper(GLMHelper):
 
                 # Plotting
                 plt.figure(figsize=(10, 6))
-                for norm_idx, norm in enumerate(self.normalizations):
-                    if norm != "min_max" and norm != "median_centered_ch_t" and norm != "robust_scaling" and norm in session_dict["norm"] and sensor_type in session_dict["norm"][norm]["sensor_type"]:
-                        # Get data for timepoints
-                        meg_norm_sensor = session_dict["norm"][norm]["sensor_type"][sensor_type]
+                for norm_idx, norm in enumerate(plot_norms):
+                    # Get data for timepoints
+                    meg_norm_sensor = session_dict["norm"][norm]["sensor_type"][sensor_type]
 
-                        num_epochs_for_x_axis = num_epochs = meg_norm_sensor.shape[0]
-                        
-                        # Select epochs to plot (f.e. 200 total, every 10th or smth)
-                        plot_epochs = []
-                        epoch_plot_interval = 10
-                        for epoch in range(1, num_epochs_for_x_axis, epoch_plot_interval):
-                            plot_epochs.append(epoch)
+                    num_epochs_for_x_axis = num_epochs = meg_norm_sensor.shape[0]
+                    
+                    # Select epochs to plot (f.e. 200 total, every 10th or smth)
+                    plot_epochs = []
+                    epoch_plot_interval = 10
+                    for epoch in range(1, num_epochs_for_x_axis, epoch_plot_interval):
+                        plot_epochs.append(epoch)
 
-                        plot_epochs = np.array(plot_epochs)
-                        epochs = np.array(list(range(num_epochs)))
+                    plot_epochs = np.array(plot_epochs)
+                    epochs = np.array(list(range(num_epochs)))
 
-                        filtered_epoch_meg = meg_norm_sensor[plot_epochs, :]
+                    filtered_epoch_meg = meg_norm_sensor[plot_epochs, :]
 
-                        for timepoint in plot_timepoints:
-                            filtered_timepoint_meg = filtered_epoch_meg[:, timepoint]
-                            plt.plot(plot_epochs, filtered_timepoint_meg, linewidth=0.5, color=f'C{norm_idx}')  # Use color index linked to normalization and line index linked to timepoint
-                        # Create a custom legend element for this normalization
-                        legend_elements.append(Line2D([0], [0], color=f'C{norm_idx}', lw=4, label=norm))
-                    else:
-                        if norm != "min_max" and norm != "median_centered_ch_t" and norm != "robust_scaling":
-                            print(f"Wrong key combination: {norm} and {sensor_type}")
+                    for timepoint in plot_timepoints:
+                        filtered_timepoint_meg = filtered_epoch_meg[:, timepoint]
+                        plt.plot(plot_epochs, filtered_timepoint_meg, linewidth=0.5, color=f'C{norm_idx}')  # Use color index linked to normalization and line index linked to timepoint
+                    # Create a custom legend element for this normalization
+                    legend_elements.append(Line2D([0], [0], color=f'C{norm_idx}', lw=4, label=norm))
 
                 # Set x-axis to show full range of epochs
                 plt.xlim(1, num_epochs_for_x_axis)
