@@ -94,11 +94,14 @@ for subject_id in subject_ids:
         # Visualize meg data with mne
         #visualization_helper.visualize_meg_epochs_mne()
 
-        # Visualize meg data without mne
-        visualization_helper.visualize_meg_epochs()
+        # Visualize meg data ERP style
+        #visualization_helper.visualize_meg_ERP_style()
 
         # Visualize prediction results
         #visualization_helper.visualize_GLM_results(only_distance=True, separate_plots=False)
+
+        # Visualize model perspective (values by timepoint)
+        visualization_helper.visualize_model_perspective()
 
         print("Visualization completed.")
         

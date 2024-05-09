@@ -7,6 +7,7 @@ import numpy as np
 import imageio
 import mne
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D  # Import Line2D for custom legend
 from collections import defaultdict
 from typing import Tuple, Dict
 
@@ -202,7 +203,7 @@ class BasicOperationsHelper:
         """
         normalized_data = None
 
-        match normalization: # 0.8946406   1.01099488  0.9057941  ...  0.83131723  0.01058103
+        match normalization: 
 
             case "min_max":
                 data_min = data.min()
@@ -212,19 +213,21 @@ class BasicOperationsHelper:
             case "mean_centered_ch_t":
                 means = np.mean(data, axis=0)  # Compute means for each channel and timepoint, averaged over all epochs
                 normalized_data = data - means  # Subtract the mean to center the data
-                  # multiply by 10 to achieve values that are easier to work with 
+                normalized_data *= 100  # multiply by 10 to achieve values that are easier to work with 
+                if session_id == "1":
+                    print(f"mean_centered_ch_t normalized_data: {normalized_data}")
 
             case "median_centered_ch_t":
                 median = np.median(data, axis=0)  # Compute median for each channel and timepoint, averaged over all epochs
                 normalized_data = data - median  # Subtract the median to center the data
-                  # multiply by 10 to achieve values that are easier to work with 
+                normalized_data *= 100  # multiply by 10 to achieve values that are easier to work with 
 
             case "robust_scaling":
                 medians = np.median(data, axis=0)  # Median across epochs
                 q75, q25 = np.percentile(data, [75, 25], axis=0)
                 iqr = q75 - q25
                 normalized_data = (data - medians) / iqr  # Subtract medians and divide by IQR
-                if normalized_data == data:
+                if (normalized_data == data).all():
                     raise ValueError(f"normalize_array: data the same before and after norm {normalization}")
 
             case "no_norm":
@@ -449,6 +452,7 @@ class DatasetHelper(BasicOperationsHelper):
 
         for session_id_char in self.session_ids_char:
             session_id_num = self.map_session_letter_id_to_num(session_id_char)
+            print(f"Creating meg dataset for session {session_id_num}")
             # Load session MEG data from .h5
             meg_data_file = f"as{self.subject_id}{session_id_char}_population_codes_fixation_500hz_masked_False.h5"
             with h5py.File(os.path.join(meg_data_folder, meg_data_file), "r") as f:
@@ -457,7 +461,7 @@ class DatasetHelper(BasicOperationsHelper):
                 meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a (2874, 102, 601)
     
 
-                # Create datasets based on passed normalizations
+                # Create datasets based on specified normalizations
                 for normalization in self.normalizations:
                     # Normalize grad and mag independently
                     meg_data["grad"] = self.normalize_array(np.array(meg_data['grad']), normalization=normalization, session_id=session_id_num)
@@ -683,6 +687,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         Trains a mapping from ANN features to MEG data over all sessions.
         """
         for session_id_num in self.session_ids_num:
+            print(f"Training mapping for session {session_id_num}")
             for normalization in self.normalizations:
                 # Get ANN features for session
                 ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
@@ -715,6 +720,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         """
 
         for normalization in self.normalizations:
+            print(f"Predicting from mapping for normalization {normalization}")
             mse_session_losses = {"session_mapping": {}}
             for session_id_model in self.session_ids_num:
                 mse_session_losses["session_mapping"][session_id_model] = {"session_pred": {}}
@@ -940,9 +946,9 @@ class VisualizationHelper(GLMHelper):
                 self.save_plot_as_file(plt=epochs_plot, plot_folder=plot_folder, plot_file=plot_file, plot_type="mne")
 
 
-    def visualize_meg_epochs(self):
+    def visualize_meg_ERP_style(self):
         """
-        Visualizes meg data at various processing steps
+        Visualizes meg data in ERP fashion, averaged over sessions and channels.
         """
         # To-do: Combine data from normalizations for the same session and sensor type into one plot
         # hopefully this is at least somewhat reasonable with the different scales
@@ -951,7 +957,7 @@ class VisualizationHelper(GLMHelper):
             # Use defaultdict to automatically create missing keys
             session_dict = self.recursive_defaultdict()
             for normalization in self.normalizations:
-                if normalization != "min_max":
+                if normalization != "min_max" :  # omitted because of range difference
                     # Load meg data and split into grad and mag
                     meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
                     meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
@@ -989,4 +995,83 @@ class VisualizationHelper(GLMHelper):
                 # Save plot
                 plot_folder = f"data_files/visualizations/meg_data/ERP_like/{sensor_type}_combined-norms"
                 plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_plot.png"
+                self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+
+    def visualize_model_perspective(self):
+        """
+        Visualizes meg data from the regression models perspective. This means, we plot the values over the epochs for each timepoint, averaged over the sensors.
+        """
+        for session_id_num in self.session_ids_num:
+            # Use defaultdict to automatically create missing keys
+            session_dict = self.recursive_defaultdict()
+            for normalization in self.normalizations:
+                if normalization != "min_max" and normalization != "median_centered_ch_t" and normalization != "robust_scaling":  # omitted because of range difference
+                    # Load meg data and split into grad and mag
+                    meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
+                    meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
+                    meg_dict = {"grad": {"meg": meg_data_complete[:,:204,:], "n_sensors": 204}, "mag": {"meg": meg_data_complete[:,204:,:], "n_sensors": 102}}
+                    
+                    for sensor_type in meg_dict:
+                        data = meg_dict[sensor_type]["meg"]
+
+                        # Calculate the mean over the epochs and sensors
+                        averaged_data = np.mean(data, axis=1)  # (epochs, timepoints)
+                        # Store data in session dict
+                        session_dict["norm"][normalization]["sensor_type"][sensor_type] = averaged_data
+                        #print(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][normalization]['sensor_type'][sensor_type].shape}")
+
+            for sensor_type in ["grad", "mag"]:
+                timepoints = np.array(list(range(601)))
+                
+
+                # Select timepoints to plot (f.e. 10 total, every 60th)
+                plot_timepoints = []
+                timepoint_plot_interval = 600
+                for timepoint in range(1, 601, timepoint_plot_interval):
+                    plot_timepoints.append(timepoint)
+
+                legend_elements = []  # List to hold the custom legend elements (colors for norms)
+
+                num_epochs_for_x_axis = 0
+
+                # Plotting
+                plt.figure(figsize=(10, 6))
+                for norm_idx, norm in enumerate(self.normalizations):
+                    if norm != "min_max" and norm != "median_centered_ch_t" and norm != "robust_scaling" and norm in session_dict["norm"] and sensor_type in session_dict["norm"][norm]["sensor_type"]:
+                        # Get data for timepoints
+                        meg_norm_sensor = session_dict["norm"][norm]["sensor_type"][sensor_type]
+
+                        num_epochs_for_x_axis = num_epochs = meg_norm_sensor.shape[0]
+                        
+                        # Select epochs to plot (f.e. 200 total, every 10th or smth)
+                        plot_epochs = []
+                        epoch_plot_interval = 10
+                        for epoch in range(1, num_epochs_for_x_axis, epoch_plot_interval):
+                            plot_epochs.append(epoch)
+
+                        plot_epochs = np.array(plot_epochs)
+                        epochs = np.array(list(range(num_epochs)))
+
+                        filtered_epoch_meg = meg_norm_sensor[plot_epochs, :]
+
+                        for timepoint in plot_timepoints:
+                            filtered_timepoint_meg = filtered_epoch_meg[:, timepoint]
+                            plt.plot(plot_epochs, filtered_timepoint_meg, linewidth=0.5, color=f'C{norm_idx}')  # Use color index linked to normalization and line index linked to timepoint
+                        # Create a custom legend element for this normalization
+                        legend_elements.append(Line2D([0], [0], color=f'C{norm_idx}', lw=4, label=norm))
+                    else:
+                        if norm != "min_max" and norm != "median_centered_ch_t" and norm != "robust_scaling":
+                            print(f"Wrong key combination: {norm} and {sensor_type}")
+
+                # Set x-axis to show full range of epochs
+                plt.xlim(1, num_epochs_for_x_axis)
+
+                plt.xlabel('Epochs in Session)')
+                plt.ylabel('MEG Value averaged over Channels')
+                plt.title(f'Average MEG Signal over Channels per timepoint. Session {session_id_num} Sensor {sensor_type}')
+                plt.legend(handles=legend_elements, title="Normalization Methods")
+
+                # Save plot
+                plot_folder = f"data_files/visualizations/meg_data/regression_model_perspective/{sensor_type}"
+                plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_timepoint-overview.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
