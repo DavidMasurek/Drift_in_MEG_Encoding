@@ -58,7 +58,7 @@ class BasicOperationsHelper:
             raise ValueError(f"Function read_dict_from_json called with unrecognized type {type_of_content}.")
 
         if type_of_content == "mse_losses":
-            file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/mse_losses_dict.json"
+            file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/mse_losses_{type_of_norm}_dict.json"
         else:
             file_path = f"data_files/metadata/{type_of_content}/subject_{self.subject_id}/{type_of_content}_dict.json"
         
@@ -84,11 +84,13 @@ class BasicOperationsHelper:
 
         if type_of_content == "mse_losses":
             storage_folder = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}"
+            name_addition = f"{type_of_norm}_"
         else:
             storage_folder = f'data_files/metadata/{type_of_content}/subject_{self.subject_id}'
+            name_addition = ""
         if not os.path.exists(storage_folder):
             os.makedirs(storage_folder)
-        json_storage_file = f"{type_of_content}_dict.json"
+        json_storage_file = f"{type_of_content}_{name_addition}dict.json"
         json_storage_path = os.path.join(storage_folder, json_storage_file)
 
         with open(json_storage_path, 'w') as file:
@@ -213,14 +215,14 @@ class BasicOperationsHelper:
             case "mean_centered_ch_t":
                 means = np.mean(data, axis=0)  # Compute means for each channel and timepoint, averaged over all epochs
                 normalized_data = data - means  # Subtract the mean to center the data
-                normalized_data *= 100  # multiply by 10 to achieve values that are easier to work with 
+                #normalized_data *= 100  # multiply by 10 to achieve values that are easier to work with 
                 if session_id == "1":
                     print(f"mean_centered_ch_t normalized_data: {normalized_data}")
 
             case "median_centered_ch_t":
                 median = np.median(data, axis=0)  # Compute median for each channel and timepoint, averaged over all epochs
                 normalized_data = data - median  # Subtract the median to center the data
-                normalized_data *= 100  # multiply by 10 to achieve values that are easier to work with 
+                #normalized_data *= 100  # multiply by 10 to achieve values that are easier to work with 
 
             case "robust_scaling":
                 medians = np.median(data, axis=0)  # Median across epochs
@@ -719,6 +721,8 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         """
         Based on the trained mapping for each session, predicts MEG data over all sessions from their respective test features.
         """
+        # Debugging
+        ridge_models_session_1 = []
 
         for normalization in self.normalizations:
             print(f"Predicting from mapping for normalization {normalization}")
@@ -732,6 +736,12 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 storage_path = os.path.join(storage_folder, storage_file)
                 with open(storage_path, 'rb') as file:
                     ridge_models = pickle.load(file)
+
+                # Debugging
+                if session_id_model == 1:
+                    print(f"ridge_models: {ridge_models}")
+                    assert ridge_models not in ridge_models_session_1, "Ridge models doubled."
+                    ridge_models_session_1.append(ridge_models)
                 
                 # Initialize MultiDim GLM class with stored models
                 ridge_model = GLMHelper.MultiDimensionalRidge(alpha=0.5, models=ridge_models)
@@ -805,9 +815,12 @@ class VisualizationHelper(GLMHelper):
         Visualizes results from GLMHelper.predict_from_mapping
         """
         print(f"self.normalizations: {self.normalizations}")
+        mse_losses_norms = {}
         for normalization in self.normalizations:
             # Load loss dict
             mse_session_losses = self.read_dict_from_json(type_of_content="mse_losses", type_of_norm=normalization)
+            mse_losses_norms[normalization] = mse_session_losses
+
 
             if only_distance:
                 # Plot loss as a function of distance of predicted session from "training" session
@@ -833,6 +846,7 @@ class VisualizationHelper(GLMHelper):
                     avg_losses[distance] = losses_by_distances[distance]["loss"] / losses_by_distances[distance]["num_losses"]
                     num_datapoints[distance] = losses_by_distances[distance]["num_losses"]
 
+
                 # Plot
                 ax1.plot(avg_losses.keys(), avg_losses.values(), marker='o', linestyle='-', label=f'Average loss')
                 ax1.set_xlabel('Distance between "train" and "test" Session')
@@ -853,11 +867,14 @@ class VisualizationHelper(GLMHelper):
                 
                 ax1.set_title(f'MSE vs Distance for Predictions Averaged Across all Sessions with Norm {normalization}')
                 plt.grid(True)
+                plt.show()
 
                 # Save the plot to a file
                 plot_folder = f"data_files/visualizations/only_distance/subject_{self.subject_id}/norm_{normalization}"
                 plot_file = f"MSE_plot_over_distance_{normalization}.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+
+                print(f"avg_losses after plot {normalization}: {avg_losses}")
 
             else:
                 # Collect self-prediction MSEs for baseline and prepare average non-self-MSE calculation
@@ -916,7 +933,18 @@ class VisualizationHelper(GLMHelper):
                     plot_folder = f"data_files/visualizations/seperate_plots_{separate_plots}/subject_{self.subject_id}/norm_{normalization}"
                     plot_file = f"MSE_plot_all_sessions.png"
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
-            
+
+        mse_losses_new = {}
+        for norm, loss in mse_losses_norms.items():
+            if loss in mse_losses_new.values():
+                # get key
+                for key, value in mse_losses_new.items():
+                    if value == loss:
+                        norm_new = key
+                print(f"Same loss for norm {norm} and norm {norm_new}")  # raise ValueError()
+
+            mse_losses_new[norm] = loss
+
     
     def visualize_meg_epochs_mne(self):
         """
@@ -1069,3 +1097,17 @@ class VisualizationHelper(GLMHelper):
                 plot_folder = f"data_files/visualizations/meg_data/regression_model_perspective/{sensor_type}"
                 plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_timepoint-overview.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+
+
+
+class DebuggingHelper(VisualizationHelper):
+    def __init__(self, norms:list, subject_id: str = "02"):
+        super().__init__(norms, subject_id)
+
+
+    def inspect_meg_data():
+        pass
+
+
+    def inspect_ridge_models():
+        pass
