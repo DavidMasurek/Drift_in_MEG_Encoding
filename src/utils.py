@@ -212,6 +212,24 @@ class BasicOperationsHelper:
                 data_max = data.max()
                 normalized_data = (data - data_min) / (data_max - data_min)
 
+            case "robust_scaling":
+                medians = np.median(data, axis=None)  # Median across epochs
+                q75, q25 = np.percentile(data, [75, 25], axis=None)
+                iqr = q75 - q25
+                normalized_data = (data - medians) / iqr  # Subtract medians and divide by IQR
+                if (normalized_data == data).all():
+                    raise ValueError(f"normalize_array: data the same before and after norm {normalization}")
+
+            case "z_score":
+                means = np.mean(data, axis=None)
+                std_devs = np.std(data, axis=None)
+
+                # Use an epsilon to prevent division by zero
+                epsilon = 1e-100
+                std_devs += epsilon
+    
+                normalized_data = (data - means) / std_devs
+
             case "mean_centered_ch_t":
                 means = np.mean(data, axis=0)  # Compute means for each channel and timepoint, averaged over all epochs
                 normalized_data = data - means  # Subtract the mean to center the data
@@ -224,13 +242,28 @@ class BasicOperationsHelper:
                 normalized_data = data - median  # Subtract the median to center the data
                 #normalized_data *= 100  # multiply by 10 to achieve values that are easier to work with 
 
-            case "robust_scaling":
+            case "robust_scaling_ch_t":
                 medians = np.median(data, axis=0)  # Median across epochs
                 q75, q25 = np.percentile(data, [75, 25], axis=0)
                 iqr = q75 - q25
                 normalized_data = (data - medians) / iqr  # Subtract medians and divide by IQR
                 if (normalized_data == data).all():
                     raise ValueError(f"normalize_array: data the same before and after norm {normalization}")
+
+            case "min_max_ch_t":
+                data_min = data.min(axis=0)
+                data_max = data.max(axis=0)
+                normalized_data = (data - data_min) / (data_max - data_min)
+
+            case "z_score_ch_t":
+                means = np.mean(data, axis=0)
+                std_devs = np.std(data, axis=0)
+
+                # Use an epsilon to prevent division by zero
+                epsilon = 1e-100
+                std_devs += epsilon
+
+                normalized_data = (data - means) / std_devs
 
             case "no_norm":
                 normalized_data = data
