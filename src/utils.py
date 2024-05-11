@@ -498,12 +498,13 @@ class DatasetHelper(BasicOperationsHelper):
 
                 # Create datasets based on specified normalizations
                 for normalization in self.normalizations:
+                    meg_data_norm = {}
                     # Normalize grad and mag independently
-                    meg_data["grad"] = self.normalize_array(np.array(meg_data['grad']), normalization=normalization, session_id=session_id_num)
-                    meg_data["mag"] = self.normalize_array(np.array(meg_data['mag']), normalization=normalization, session_id=session_id_num)
+                    meg_data_norm["grad"] = self.normalize_array(np.array(meg_data['grad']), normalization=normalization, session_id=session_id_num)
+                    meg_data_norm["mag"] = self.normalize_array(np.array(meg_data['mag']), normalization=normalization, session_id=session_id_num)
 
                     # Combine grad and mag data
-                    combined_meg = np.concatenate([meg_data["grad"], meg_data["mag"]], axis=1) #(2874, 306, 601)
+                    combined_meg = np.concatenate([meg_data_norm["grad"], meg_data_norm["mag"]], axis=1) #(2874, 306, 601)
         
                     # Split meg data 
                     # Get train/test split based on trials (based on scenes)
