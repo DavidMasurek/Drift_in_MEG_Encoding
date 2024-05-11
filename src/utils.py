@@ -234,8 +234,8 @@ class BasicOperationsHelper:
                 means = np.mean(data, axis=0)  # Compute means for each channel and timepoint, averaged over all epochs
                 normalized_data = data - means  # Subtract the mean to center the data
                 #normalized_data *= 100  # multiply by 10 to achieve values that are easier to work with 
-                if session_id == "1":
-                    print(f"mean_centered_ch_t normalized_data: {normalized_data}")
+                #if session_id == "1":
+                #    print(f"mean_centered_ch_t normalized_data: {normalized_data}")
 
             case "median_centered_ch_t":
                 median = np.median(data, axis=0)  # Compute median for each channel and timepoint, averaged over all epochs
@@ -247,8 +247,6 @@ class BasicOperationsHelper:
                 q75, q25 = np.percentile(data, [75, 25], axis=0)
                 iqr = q75 - q25
                 normalized_data = (data - medians) / iqr  # Subtract medians and divide by IQR
-                if (normalized_data == data).all():
-                    raise ValueError(f"normalize_array: data the same before and after norm {normalization}")
 
             case "min_max_ch_t":
                 data_min = data.min(axis=0)
@@ -271,6 +269,8 @@ class BasicOperationsHelper:
             case _:
                 raise ValueError(f"normalize_array called with unrecognized type {normalization}")
 
+        if (normalized_data == data).all() and normalization != "no_norm":
+            print(f"[WARNING][normalize_array]: data the same before and after norm {normalization}")
 
         return normalized_data
 
@@ -773,7 +773,6 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                 # Debugging
                 if session_id_model == 1:
-                    print(f"ridge_models: {ridge_models}")
                     assert ridge_models not in ridge_models_session_1, "Ridge models doubled."
                     ridge_models_session_1.append(ridge_models)
                 
@@ -1058,7 +1057,7 @@ class VisualizationHelper(GLMHelper):
                 plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_plot.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
-    def visualize_model_perspective(self, plot_norms: list = ["mean_centered_ch_t"]):
+    def visualize_model_perspective(self, plot_norms: list = ["mean_centered_ch_t"], seperate_plots=False):
         """
         Visualizes meg data from the regression models perspective. This means, we plot the values over the epochs for each timepoint, averaged over the sensors.
         """
@@ -1095,8 +1094,11 @@ class VisualizationHelper(GLMHelper):
                 num_epochs_for_x_axis = 0
 
                 # Plotting
-                plt.figure(figsize=(10, 6))
+                if not seperate_plots:
+                    plt.figure(figsize=(10, 6))
                 for norm_idx, norm in enumerate(plot_norms):
+                    if seperate_plots:
+                        plt.figure(figsize=(10, 6))
                     # Get data for timepoints
                     meg_norm_sensor = session_dict["norm"][norm]["sensor_type"][sensor_type]
 
@@ -1119,18 +1121,34 @@ class VisualizationHelper(GLMHelper):
                     # Create a custom legend element for this normalization
                     legend_elements.append(Line2D([0], [0], color=f'C{norm_idx}', lw=4, label=norm))
 
-                # Set x-axis to show full range of epochs
-                plt.xlim(1, num_epochs_for_x_axis)
+                    if seperate_plots:
+                        # Set x-axis to show full range of epochs
+                        plt.xlim(1, num_epochs_for_x_axis)
 
-                plt.xlabel('Epochs in Session)')
-                plt.ylabel('MEG Value averaged over Channels')
-                plt.title(f'Average MEG Signal over Channels per timepoint. Session {session_id_num} Sensor {sensor_type}')
-                plt.legend(handles=legend_elements, title="Normalization Methods")
+                        plt.xlabel('Epochs in Session)')
+                        plt.ylabel('MEG Value averaged over Channels')
+                        plt.title(f'Average MEG Signal over Channels per timepoint. Session {session_id_num} Sensor {sensor_type} {norm}')
+                        plt.legend(handles=legend_elements, title="Normalization Methods")
 
-                # Save plot
-                plot_folder = f"data_files/visualizations/meg_data/regression_model_perspective/{sensor_type}"
-                plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_timepoint-overview.png"
-                self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+                        # Save plot
+                        plot_folder = f"data_files/visualizations/meg_data/regression_model_perspective/{norm}/{sensor_type}"
+                        plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_timepoint-overview.png"
+                        self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+
+
+                if not seperate_plots:
+                    # Set x-axis to show full range of epochs
+                    plt.xlim(1, num_epochs_for_x_axis)
+
+                    plt.xlabel('Epochs in Session)')
+                    plt.ylabel('MEG Value averaged over Channels')
+                    plt.title(f'Average MEG Signal over Channels per timepoint. Session {session_id_num} Sensor {sensor_type}')
+                    plt.legend(handles=legend_elements, title="Normalization Methods")
+
+                    # Save plot
+                    plot_folder = f"data_files/visualizations/meg_data/regression_model_perspective/{sensor_type}"
+                    plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_timepoint-overview.png"
+                    self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
 
 
