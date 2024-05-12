@@ -237,14 +237,12 @@ class BasicOperationsHelper:
             case "mean_centered_ch_t":
                 means = np.mean(data, axis=0)  # Compute means for each channel and timepoint, averaged over all epochs
                 normalized_data = data - means  # Subtract the mean to center the data
-                #normalized_data *= 100  # multiply by 10 to achieve values that are easier to work with 
                 #if session_id == "1":
                 #    print(f"mean_centered_ch_t normalized_data: {normalized_data}")
 
             case "median_centered_ch_t":
                 median = np.median(data, axis=0)  # Compute median for each channel and timepoint, averaged over all epochs
                 normalized_data = data - median  # Subtract the median to center the data
-                #normalized_data *= 100  # multiply by 10 to achieve values that are easier to work with 
 
             case "robust_scaling_ch_t":
                 medians = np.median(data, axis=0)  # Median across epochs
