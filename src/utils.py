@@ -50,15 +50,15 @@ class BasicOperationsHelper:
     def read_dict_from_json(self, type_of_content: str, type_of_norm: str = None) -> dict:
         """
         Helper function to read json files into dicts.
-
-        Allowed Parameters: ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses"]
         """
-        valid_types = ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses"]
+        valid_types = ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses", "mse_losses_timepoint"]
         if type_of_content not in valid_types:
             raise ValueError(f"Function read_dict_from_json called with unrecognized type {type_of_content}.")
 
         if type_of_content == "mse_losses":
             file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/mse_losses_{type_of_norm}_dict.json"
+        elif type_of_content == "mse_losses_timepoint":
+            file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/timepoints/norm_{type_of_norm}/mse_losses_timepoint_{type_of_norm}_dict.json"
         else:
             file_path = f"data_files/metadata/{type_of_content}/subject_{self.subject_id}/{type_of_content}_dict.json"
         
@@ -75,22 +75,26 @@ class BasicOperationsHelper:
     def save_dict_as_json(self, type_of_content: str, dict_to_store: dict, type_of_norm: str = None) -> None:
         """
         Helper function to store dicts as json files.
-
-        Allowed Parameters: ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses"]
         """
-        valid_types = ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses"]
+        valid_types = ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses", "mse_losses_timepoint"]
         if type_of_content not in valid_types:
             raise ValueError(f"Function save_dict_as_json called with unrecognized type {type_of_content}.")
 
-        if type_of_content == "mse_losses":
-            storage_folder = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}"
-            name_addition = f"{type_of_norm}_"
+        if type_of_content == "mse_losses" or type_of_content == "mse_losses_timepoint":
+            if type_of_content == "mse_losses_timepoint":
+                timepoint_folder = "timepoints/"
+                timepoint_name = "_timepoints"
+            else:
+                timepoint_folder = ""
+                timepoint_name = ""
+            storage_folder = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/{timepoint_folder}norm_{type_of_norm}"
+            name_addition = f"{type_of_norm}"
         else:
             storage_folder = f'data_files/metadata/{type_of_content}/subject_{self.subject_id}'
             name_addition = ""
         if not os.path.exists(storage_folder):
             os.makedirs(storage_folder)
-        json_storage_file = f"{type_of_content}_{name_addition}dict.json"
+        json_storage_file = f"{type_of_content}_{name_addition}_dict.json"
         json_storage_path = os.path.join(storage_folder, json_storage_file)
 
         with open(json_storage_path, 'w') as file:
@@ -751,7 +755,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     pickle.dump(ridge_model.models, file)
 
         
-    def predict_from_mapping(self):
+    def predict_from_mapping(self, store_timepoint_based_losses=False):
         """
         Based on the trained mapping for each session, predicts MEG data over all sessions from their respective test features.
         """
@@ -789,14 +793,28 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     # Generate predictions
                     predictions = ridge_model.predict(X_test)
 
-                    # Calculate the mean squared error across all flattened features and timepoints
-                    mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
+                    if store_timepoint_based_losses:
+                        mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = {"timepoint":{}}
+                        # Calculate loss seperately for each timepoint/model
+                        n_timepoints = predictions.shape[2]
+                        for t in range(n_timepoints):
+                            mse_timepoint = mean_squared_error(Y_test[:,:,t].reshape(-1), predictions[:,:,t].reshape(-1))
+                            # Save loss
+                            mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = mse_timepoint
+                    else:
+                        # Calculate the mean squared error across all flattened features and timepoints
+                        mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
 
-                    # Save loss
-                    mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = mse
+                        # Save loss
+                        mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = mse
 
             # Store loss dict
-            self.save_dict_as_json(type_of_content="mse_losses", dict_to_store=mse_session_losses, type_of_norm=normalization)
+            if store_timepoint_based_losses:
+                type_of_content = "mse_losses_timepoint"
+            else:
+                type_of_content = "mse_losses"
+
+            self.save_dict_as_json(type_of_content=type_of_content, dict_to_store=mse_session_losses, type_of_norm=normalization)
 
 
     class MultiDimensionalRidge:
@@ -843,15 +861,19 @@ class VisualizationHelper(GLMHelper):
         super().__init__(norms=norms, subject_id=subject_id)
 
 
-    def visualize_GLM_results(self, only_distance: bool = False, separate_plots:bool = False):
+    def visualize_GLM_results(self, by_timepoints:bool = False, only_distance:bool = False, separate_plots:bool = False):
         """
         Visualizes results from GLMHelper.predict_from_mapping
         """
         print(f"self.normalizations: {self.normalizations}")
+        if not by_timepoints:
+            type_of_content = "mse_losses"
+        else:
+            type_of_content = "mse_losses_timepoint"
         mse_losses_norms = {}
         for normalization in self.normalizations:
             # Load loss dict
-            mse_session_losses = self.read_dict_from_json(type_of_content="mse_losses", type_of_norm=normalization)
+            mse_session_losses = self.read_dict_from_json(type_of_content=type_of_content, type_of_norm=normalization)
             mse_losses_norms[normalization] = mse_session_losses
 
 
@@ -909,7 +931,7 @@ class VisualizationHelper(GLMHelper):
 
                 print(f"avg_losses after plot {normalization}: {avg_losses}")
 
-            else:
+            elif not by_timepoints:
                 # Collect self-prediction MSEs for baseline and prepare average non-self-MSE calculation
                 self_prediction_mses = {}
                 average_prediction_mses = {}
@@ -966,17 +988,53 @@ class VisualizationHelper(GLMHelper):
                     plot_folder = f"data_files/visualizations/seperate_plots_{separate_plots}/subject_{self.subject_id}/norm_{normalization}"
                     plot_file = f"MSE_plot_all_sessions.png"
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+            elif by_timepoints:
+                # Collect losses for timepoint models on predictions on the own session
+                losses_by_session_by_timepoint = {"session": {}}
+                for session_id in mse_session_losses['session_mapping']:
+                    losses_by_session_by_timepoint["session"][session_id] = {"timepoint":{}}
+                    for timepoint in mse_session_losses['session_mapping'][session_id]["session_pred"][session_id]["timepoint"]:
+                        mse_timepoint = mse_session_losses['session_mapping'][session_id]["session_pred"][session_id]["timepoint"][timepoint]
+                        losses_by_session_by_timepoint["session"][session_id]["timepoint"][timepoint] = mse_timepoint
 
-        mse_losses_new = {}
-        for norm, loss in mse_losses_norms.items():
-            if loss in mse_losses_new.values():
-                # get key
-                for key, value in mse_losses_new.items():
-                    if value == loss:
-                        norm_new = key
-                print(f"Same loss for norm {norm} and norm {norm_new}")  # raise ValueError()
+                # Plot results averaged over all sessions
+                num_timepoints = len([timepoint for timepoint in losses_by_session_by_timepoint["session"]["1"]["timepoint"]])
+                timepoint_average_losses = {}
+                for timepoint in range(num_timepoints):
+                    # Calculate average over all within session predictions for this timepoint
+                    losses = []
+                    for session in losses_by_session_by_timepoint["session"]:
+                        timepoint_session_loss = losses_by_session_by_timepoint["session"][session]["timepoint"][str(timepoint)]
+                        losses.append(timepoint_session_loss)
+                    avg_loss = np.sum(losses) / len(losses)
+                    timepoint_average_losses[timepoint] = avg_loss
+                timepoint_avg_loss_list = [timepoint_average_losses[timepoint] for timepoint in timepoint_average_losses]
 
-            mse_losses_new[norm] = loss
+                plt.figure(figsize=(10, 6))
+                plt.bar(list(range(num_timepoints)), timepoint_avg_loss_list, color='blue')
+                plt.title('MSE Loss per Timepoint Model. Averaged across all Sessions, predicting themselves.')
+                plt.xlabel('Timepoints')
+                plt.ylabel('Loss')
+                plt.grid(True)
+
+                # Save the plot to a file
+                plot_folder = f"data_files/visualizations/timepoint_model_comparison/subject_{self.subject_id}/norm_{normalization}"
+                plot_file = f"MSE_timepoint_comparison_{normalization}.png"
+                self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+            else:
+                raise ValueError("[ERROR][visualize_GLM_results] Function called with invalid parameter configuration.")
+
+        if not by_timepoints:
+            mse_losses_new = {}
+            for norm, loss in mse_losses_norms.items():
+                if loss in mse_losses_new.values():
+                    # get key
+                    for key, value in mse_losses_new.items():
+                        if value == loss:
+                            norm_new = key
+                    print(f"Same loss for norm {norm} and norm {norm_new}")  # raise ValueError()
+
+                mse_losses_new[norm] = loss
 
     
     def visualize_meg_epochs_mne(self):
@@ -1085,7 +1143,7 @@ class VisualizationHelper(GLMHelper):
 
                 # Select timepoints to plot (f.e. 10 total, every 60th)
                 plot_timepoints = []
-                timepoint_plot_interval = 60
+                timepoint_plot_interval = 180
                 for timepoint in range(1, 601, timepoint_plot_interval):
                     plot_timepoints.append(timepoint)
 
