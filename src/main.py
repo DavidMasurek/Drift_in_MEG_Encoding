@@ -17,13 +17,13 @@ subject_ids = ["02"]
 normalizations = ["mean_centered_ch_t", "robust_scaling_ch_t", "no_norm"] # ["min_max", "mean_centered_ch_t", "median_centered_ch_t", "robust_scaling", "no_norm"]
 
 # Choose Calculations to be performed
-create_metadata = False
+create_metadata = True
 create_non_meg_dataset = False
 create_meg_dataset = False
 extract_features = False
 train_GLM = False
 generate_predictions_with_GLM = False
-visualization = True
+visualization = False
 
 for subject_id in subject_ids:
     print(f"Processing subject {subject_id}")
@@ -37,7 +37,7 @@ for subject_id in subject_ids:
         # Read meg metadata over all sessions
         metadata_helper.create_meg_metadata_dict()
         # Combine meg and crop metadata over all sessions
-        metadata_helper.create_combined_metadata_dict()
+        metadata_helper.create_combined_metadata_dict(investigate_missing_data=False)
 
         print("Metadata created.")
 
@@ -92,16 +92,16 @@ for subject_id in subject_ids:
         visualization_helper = VisualizationHelper(norms=normalizations, subject_id=subject_id)
 
         # Visualize meg data with mne
-        #visualization_helper.visualize_meg_epochs_mne()
+        visualization_helper.visualize_meg_epochs_mne()
 
         # Visualize meg data ERP style
-        #visualization_helper.visualize_meg_ERP_style(plot_norms=["mean_centered_ch_t", "no_norm"])
+        visualization_helper.visualize_meg_ERP_style(plot_norms=["mean_centered_ch_t", "no_norm"])
 
         # Visualize prediction results
         visualization_helper.visualize_GLM_results(by_timepoints=True, only_distance=False, separate_plots=False)
 
         # Visualize model perspective (values by timepoint)
-        #visualization_helper.visualize_model_perspective(plot_norms=["mean_centered_ch_t", "no_norm"], seperate_plots=False)  # , "no_norm"
+        visualization_helper.visualize_model_perspective(plot_norms=["mean_centered_ch_t", "no_norm"], seperate_plots=False)  # , "no_norm"
 
         print("Visualization completed.")
         

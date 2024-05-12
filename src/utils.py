@@ -288,7 +288,7 @@ class MetadataHelper(BasicOperationsHelper):
         self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{subject_id}/sensor/filter_0.2_200"
 
 
-    def create_combined_metadata_dict(self) -> None:
+    def create_combined_metadata_dict(self, investigate_missing_data=False) -> None:
         """
         Creates the combined metadata dict with timepoints that can be found in both meg and crop metadata for the respective session and trial.
         """
@@ -304,6 +304,7 @@ class MetadataHelper(BasicOperationsHelper):
         combined_metadata_dict = self.recursive_defaultdict()
 
         meg_index = 0
+        meg_missing_trials = []
         for session_id in meg_metadata["sessions"]:
             for trial_id in meg_metadata["sessions"][session_id]["trials"]:
                 for timepoint_id in meg_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
@@ -315,9 +316,27 @@ class MetadataHelper(BasicOperationsHelper):
                         combined_metadata_dict["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["sceneID"] = sceneID
                         combined_metadata_dict["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["meg_index"] = meg_index
                     except:
+                        if trial_id not in meg_missing_trials and investigate_missing_data:
+                            print(f"[Session {session_id}][Trial {trial_id}]: Within this Trial, data for at least one timepoint exists only in the meg-, and not the crop metadata.")
+                            meg_missing_trials.append(trial_id)
                         pass
                     meg_index += 1
-        
+
+        if investigate_missing_data:
+            crop_missing_trials = []
+            # Do the same from the perspective of the crop_metadata to find datapoints that only exist in the crop-, but not the meg-metadata
+            for session_id in crop_metadata["sessions"]:
+                for trial_id in crop_metadata["sessions"][session_id]["trials"]:
+                    for timepoint_id in crop_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
+                        # For each timepoint in the crop metadata: Check if this timepoint is in the meg metadata and if so store it
+                        try:
+                            crop_identifier = meg_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["crop_identifier"]
+                        except:
+                            if trial_id not in crop_missing_trials:
+                                print(f"[Session {session_id}][Trial {trial_id}]: Within this Trial, data for at least one timepoint exists only in the crop-, and not the meg metadata.")
+                                crop_missing_trials.append(trial_id)
+                            pass
+            
         # Export dict to json 
         self.save_dict_as_json(type_of_content="combined_metadata", dict_to_store=combined_metadata_dict)
 
@@ -1014,7 +1033,7 @@ class VisualizationHelper(GLMHelper):
                 plt.bar(list(range(num_timepoints)), timepoint_avg_loss_list, color='blue')
                 plt.title('MSE Loss per Timepoint Model. Averaged across all Sessions, predicting themselves.')
                 plt.xlabel('Timepoints')
-                plt.ylabel('Loss')
+                plt.ylabel('MSE Loss')
                 plt.grid(True)
 
                 # Save the plot to a file
