@@ -16,23 +16,18 @@ os.chdir(__location__)
 subject_ids = ["02"]
 normalizations = ["no_norm"] # ["min_max", "mean_centered_ch_t", "median_centered_ch_t", "robust_scaling", "no_norm"]
 lock_event = "saccade"
+meg_channels = [1731, 1921, 2111, 2341, 2511]
 timepoint_min = 50
 timepoint_max = 250
 
 # Choose Calculations to be performed
 create_metadata = False
-create_non_meg_dataset = False
-create_meg_dataset = False
-extract_features = False
-train_GLM = False
-generate_predictions_with_GLM = False
-visualization = False
-
-# Debugging
-ops_helper = BasicOperationsHelper()
-fif_info = ops_helper.inspect_fif_file()
-#print(f"fif_info: {fif_info}")
-
+create_non_meg_dataset = True
+create_meg_dataset = True
+extract_features = True
+train_GLM = True
+generate_predictions_with_GLM = True
+visualization = True
 
 for subject_id in subject_ids:
     print(f"Processing subject {subject_id}")
@@ -52,7 +47,7 @@ for subject_id in subject_ids:
 
     ##### Create crop and meg dataset based on metadata #####
     if create_non_meg_dataset or create_meg_dataset:
-        dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations, lock_event=lock_event)
+        dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations, chosen_channels=meg_channels, lock_event=lock_event)
 
         if create_non_meg_dataset:
             # Create train/test split based on sceneIDs (based on trial_ids)
@@ -82,7 +77,7 @@ for subject_id in subject_ids:
 
     ##### Train GLM from features to meg #####
     if train_GLM or generate_predictions_with_GLM:
-        glm_helper = GLMHelper(norms=normalizations, subject_id=subject_id)
+        glm_helper = GLMHelper(norms=normalizations, subject_id=subject_id, chosen_channels=meg_channels)
 
         # Train GLM
         if train_GLM:

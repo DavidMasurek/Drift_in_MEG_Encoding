@@ -27,23 +27,28 @@ class BasicOperationsHelper:
         self.session_ids_num = [str(session_id) for session_id in range(1,11)]
 
 
-    def inspect_fif_file(self, path='/share/klab/datasets/avs/population_codes/as02/sensor/filter_0.2_200/saccade_evoked_02_01_.fif'):
-        try:
-            evoked = mne.read_evokeds(path)
-            print("This is an Evoked file.")
-        except Exception as e:
-            print("Not an Evoked file:", e)
-    
-        print(f"evoked: {evoked}")
-        num_evoked = len(evoked)
-        print(f"num_evoked: {num_evoked}")
-        print(f"evoked[0].ch_names: {evoked[0].ch_names}")
-        #epoch_data = mne.io.read_epochs(path)
-        #print(f"raw.info: {raw.info}")
-        #print(f"raw.ch_names: {raw.ch_names}")
+    def get_relevant_meg_channels(self, chosen_channels, subject_id, session_id, lock_event="saccade"):
+        #{'grad': {}, 'mag': {194: 'MEG1731', 215: 'MEG1921', 236: 'MEG2111', 269: 'MEG2341', 284: 'MEG2511'}}
+        session_id_padded = "0" + session_id if session_id != 10 else session_id
+        fif_file_path = f'/share/klab/datasets/avs/population_codes/as{subject_id}/sensor/filter_0.2_200/{lock_event}_evoked_{subject_id}_{session_id_padded}_.fif'
+        
+        processing_channels_indices = {"grad": {}, "mag": {}}
+        evoked = mne.read_evokeds(path)[0]
 
-        fif_info = mne.io.show_fiff(path) #read_raw_fif
-        return fif_info
+        # Get indices of Grad and Mag sensors
+        grad_indices = mne.pick_types(evoked.info, meg='grad')
+        mag_indices = mne.pick_types(evoked.info, meg='mag')
+
+        for sensor_type in processing_channels_indices: # grad, mag
+            channel_indices = mne.pick_types(evoked.info, meg=sensor_type)
+            for channel_idx in channel_indices:
+                ch_name = evoked.ch_names[channel_idx]
+                if int(ch_name[3:]) in chosen_channels:
+                    processing_channels_indices[sensor_type][channel_idx] = ch_name
+
+        print(processing_channels_indices)
+
+        return 
 
 
     def recursive_defaultdict(self) -> dict:
@@ -463,10 +468,11 @@ class MetadataHelper(BasicOperationsHelper):
 
         
 class DatasetHelper(MetadataHelper):
-    def __init__(self, normalizations:list, subject_id: str = "02", lock_event: str = "saccade", timepoint_min: int = 50, timepoint_max:int = 250):
+    def __init__(self, normalizations:list, subject_id: str = "02", chosen_channels:list = [1731, 1921, 2111, 2341, 2511], lock_event: str = "saccade", timepoint_min: int = 50, timepoint_max:int = 250):
         super().__init__(subject_id=subject_id, lock_event=lock_event)
 
         self.normalizations = normalizations
+        self.chosen_channels = chosen_channels
         self.timepoint_min = timepoint_min
         self.timepoint_max = timepoint_max
 
@@ -535,6 +541,12 @@ class DatasetHelper(MetadataHelper):
                 meg_data = {}
                 meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a saccade: (2945, 204, 401), fixation: (2874, 204, 601) 
                 meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a saccade: (2945, 102, 401), fixation: (2874, 102, 601)
+
+                # Select relevant channels
+                channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels, subject_id=self.subject_id, session_id=session_id_num, lock_event="saccade")
+
+                meg_data["grad"] = meg_data["grad"][:, channel_indices['grad'].keys(),:]
+                meg_data["mag"] = meg_data["mag"][:, channel_indices['mag'].keys(),:]
 
                 # Cut relevant timepoints. Range is -0.5 – 0.3 s. We want timepoints 50-250
                 if self.timepoint_min is not None and self.timepoint_max is not None:
@@ -765,8 +777,8 @@ class ExtractionHelper(BasicOperationsHelper):
 
 
 class GLMHelper(DatasetHelper, ExtractionHelper):
-    def __init__(self, norms: list, subject_id: str = "02"):
-        DatasetHelper.__init__(self, normalizations=norms, subject_id=subject_id)
+    def __init__(self, norms: list, subject_id: str = "02", chosen_channels: list = [1731, 1921, 2111, 2341, 2511]):
+        DatasetHelper.__init__(self, normalizations=norms, subject_id=subject_id, chosen_channels=chosen_channels)
         ExtractionHelper.__init__(self, subject_id=subject_id)
 
 
