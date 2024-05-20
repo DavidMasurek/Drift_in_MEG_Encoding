@@ -27,6 +27,25 @@ class BasicOperationsHelper:
         self.session_ids_num = [str(session_id) for session_id in range(1,11)]
 
 
+    def inspect_fif_file(self, path='/share/klab/datasets/avs/population_codes/as02/sensor/filter_0.2_200/saccade_evoked_02_01_.fif'):
+        try:
+            evoked = mne.read_evokeds(path)
+            print("This is an Evoked file.")
+        except Exception as e:
+            print("Not an Evoked file:", e)
+    
+        print(f"evoked: {evoked}")
+        num_evoked = len(evoked)
+        print(f"num_evoked: {num_evoked}")
+        print(f"evoked[0].ch_names: {evoked[0].ch_names}")
+        #epoch_data = mne.io.read_epochs(path)
+        #print(f"raw.info: {raw.info}")
+        #print(f"raw.ch_names: {raw.ch_names}")
+
+        fif_info = mne.io.show_fiff(path) #read_raw_fif
+        return fif_info
+
+
     def recursive_defaultdict(self) -> dict:
         return defaultdict(self.recursive_defaultdict)
 
@@ -444,10 +463,12 @@ class MetadataHelper(BasicOperationsHelper):
 
         
 class DatasetHelper(MetadataHelper):
-    def __init__(self, normalizations:list, subject_id: str = "02", lock_event: str = "saccade"):
+    def __init__(self, normalizations:list, subject_id: str = "02", lock_event: str = "saccade", timepoint_min: int = 50, timepoint_max:int = 250):
         super().__init__(subject_id=subject_id, lock_event=lock_event)
 
         self.normalizations = normalizations
+        self.timepoint_min = timepoint_min
+        self.timepoint_max = timepoint_max
 
     def create_crop_dataset(self) -> None:
         """
@@ -512,11 +533,22 @@ class DatasetHelper(MetadataHelper):
             meg_data_file = f"as{self.subject_id}{session_id_char}_population_codes_{self.lock_event}_500hz_masked_False.h5"
             with h5py.File(os.path.join(meg_data_folder, meg_data_file), "r") as f:
                 meg_data = {}
-                meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a (2874, 204, 601)
-                meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a (2874, 102, 601)
+                meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a saccade: (2945, 204, 401), fixation: (2874, 204, 601) 
+                meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a saccade: (2945, 102, 401), fixation: (2874, 102, 601)
+
+                # Cut relevant timepoints. Range is -0.5 – 0.3 s. We want timepoints 50-250
+                if self.timepoint_min is not None and self.timepoint_max is not None:
+                    meg_data["grad"] = meg_data["grad"][:,:,self.timepoint_min:self.timepoint_max+1]
+                    meg_data["mag"] = meg_data["mag"][:,:,self.timepoint_min:self.timepoint_max+1]
+                
 
                 # Create datasets based on specified normalizations
                 for normalization in self.normalizations:
+                    # Debugging
+                    if session_id_num == "1" and normalization == "no_norm":
+                        print(f"meg_data['grad'].shape: {meg_data['grad'].shape}")
+                        print(f"meg_data['mag'].shape: {meg_data['mag'].shape}")
+
                     meg_data_norm = {}
                     # Normalize grad and mag independently
                     meg_data_norm["grad"] = self.normalize_array(np.array(meg_data['grad']), normalization=normalization, session_id=session_id_num)
@@ -1087,7 +1119,6 @@ class VisualizationHelper(GLMHelper):
         """
         # To-do: Combine data from normalizations for the same session and sensor type into one plot
         # hopefully this is at least somewhat reasonable with the different scales
-
         for session_id_num in self.session_ids_num:
             # Use defaultdict to automatically create missing keys
             session_dict = self.recursive_defaultdict()
@@ -1096,7 +1127,8 @@ class VisualizationHelper(GLMHelper):
                 meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
                 meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
                 meg_dict = {"grad": {"meg": meg_data_complete[:,:204,:], "n_sensors": 204}, "mag": {"meg": meg_data_complete[:,204:,:], "n_sensors": 102}}
-                
+                # Store number of timepoints in current processing for plots
+
                 for sensor_type in meg_dict:
                     data = meg_dict[sensor_type]["meg"]
 
@@ -1108,8 +1140,8 @@ class VisualizationHelper(GLMHelper):
                     #print(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][normalization]['sensor_type'][sensor_type].shape}")
 
             for sensor_type in ["grad", "mag"]:
-                timepoints = np.array(list(range(601)))
-                #print(f"timepoints.shape: {timepoints.shape}")
+                timepoints = np.array(list(range(session_dict["norm"][norm]["sensor_type"][sensor_type].shape[0])))
+                raise ValueError(f"timepoints is {timepoints}, shape is {session_dict['norm'][norm]['sensor_type'][sensor_type].shape} debug this if necessary, else delete this Error raise.")
 
                 # Plotting
                 plt.figure(figsize=(10, 6))
@@ -1153,13 +1185,16 @@ class VisualizationHelper(GLMHelper):
                     #print(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][normalization]['sensor_type'][sensor_type].shape}")
 
             for sensor_type in ["grad", "mag"]:
-                timepoints = np.array(list(range(601)))
+                timepoints = np.array(list(range(session_dict["norm"][norm]["sensor_type"][sensor_type].shape[0])))
+                raise ValueError(f"timepoints is {timepoints}, shape is {session_dict['norm'][norm]['sensor_type'][sensor_type].shape} debug this if necessary, else delete this Error raise.")
+                #timepoints = np.array(list(range(601)))
                 
 
                 # Select timepoints to plot (f.e. 10 total, every 60th)
                 plot_timepoints = []
-                timepoint_plot_interval = 300
-                for timepoint in range(1, 601, timepoint_plot_interval):
+                timepoint_plot_interval = 150
+
+                for timepoint in range(1, max(timepoints)+1, timepoint_plot_interval):
                     plot_timepoints.append(timepoint)
                 n_plot_timepoints = len(plot_timepoints)
                 legend_elements = []  # List to hold the custom legend elements (colors for norms)

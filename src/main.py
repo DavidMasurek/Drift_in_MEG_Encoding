@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import json
 from collections import defaultdict
-from utils import MetadataHelper, DatasetHelper, ExtractionHelper, GLMHelper, VisualizationHelper
+from utils import BasicOperationsHelper, MetadataHelper, DatasetHelper, ExtractionHelper, GLMHelper, VisualizationHelper
 
 # Add parent folder of src to path and change cwd
 __location__ = Path(__file__).parent.parent
@@ -16,15 +16,23 @@ os.chdir(__location__)
 subject_ids = ["02"]
 normalizations = ["no_norm"] # ["min_max", "mean_centered_ch_t", "median_centered_ch_t", "robust_scaling", "no_norm"]
 lock_event = "saccade"
+timepoint_min = 50
+timepoint_max = 250
 
 # Choose Calculations to be performed
-create_metadata = True
-create_non_meg_dataset = True
-create_meg_dataset = True
-extract_features = True
-train_GLM = True
-generate_predictions_with_GLM = True
-visualization = True
+create_metadata = False
+create_non_meg_dataset = False
+create_meg_dataset = False
+extract_features = False
+train_GLM = False
+generate_predictions_with_GLM = False
+visualization = False
+
+# Debugging
+ops_helper = BasicOperationsHelper()
+fif_info = ops_helper.inspect_fif_file()
+#print(f"fif_info: {fif_info}")
+
 
 for subject_id in subject_ids:
     print(f"Processing subject {subject_id}")
