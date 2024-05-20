@@ -279,9 +279,10 @@ class BasicOperationsHelper:
 
 
 class MetadataHelper(BasicOperationsHelper):
-    def __init__(self, subject_id: str = "02"):
+    def __init__(self, subject_id: str = "02", lock_event: str = "saccade"):
         super().__init__(subject_id)
 
+        self.lock_event = lock_event
         self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{subject_id}_crops_metadata.csv"
         self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{subject_id}/sensor/filter_0.2_200"
 
@@ -348,7 +349,7 @@ class MetadataHelper(BasicOperationsHelper):
         # Read metadata for each session from csv
         for session_id_letter in self.session_ids_char:
             # Build path to session metadata file
-            meg_metadata_file = f"as{self.subject_id}{session_id_letter}_et_epochs_metadata_fixation.csv"
+            meg_metadata_file = f"as{self.subject_id}{session_id_letter}_et_epochs_metadata_{self.lock_event}.csv"
             meg_metadata_path = os.path.join(self.meg_metadata_folder, meg_metadata_file)
 
             session_id_num = self.map_session_letter_id_to_num(session_id_letter)
@@ -442,9 +443,10 @@ class MetadataHelper(BasicOperationsHelper):
 
 
         
-class DatasetHelper(BasicOperationsHelper):
-    def __init__(self, normalizations:list, subject_id: str = "02"):
-        super().__init__(subject_id)
+class DatasetHelper(BasicOperationsHelper, MetadataHelper):
+    def __init__(self, normalizations:list, subject_id: str = "02", lock_event: str = "saccade"):
+        BasicOperationsHelper.__init__(self, subject_id=subject_id)
+        MetadataHelper.__init__(self, subject_id=subject_id, lock_event=self.lock_event)
 
         self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{subject_id}_crops_metadata.csv"
         self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{subject_id}/sensor/filter_0.2_200"
@@ -510,7 +512,7 @@ class DatasetHelper(BasicOperationsHelper):
             session_id_num = self.map_session_letter_id_to_num(session_id_char)
             print(f"Creating meg dataset for session {session_id_num}")
             # Load session MEG data from .h5
-            meg_data_file = f"as{self.subject_id}{session_id_char}_population_codes_fixation_500hz_masked_False.h5"
+            meg_data_file = f"as{self.subject_id}{session_id_char}_population_codes_{self.lock_event}_500hz_masked_False.h5"
             with h5py.File(os.path.join(meg_data_folder, meg_data_file), "r") as f:
                 meg_data = {}
                 meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a (2874, 204, 601)
@@ -1160,10 +1162,10 @@ class VisualizationHelper(GLMHelper):
 
                 # Select timepoints to plot (f.e. 10 total, every 60th)
                 plot_timepoints = []
-                timepoint_plot_interval = 180
+                timepoint_plot_interval = 300
                 for timepoint in range(1, 601, timepoint_plot_interval):
                     plot_timepoints.append(timepoint)
-
+                n_plot_timepoints = len(plot_timepoints)
                 legend_elements = []  # List to hold the custom legend elements (colors for norms)
 
                 num_epochs_for_x_axis = 0
@@ -1202,7 +1204,7 @@ class VisualizationHelper(GLMHelper):
 
                         plt.xlabel('Epochs in Session)')
                         plt.ylabel('MEG Value averaged over Channels')
-                        plt.title(f'Average MEG Signal over Channels per timepoint. Session {session_id_num} Sensor {sensor_type} {norm}')
+                        plt.title(f'Average MEG Signal over Channels per timepoint (showing {n_plot_timepoints} timepoints). Session {session_id_num} Sensor {sensor_type} {norm}')
                         plt.legend(handles=legend_elements, title="Normalization Methods")
 
                         # Save plot
@@ -1217,7 +1219,7 @@ class VisualizationHelper(GLMHelper):
 
                     plt.xlabel('Epochs in Session)')
                     plt.ylabel('MEG Value averaged over Channels')
-                    plt.title(f'Average MEG Signal over Channels per timepoint. Session {session_id_num} Sensor {sensor_type}')
+                    plt.title(f'Average MEG Signal over Channels per timepoint (showing {n_plot_timepoints} timepoints). Session {session_id_num} Sensor {sensor_type}')
                     plt.legend(handles=legend_elements, title="Normalization Methods")
 
                     # Save plot

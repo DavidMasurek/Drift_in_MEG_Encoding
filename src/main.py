@@ -14,23 +14,24 @@ os.chdir(__location__)
 
 # Choose params
 subject_ids = ["02"]
-normalizations = ["mean_centered_ch_t", "robust_scaling_ch_t", "no_norm"] # ["min_max", "mean_centered_ch_t", "median_centered_ch_t", "robust_scaling", "no_norm"]
+normalizations = ["no_norm"] # ["min_max", "mean_centered_ch_t", "median_centered_ch_t", "robust_scaling", "no_norm"]
+lock_event = "saccade"
 
 # Choose Calculations to be performed
-create_metadata = True
+create_metadata = False
 create_non_meg_dataset = False
 create_meg_dataset = False
 extract_features = False
 train_GLM = False
 generate_predictions_with_GLM = False
-visualization = False
+visualization = True
 
 for subject_id in subject_ids:
     print(f"Processing subject {subject_id}")
 
     ##### Process metadata for subject #####
     if create_metadata:
-        metadata_helper = MetadataHelper(subject_id=subject_id)
+        metadata_helper = MetadataHelper(subject_id=subject_id, lock_event=lock_event)
 
         # Read crop metadata over all sessions 
         metadata_helper.create_crop_metadata_dict()
@@ -43,7 +44,7 @@ for subject_id in subject_ids:
 
     ##### Create crop and meg dataset based on metadata #####
     if create_non_meg_dataset or create_meg_dataset:
-        dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations)
+        dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations, lock_event=lock_event)
 
         if create_non_meg_dataset:
             # Create train/test split based on sceneIDs (based on trial_ids)
@@ -92,13 +93,13 @@ for subject_id in subject_ids:
         visualization_helper = VisualizationHelper(norms=normalizations, subject_id=subject_id)
 
         # Visualize meg data with mne
-        visualization_helper.visualize_meg_epochs_mne()
+        #visualization_helper.visualize_meg_epochs_mne()
 
         # Visualize meg data ERP style
-        visualization_helper.visualize_meg_ERP_style(plot_norms=["mean_centered_ch_t", "no_norm"])
+        #visualization_helper.visualize_meg_ERP_style(plot_norms=["no_norm", "mean_centered_ch_t"])  # ,"robust_scaling_ch_t", "z_score_ch_t", "robust_scaling", "z_score"
 
         # Visualize prediction results
-        visualization_helper.visualize_GLM_results(by_timepoints=True, only_distance=False, separate_plots=False)
+        #visualization_helper.visualize_GLM_results(by_timepoints=True, only_distance=False, separate_plots=False)
 
         # Visualize model perspective (values by timepoint)
         visualization_helper.visualize_model_perspective(plot_norms=["mean_centered_ch_t", "no_norm"], seperate_plots=False)  # , "no_norm"
