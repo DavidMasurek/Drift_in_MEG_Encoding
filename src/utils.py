@@ -33,22 +33,27 @@ class BasicOperationsHelper:
         fif_file_path = f'/share/klab/datasets/avs/population_codes/as{subject_id}/sensor/filter_0.2_200/{lock_event}_evoked_{subject_id}_{session_id_padded}_.fif'
         
         processing_channels_indices = {"grad": {}, "mag": {}}
-        evoked = mne.read_evokeds(path)[0]
+        evoked = mne.read_evokeds(fif_file_path)[0]
 
         # Get indices of Grad and Mag sensors
         grad_indices = mne.pick_types(evoked.info, meg='grad')
         mag_indices = mne.pick_types(evoked.info, meg='mag')
 
+        #print(f"grad_indices: {grad_indices}")
+        #print(f"mag_indices: {mag_indices}")
+
         for sensor_type in processing_channels_indices: # grad, mag
             channel_indices = mne.pick_types(evoked.info, meg=sensor_type)
+            sensor_index = 0
             for channel_idx in channel_indices:
                 ch_name = evoked.ch_names[channel_idx]
                 if int(ch_name[3:]) in chosen_channels:
-                    processing_channels_indices[sensor_type][channel_idx] = ch_name
+                    processing_channels_indices[sensor_type][sensor_index] = ch_name
+                sensor_index += 1
 
         print(processing_channels_indices)
 
-        return 
+        return processing_channels_indices
 
 
     def recursive_defaultdict(self) -> dict:
@@ -542,33 +547,58 @@ class DatasetHelper(MetadataHelper):
                 meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a saccade: (2945, 204, 401), fixation: (2874, 204, 601) 
                 meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a saccade: (2945, 102, 401), fixation: (2874, 102, 601)
 
+                print(f"Pre filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
+                print(f"Pre filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
+
+
                 # Select relevant channels
                 channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels, subject_id=self.subject_id, session_id=session_id_num, lock_event="saccade")
 
-                meg_data["grad"] = meg_data["grad"][:, channel_indices['grad'].keys(),:]
-                meg_data["mag"] = meg_data["mag"][:, channel_indices['mag'].keys(),:]
+                grad_selected = False
+                mag_selected = False
+                if channel_indices['grad']:
+                    grad_selected = True
+                    meg_data["grad"] = meg_data["grad"][:, list(channel_indices['grad'].keys()),:]
+                if channel_indices['mag']:
+                    mag_selected = True
+                    meg_data["mag"] = meg_data["mag"][:, list(channel_indices['mag'].keys()),:]
 
                 # Cut relevant timepoints. Range is -0.5 – 0.3 s. We want timepoints 50-250
                 if self.timepoint_min is not None and self.timepoint_max is not None:
-                    meg_data["grad"] = meg_data["grad"][:,:,self.timepoint_min:self.timepoint_max+1]
-                    meg_data["mag"] = meg_data["mag"][:,:,self.timepoint_min:self.timepoint_max+1]
+                    if grad_selected:
+                        meg_data["grad"] = meg_data["grad"][:,:,self.timepoint_min:self.timepoint_max+1]
+                    if mag_selected:
+                        meg_data["mag"] = meg_data["mag"][:,:,self.timepoint_min:self.timepoint_max+1]
+                    if not grad_selected and not mag_selected:
+                        raise ValueError("Neither mag or grad channels selected.")
                 
 
                 # Create datasets based on specified normalizations
                 for normalization in self.normalizations:
                     # Debugging
-                    if session_id_num == "1" and normalization == "no_norm":
-                        print(f"meg_data['grad'].shape: {meg_data['grad'].shape}")
-                        print(f"meg_data['mag'].shape: {meg_data['mag'].shape}")
+                    #if session_id_num == "1" and normalization == "no_norm":
+                    if grad_selected:
+                        print(f"Post filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
+                    if mag_selected:
+                        print(f"Post filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
 
                     meg_data_norm = {}
                     # Normalize grad and mag independently
-                    meg_data_norm["grad"] = self.normalize_array(np.array(meg_data['grad']), normalization=normalization, session_id=session_id_num)
-                    meg_data_norm["mag"] = self.normalize_array(np.array(meg_data['mag']), normalization=normalization, session_id=session_id_num)
+                    if grad_selected:
+                        meg_data_norm["grad"] = self.normalize_array(np.array(meg_data['grad']), normalization=normalization, session_id=session_id_num)
+                    if mag_selected:
+                        meg_data_norm["mag"] = self.normalize_array(np.array(meg_data['mag']), normalization=normalization, session_id=session_id_num)
 
                     # Combine grad and mag data
-                    combined_meg = np.concatenate([meg_data_norm["grad"], meg_data_norm["mag"]], axis=1) #(2874, 306, 601)
-        
+                    if grad_selected and mag_selected:
+                        combined_meg = np.concatenate([meg_data_norm["grad"], meg_data_norm["mag"]], axis=1) #(2874, 306, 601)
+                    elif grad_selected:
+                        combined_meg = meg_data_norm["grad"]
+                    elif mag_selected:
+                        combined_meg = meg_data_norm["mag"]
+
+                    print(f"After normalization and combination: combined_meg.shape: {combined_meg.shape}")
+
                     # Split meg data 
                     # Get train/test split based on trials (based on scenes)
                     trials_split_dict = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="trial_splits")

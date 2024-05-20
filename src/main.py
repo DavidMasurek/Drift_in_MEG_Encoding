@@ -21,7 +21,7 @@ timepoint_min = 50
 timepoint_max = 250
 
 # Choose Calculations to be performed
-create_metadata = False
+create_metadata = True
 create_non_meg_dataset = True
 create_meg_dataset = True
 extract_features = True
