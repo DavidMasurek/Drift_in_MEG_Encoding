@@ -443,13 +443,10 @@ class MetadataHelper(BasicOperationsHelper):
 
 
         
-class DatasetHelper(BasicOperationsHelper, MetadataHelper):
+class DatasetHelper(MetadataHelper):
     def __init__(self, normalizations:list, subject_id: str = "02", lock_event: str = "saccade"):
-        BasicOperationsHelper.__init__(self, subject_id=subject_id)
-        MetadataHelper.__init__(self, subject_id=subject_id, lock_event=self.lock_event)
+        super().__init__(subject_id=subject_id, lock_event=lock_event)
 
-        self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{subject_id}_crops_metadata.csv"
-        self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{subject_id}/sensor/filter_0.2_200"
         self.normalizations = normalizations
 
     def create_crop_dataset(self) -> None:
@@ -517,7 +514,6 @@ class DatasetHelper(BasicOperationsHelper, MetadataHelper):
                 meg_data = {}
                 meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a (2874, 204, 601)
                 meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a (2874, 102, 601)
-    
 
                 # Create datasets based on specified normalizations
                 for normalization in self.normalizations:
