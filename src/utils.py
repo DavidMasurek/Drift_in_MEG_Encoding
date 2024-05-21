@@ -19,6 +19,7 @@ from thingsvision import get_extractor
 
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_squared_error
+from sklearn.metrics import explained_variance_score
 
 class BasicOperationsHelper:
     def __init__(self, subject_id: str = "02"):
@@ -80,7 +81,7 @@ class BasicOperationsHelper:
         """
         Helper function to read json files into dicts.
         """
-        valid_types = ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses", "mse_losses_timepoint"]
+        valid_types = ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses", "mse_losses_timepoint", "var_explained"]
         if type_of_content not in valid_types:
             raise ValueError(f"Function read_dict_from_json called with unrecognized type {type_of_content}.")
 
@@ -88,6 +89,8 @@ class BasicOperationsHelper:
             file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/mse_losses_{type_of_norm}_dict.json"
         elif type_of_content == "mse_losses_timepoint":
             file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/timepoints/norm_{type_of_norm}/mse_losses_timepoint_{type_of_norm}_dict.json"
+        elif type_of_content == "var_explained":
+            file_path = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/var_explained_{type_of_norm}_dict.json"
         else:
             file_path = f"data_files/metadata/{type_of_content}/subject_{self.subject_id}/{type_of_content}_dict.json"
         
@@ -105,7 +108,7 @@ class BasicOperationsHelper:
         """
         Helper function to store dicts as json files.
         """
-        valid_types = ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses", "mse_losses_timepoint"]
+        valid_types = ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses", "mse_losses_timepoint", "var_explained"]
         if type_of_content not in valid_types:
             raise ValueError(f"Function save_dict_as_json called with unrecognized type {type_of_content}.")
 
@@ -117,6 +120,9 @@ class BasicOperationsHelper:
                 timepoint_folder = ""
                 timepoint_name = ""
             storage_folder = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/{timepoint_folder}norm_{type_of_norm}"
+            name_addition = f"_{type_of_norm}"
+        elif type_of_content == "var_explained":
+            storage_folder = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}"
             name_addition = f"_{type_of_norm}"
         else:
             storage_folder = f'data_files/metadata/{type_of_content}/subject_{self.subject_id}'
@@ -876,6 +882,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
         for normalization in self.normalizations:
             print(f"Predicting from mapping for normalization {normalization}")
+            variance_explained_dict =self.recursive_defaultdict()
             mse_session_losses = {"session_mapping": {}}
             for session_id_model in self.session_ids_num:
                 mse_session_losses["session_mapping"][session_id_model] = {"session_pred": {}}
@@ -917,16 +924,21 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         # Calculate the mean squared error across all flattened features and timepoints
                         mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
 
-                        # Save loss
+                        # Calculate variance explained 
+                        var_explained = explained_variance_score(Y_test.reshape(-1), predictions.reshape(-1))
+
+                        # Save loss and variance explained
                         mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = mse
+                        variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = var_explained
 
             # Store loss dict
             if store_timepoint_based_losses:
-                type_of_content = "mse_losses_timepoint"
+                mse_type_of_content = "mse_losses_timepoint"
             else:
-                type_of_content = "mse_losses"
+                mse_type_of_content = "mse_losses"
 
-            self.save_dict_as_json(type_of_content=type_of_content, dict_to_store=mse_session_losses, type_of_norm=normalization)
+            self.save_dict_as_json(type_of_content=mse_type_of_content, dict_to_store=mse_session_losses, type_of_norm=normalization)
+            self.save_dict_as_json(type_of_content="var_explained", dict_to_store=variance_explained_dict, type_of_norm=normalization)
 
 
     class MultiDimensionalRidge:
