@@ -24,10 +24,10 @@ timepoint_max = 250
 create_metadata = True
 create_non_meg_dataset = True
 create_meg_dataset = True
-extract_features = True
-train_GLM = True
-generate_predictions_with_GLM = True
-visualization = True
+extract_features = False
+train_GLM = False
+generate_predictions_with_GLM = False
+visualization = False
 
 for subject_id in subject_ids:
     print(f"Processing subject {subject_id}")

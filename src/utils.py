@@ -117,13 +117,13 @@ class BasicOperationsHelper:
                 timepoint_folder = ""
                 timepoint_name = ""
             storage_folder = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/{timepoint_folder}norm_{type_of_norm}"
-            name_addition = f"{type_of_norm}"
+            name_addition = f"_{type_of_norm}"
         else:
             storage_folder = f'data_files/metadata/{type_of_content}/subject_{self.subject_id}'
             name_addition = ""
         if not os.path.exists(storage_folder):
             os.makedirs(storage_folder)
-        json_storage_file = f"{type_of_content}_{name_addition}_dict.json"
+        json_storage_file = f"{type_of_content}{name_addition}_dict.json"
         json_storage_path = os.path.join(storage_folder, json_storage_file)
 
         with open(json_storage_path, 'w') as file:
@@ -547,8 +547,9 @@ class DatasetHelper(MetadataHelper):
                 meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a saccade: (2945, 204, 401), fixation: (2874, 204, 601) 
                 meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a saccade: (2945, 102, 401), fixation: (2874, 102, 601)
 
-                print(f"Pre filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
-                print(f"Pre filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
+                num_meg_timepoints = meg_data['grad'].shape[0]
+                print(f"[Session {session_id_num}]: Pre filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
+                print(f"[Session {session_id_num}]: Pre filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
 
 
                 # Select relevant channels
@@ -578,9 +579,9 @@ class DatasetHelper(MetadataHelper):
                     # Debugging
                     #if session_id_num == "1" and normalization == "no_norm":
                     if grad_selected:
-                        print(f"Post filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
+                        print(f"[Session {session_id_num}]: Post filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
                     if mag_selected:
-                        print(f"Post filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
+                        print(f"[Session {session_id_num}]: Post filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
 
                     meg_data_norm = {}
                     # Normalize grad and mag independently
@@ -597,13 +598,31 @@ class DatasetHelper(MetadataHelper):
                     elif mag_selected:
                         combined_meg = meg_data_norm["mag"]
 
-                    print(f"After normalization and combination: combined_meg.shape: {combined_meg.shape}")
+                    print(f"[Session {session_id_num}]: After normalization and combination: combined_meg.shape: {combined_meg.shape}")
 
                     # Split meg data 
                     # Get train/test split based on trials (based on scenes)
                     trials_split_dict = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="trial_splits")
 
                     meg_split = {"train": [], "test": []}
+
+                    # Debugging: Count timepoints in meg metadata
+                    num_meg_metadata_timepoints = 0
+                    for trial_id in meg_metadata["sessions"][session_id_num]["trials"]:
+                        for timepoint in meg_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
+                            num_meg_metadata_timepoints += 1
+                    print(f"[Session {session_id_num}]: Timepoints in meg metadata: {num_meg_metadata_timepoints}")
+                    #if num_meg_timepoints != num_meg_metadata_timepoints:
+                    #    raise ValueError(f"The number of datapoints in the meg data and in the meg metadata is not identical. Dataset: {num_meg_timepoints}. Metadata: {num_meg_metadata_timepoints}") 
+
+                    # Debugging: Count timepoints in combined metadata
+                    num_combined_metadata_timepoints = 0
+                    for trial_id in combined_metadata["sessions"][session_id_num]["trials"]:
+                        for timepoint in combined_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
+                            num_combined_metadata_timepoints += 1
+                    print(f"[Session {session_id_num}]: Timepoints in combined metadata: {num_combined_metadata_timepoints}")
+
+
                     # Iterate through meg metadata for simplicity with indexing
                     index = 0
                     for trial_id in meg_metadata["sessions"][session_id_num]["trials"]:
@@ -615,9 +634,11 @@ class DatasetHelper(MetadataHelper):
                             # Raise error if the trial is in neither split, but is in the combined metadata (in this case it should be there)
                             if trial_id in combined_metadata["sessions"][session_id_num]["trials"]:
                                 raise ValueError(f"Session {session_id_num}: Trial_id {trial_id} neither in train nor test split.")
-                            # Otherwise skip this trial
+                            # Otherwise skip the data in this trial (there is no corresponding crop data for the meg trial data)
                             else:
-                                index += 1
+                                for timepoint in meg_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
+                                    index += 1
+                                print(f"[Session {session_id_num}]: Trial {trial_id} from meg metadata is not in combined metadata.")
                                 continue
                         for timepoint in meg_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
                             # Check if there is both crop and metadata for the timepoint
@@ -626,6 +647,8 @@ class DatasetHelper(MetadataHelper):
                                 meg_split[trial_type].append(combined_meg[index])
                             # Advance index
                             index += 1
+                    
+                    print(f"[Session {session_id_num}]: Index after dataset creation: {index}")
 
                     # Export meg dataset arrays to .npz
                     self.export_split_data_as_file(session_id=session_id_num, 
