@@ -379,6 +379,11 @@ class MetadataHelper(BasicOperationsHelper):
         """
         Creates the meg metadata dict for the participant and stores it.
         """
+        if self.lock_event == "saccade":
+            time_column = "end_time" 
+        else:
+            time_column = "time_in_trial"
+
 
         data_dict = {"sessions": {}}
         # Read metadata for each session from csv
@@ -399,7 +404,7 @@ class MetadataHelper(BasicOperationsHelper):
 
             for index, row in df.iterrows():
                 trial_id = int(row["trial"])
-                timepoint = row["time_in_trial"]
+                timepoint = row[f"{time_column}"]
                 
                 # Create dict to store values for current trial if this is the first timepoint in the trial
                 if trial_id not in data_dict["sessions"][session_id_num]["trials"].keys():
@@ -416,6 +421,10 @@ class MetadataHelper(BasicOperationsHelper):
         """
         Creates the crop metadata dict for the participant and stores it.
         """
+        if self.lock_event == "saccade":
+            time_column = "Start_time"
+        else:
+            time_column = "time_in_trial"
 
         # Read data from csv and set index to crop filename (crop_identifier before .png)
         df = pd.read_csv(self.crop_metadata_path, index_col = 'crop_filename')
@@ -452,7 +461,7 @@ class MetadataHelper(BasicOperationsHelper):
                 data_dict["sessions"][nr_session]["trials"][nr_trial] = {}
 
                 # Get list of all timepoints in this trial
-                timepoints = trial_df["time_in_trial"].tolist()
+                timepoints = trial_df[f"{time_column}"].tolist()
 
                 # Create dict for timepoints in this trial
                 data_dict["sessions"][nr_session]["trials"][nr_trial]["timepoints"] = {}
@@ -460,7 +469,7 @@ class MetadataHelper(BasicOperationsHelper):
                 # For each timepoint in this trial
                 for timepoint in timepoints:
                     # Filter trial dataframe by timepoint
-                    timepoint_df = trial_df[trial_df["time_in_trial"] == timepoint]
+                    timepoint_df = trial_df[trial_df[f"{time_column}"] == timepoint]
 
                     # get sceneID for this timepoint
                     sceneID = timepoint_df['sceneID'].iloc[0]
