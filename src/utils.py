@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D  # Import Line2D for custom legend
 from collections import defaultdict
 from typing import Tuple, Dict
+from datetime import date
 
 # ANN specific imports
 import torch
@@ -659,9 +660,11 @@ class DatasetHelper(MetadataHelper):
                                 raise ValueError(f"Session {session_id_num}: Trial_id {trial_id} neither in train nor test split.")
                             # Otherwise skip the data in this trial (there is no corresponding crop data for the meg trial data)
                             else:
+                                n_timepoints_in_skipped_trial = 0
                                 for timepoint in meg_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
+                                    n_timepoints_in_skipped_trial += 1
                                     index += 1
-                                print(f"[Session {session_id_num}]: Trial {trial_id} from meg metadata is not in combined metadata.")
+                                print(f"[Session {session_id_num}]: Trial {trial_id} from meg metadata is not in combined metadata. Timepoints in trial: {n_timepoints_in_skipped_trial}")
                                 continue
                         for timepoint in meg_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
                             # Check if there is both crop and metadata for the timepoint
@@ -670,6 +673,9 @@ class DatasetHelper(MetadataHelper):
                                 meg_split[trial_type].append(combined_meg[index])
                             # Advance index
                             index += 1
+
+                    if index != num_meg_metadata_timepoints:
+                        raise ValueError(f"Index used to create dataset is not identical to number of timepoints in meg metadata after iteration. Index: {index}, num_meg_metadata_timepoints: {num_meg_metadata_timepoints}.")
                     
                     # Convert meg data to numpy array
                     for split in ["train", "test"]:
@@ -1015,7 +1021,7 @@ class VisualizationHelper(GLMHelper):
         super().__init__(norms=norms, subject_id=subject_id)
 
 
-    def visualize_GLM_results(self, by_timepoints:bool = False, only_distance:bool = False, separate_plots:bool = False):
+    def visualize_GLM_results(self, by_timepoints:bool = False, only_distance:bool = False, omit_session_10: bool = False, separate_plots:bool = False):
         """
         Visualizes results from GLMHelper.predict_from_mapping
         """
@@ -1030,7 +1036,6 @@ class VisualizationHelper(GLMHelper):
             mse_session_losses = self.read_dict_from_json(type_of_content=type_of_content, type_of_norm=normalization)
             mse_losses_norms[normalization] = mse_session_losses
 
-
             if only_distance:
                 # Plot loss as a function of distance of predicted session from "training" session
                 fig, ax1 = plt.subplots(figsize=(12, 8))
@@ -1038,8 +1043,14 @@ class VisualizationHelper(GLMHelper):
                 # Iterate over each training session
                 losses_by_distances = {}
                 for train_session, data in mse_session_losses['session_mapping'].items():
+                    if train_session == "10":
+                        if omit_session_10:
+                            continue
                     # Calculate distance and collect corresponding losses
                     for pred_session, mse in data['session_pred'].items():
+                        if train_session == "10":
+                            if omit_session_10:
+                                continue
                         if train_session != pred_session:
                             distance = abs(int(train_session) - int(pred_session))
                             if distance not in losses_by_distances:
@@ -1074,7 +1085,7 @@ class VisualizationHelper(GLMHelper):
                 lines2, labels2 = ax2.get_legend_handles_labels()
                 ax1.legend(lines + lines2, labels + labels2, loc='upper right')
                 
-                ax1.set_title(f'MSE vs Distance for Predictions Averaged Across all Sessions with Norm {normalization}')
+                ax1.set_title(f'MSE vs Distance for Predictions Averaged Across all Sessions with Norm {normalization}, session 10 omitted? {omit_session_10}, {date.today()}')
                 plt.grid(True)
                 plt.show()
 
