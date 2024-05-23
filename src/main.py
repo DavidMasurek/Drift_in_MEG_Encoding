@@ -22,9 +22,10 @@ timepoint_max = 250
 
 # Choose Calculations to be performed
 create_metadata = False
-create_non_meg_dataset = False
+create_train_test_split = True
+create_non_meg_dataset = True
 create_meg_dataset = True
-extract_features = False
+extract_features = True
 train_GLM = True
 generate_predictions_with_GLM = True
 visualization = True
@@ -46,12 +47,14 @@ for subject_id in subject_ids:
         print("Metadata created.")
 
     ##### Create crop and meg dataset based on metadata #####
-    if create_non_meg_dataset or create_meg_dataset:
+    if create_non_meg_dataset or create_meg_dataset or create_train_test_split:
         dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations, chosen_channels=meg_channels, lock_event=lock_event)
 
-        if create_non_meg_dataset:
+        if create_train_test_split:
             # Create train/test split based on sceneIDs (based on trial_ids)
             dataset_helper.create_train_test_split()
+
+        if create_non_meg_dataset:
             # Create crop numpy dataset based on split
             dataset_helper.create_crop_dataset()
             # Create torch dataset based on numpy datasets
@@ -103,7 +106,7 @@ for subject_id in subject_ids:
 
         # Visualize prediction results
         visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_session_10=False, separate_plots=True)
-        #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=True, omit_session_10=False, separate_plots=False)
+        visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=True, omit_session_10=False, separate_plots=False)
         #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=True, omit_session_10=True, separate_plots=False)
         
         # Visualize model perspective (values by timepoint)

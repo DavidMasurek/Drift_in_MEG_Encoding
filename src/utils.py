@@ -11,6 +11,7 @@ from matplotlib.lines import Line2D  # Import Line2D for custom legend
 from collections import defaultdict
 from typing import Tuple, Dict
 from datetime import date
+import random
 
 # ANN specific imports
 import torch
@@ -734,7 +735,7 @@ class DatasetHelper(MetadataHelper):
             num_trials = len(trial_ids[session_id])
             assert num_scenes == num_trials, f"Session {session_id}: Number of trials and number of scenes is not identical. Doubled scenes need to be considered"
 
-            # Choose scene_ids for 80/20 split
+            # Choose split size (80/20)
             num_trials_train = int(num_trials*0.8)
             num_trials_test = num_trials - num_trials_train
 
@@ -742,8 +743,11 @@ class DatasetHelper(MetadataHelper):
             train_split_trials = []
             test_split_trials = []
             # Create split sceneID (by ordering the trials by scenes, trials that belong to the same scene will most likely be in the same split)
-            index = 0
-            for scene_id in scene_ids[session_id]:
+            index = 0        
+            # Shuffle the scenes in the session, so that the test split does not always contain the latest scenes (I iterated by trials and timepoints above)
+            session_scene_ids = list(scene_ids[session_id].keys())
+            random.shuffle(session_scene_ids)
+            for scene_id in session_scene_ids:
                 for trial_id in scene_ids[session_id][scene_id]["trials"]:
                     # Each unique combination is one point in the dataset
                     if index < num_trials_train:
