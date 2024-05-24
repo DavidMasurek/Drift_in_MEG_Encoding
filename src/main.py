@@ -22,12 +22,12 @@ timepoint_max = 250
 
 # Choose Calculations to be performed
 create_metadata = False
-create_train_test_split = True
-create_non_meg_dataset = True
-create_meg_dataset = True
-extract_features = True
-train_GLM = True
-generate_predictions_with_GLM = True
+create_train_test_split = False
+create_non_meg_dataset = False
+create_meg_dataset = False
+extract_features = False
+train_GLM = False
+generate_predictions_with_GLM = False
 visualization = True
 
 for subject_id in subject_ids:
@@ -105,12 +105,12 @@ for subject_id in subject_ids:
         #visualization_helper.visualize_meg_ERP_style(plot_norms=["no_norm", "mean_centered_ch_t"])  # ,"robust_scaling_ch_t", "z_score_ch_t", "robust_scaling", "z_score"
 
         # Visualize prediction results
-        visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_session_10=False, separate_plots=True)
-        visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=True, omit_session_10=False, separate_plots=False)
-        #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=True, omit_session_10=True, separate_plots=False)
+        #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_session_10=False, separate_plots=True)
+        #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=True, omit_session_10=False, separate_plots=False)
+        visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=True, omit_session_10=True, separate_plots=False)
         
         # Visualize model perspective (values by timepoint)
-        #visualization_helper.visualize_model_perspective(plot_norms=["mean_centered_ch_t", "no_norm"], seperate_plots=False)  # , "no_norm"
+        #visualization_helper.visualize_model_perspective(plot_norms=["no_norm"], seperate_plots=False)  # , "no_norm"
 
         print("Visualization completed.")
         

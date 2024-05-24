@@ -27,16 +27,17 @@ from sklearn.metrics import explained_variance_score
 mne.set_log_level(verbose="ERROR")
 
 class BasicOperationsHelper:
-    def __init__(self, subject_id: str = "02"):
+    def __init__(self, subject_id: str = "02", lock_event: str = "saccade"):
         self.subject_id = subject_id
         self.session_ids_char = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
         self.session_ids_num = [str(session_id) for session_id in range(1,11)]
+        self.lock_event = lock_event
 
 
-    def get_relevant_meg_channels(self, chosen_channels, subject_id, session_id, lock_event="saccade"):
+    def get_relevant_meg_channels(self, chosen_channels, session_id):
         #{'grad': {}, 'mag': {194: 'MEG1731', 215: 'MEG1921', 236: 'MEG2111', 269: 'MEG2341', 284: 'MEG2511'}}
         session_id_padded = "0" + session_id if session_id != "10" else session_id
-        fif_file_path = f'/share/klab/datasets/avs/population_codes/as{subject_id}/sensor/filter_0.2_200/{lock_event}_evoked_{subject_id}_{session_id_padded}_.fif'
+        fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/{self.lock_event}_evoked_{subject_id}_{session_id_padded}_.fif'
         
         processing_channels_indices = {"grad": {}, "mag": {}}
         evoked = mne.read_evokeds(fif_file_path)[0]
@@ -60,6 +61,35 @@ class BasicOperationsHelper:
         #print(f"processing_channels_indices: {processing_channels_indices}")
 
         return processing_channels_indices
+
+    
+    def get_session_date_differences(self):
+        fif_folder = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/erf/filter_0.2_200/'
+        session_dates = {str(num_session): None for num_session in range(1,11)}
+        
+        # Get datetime of each session
+        for session_id_char in self.session_ids_char:
+            fif_file = f"as{self.subject_id}{session_id_char}_et_epochs_info_{self.lock_event}.fif"
+            fif_complete_path = os.path.join(fif_folder, fif_file)
+
+            session_info = mne.io.read_info(fif_complete_path)
+            date = session_info['meas_date']
+
+            session_dates[self.map_session_letter_id_to_num(session_id_char)] = date
+
+        # Get difference in days (as float) between sessions
+        session_day_differences = self.recursive_defaultdict()
+        for session_id_num in self.session_ids_num:
+            og_session_date = session_dates[session_id_num]
+            for session_comp_id_num in self.session_ids_num:
+                if session_id_num != session_comp_id_num:
+                    comp_session_date = session_dates[session_comp_id_num]
+
+                    diff_hours =  (comp_session_date - og_session_date).total_seconds() / 3600
+                    diff_days = diff_hours / 24
+                    session_day_differences[session_id_num][session_comp_id_num] = diff_days
+
+        return session_day_differences
 
 
     def recursive_defaultdict(self) -> dict:
@@ -320,9 +350,8 @@ class BasicOperationsHelper:
 
 class MetadataHelper(BasicOperationsHelper):
     def __init__(self, subject_id: str = "02", lock_event: str = "saccade"):
-        super().__init__(subject_id)
+        super().__init__(subject_id, lock_event)
 
-        self.lock_event = lock_event
         self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{subject_id}_crops_metadata.csv"
         self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{subject_id}/sensor/filter_0.2_200"
 
@@ -574,7 +603,7 @@ class DatasetHelper(MetadataHelper):
 
 
                 # Select relevant channels
-                channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels, subject_id=self.subject_id, session_id=session_id_num, lock_event="saccade")
+                channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels, session_id=session_id_num, lock_event=self.lock_event)
 
                 grad_selected = False
                 mag_selected = False
@@ -1052,11 +1081,13 @@ class VisualizationHelper(GLMHelper):
                             continue
                     # Calculate distance and collect corresponding losses
                     for pred_session, mse in data['session_pred'].items():
-                        if train_session == "10":
+                        if pred_session == "10":
                             if omit_session_10:
                                 continue
                         if train_session != pred_session:
                             distance = abs(int(train_session) - int(pred_session))
+                            if distance == 10 and omit_session_10:
+                                raise ValueError(f"Distance of 10, even though session 10 was excluded. Train session: {train_session}. Test session: {pred_session}")
                             if distance not in losses_by_distances:
                                 losses_by_distances[distance] = {"loss": mse, "num_losses": 1}
                             else:
@@ -1066,7 +1097,12 @@ class VisualizationHelper(GLMHelper):
                 # Calculate average losses over distances
                 avg_losses = {}
                 num_datapoints = {}
-                for distance in range(1,10):
+                if not omit_session_10:
+                    max_distance = 9
+                else:
+                    max_distance = 8
+
+                for distance in range(1,max_distance + 1):
                     avg_losses[distance] = losses_by_distances[distance]["loss"] / losses_by_distances[distance]["num_losses"]
                     num_datapoints[distance] = losses_by_distances[distance]["num_losses"]
 
@@ -1307,8 +1343,8 @@ class VisualizationHelper(GLMHelper):
                     #print(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][normalization]['sensor_type'][sensor_type].shape}")
 
             for sensor_type in ["grad", "mag"]:
-                timepoints = np.array(list(range(session_dict["norm"][norm]["sensor_type"][sensor_type].shape[0])))
-                raise ValueError(f"timepoints is {timepoints}, shape is {session_dict['norm'][norm]['sensor_type'][sensor_type].shape} debug this if necessary, else delete this Error raise.")
+                timepoints = np.array(list(range(session_dict["norm"][plot_norms[0]]["sensor_type"][sensor_type].shape[0])))
+                #raise ValueError(f"timepoints is {timepoints}, shape is {session_dict['norm'][plot_norms[0]]['sensor_type'][sensor_type].shape} debug this if necessary, else delete this Error raise.")
                 #timepoints = np.array(list(range(601)))
                 
 
