@@ -85,9 +85,14 @@ class BasicOperationsHelper:
                 if session_id_num != session_comp_id_num:
                     comp_session_date = session_dates[session_comp_id_num]
 
-                    diff_hours =  (comp_session_date - og_session_date).total_seconds() / 3600
-                    diff_days = diff_hours / 24
+                    diff_hours =  round(abs((comp_session_date - og_session_date).total_seconds()) / 3600)
+                    diff_days = round(diff_hours / 24)
                     session_day_differences[session_id_num][session_comp_id_num] = diff_days
+        
+        for session_id_num in self.session_ids_num:
+            for session_comp_id_num in self.session_ids_num:
+                assert session_day_differences[session_id_num][session_comp_id_num] == session_day_differences[session_comp_id_num][session_id_num], "Difference between Sessions inconsistent."
+
 
         return session_day_differences
 
@@ -1054,11 +1059,11 @@ class VisualizationHelper(GLMHelper):
         super().__init__(norms=norms, subject_id=subject_id)
 
 
-    def visualize_GLM_results(self, by_timepoints:bool = False, only_distance:bool = False, omit_session_10: bool = False, separate_plots:bool = False):
+    def visualize_GLM_results(self, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True):
         """
         Visualizes results from GLMHelper.predict_from_mapping
         """
-        print(f"self.normalizations: {self.normalizations}")
+        session_day_differences = self.get_session_date_differences()
         if not by_timepoints:
             type_of_content = "mse_losses"
         else:
@@ -1076,18 +1081,17 @@ class VisualizationHelper(GLMHelper):
                 # Iterate over each training session
                 losses_by_distances = {}
                 for train_session, data in mse_session_losses['session_mapping'].items():
-                    if train_session == "10":
-                        if omit_session_10:
-                            continue
+                    if train_session in omit_sessions:
+                        continue
                     # Calculate distance and collect corresponding losses
                     for pred_session, mse in data['session_pred'].items():
-                        if pred_session == "10":
-                            if omit_session_10:
-                                continue
+                        if pred_session in omit_sessions:
+                            continue
                         if train_session != pred_session:
-                            distance = abs(int(train_session) - int(pred_session))
-                            if distance == 10 and omit_session_10:
-                                raise ValueError(f"Distance of 10, even though session 10 was excluded. Train session: {train_session}. Test session: {pred_session}")
+                            if not distance_in_days:
+                                distance = abs(int(train_session) - int(pred_session))
+                            else:
+                                distance = session_day_differences[train_session][pred_session]
                             if distance not in losses_by_distances:
                                 losses_by_distances[distance] = {"loss": mse, "num_losses": 1}
                             else:
@@ -1097,19 +1101,19 @@ class VisualizationHelper(GLMHelper):
                 # Calculate average losses over distances
                 avg_losses = {}
                 num_datapoints = {}
-                if not omit_session_10:
-                    max_distance = 9
-                else:
-                    max_distance = 8
 
-                for distance in range(1,max_distance + 1):
+                for distance in losses_by_distances:
                     avg_losses[distance] = losses_by_distances[distance]["loss"] / losses_by_distances[distance]["num_losses"]
                     num_datapoints[distance] = losses_by_distances[distance]["num_losses"]
 
+                # Sort by distance for plot lines
+                avg_losses = dict(sorted(avg_losses.items()))
+                num_datapoints = dict(sorted(num_datapoints.items()))
 
                 # Plot
+                title_addition = "in days" if distance_in_days else ""
                 ax1.plot(avg_losses.keys(), avg_losses.values(), marker='o', linestyle='-', label=f'Average loss')
-                ax1.set_xlabel('Distance between "train" and "test" Session')
+                ax1.set_xlabel(f'Distance {title_addition} between "train" and "test" Session')
                 ax1.set_ylabel('Mean Squared Error')
                 ax1.tick_params(axis='y', labelcolor='b')
                 ax1.grid(True)
@@ -1125,7 +1129,7 @@ class VisualizationHelper(GLMHelper):
                 lines2, labels2 = ax2.get_legend_handles_labels()
                 ax1.legend(lines + lines2, labels + labels2, loc='upper right')
                 
-                ax1.set_title(f'MSE vs Distance for Predictions Averaged Across all Sessions with Norm {normalization}, session 10 omitted? {omit_session_10}, {date.today()}')
+                ax1.set_title(f'MSE vs Distance for Predictions Averaged Across all Sessions with Norm {normalization}, sessions omitted: {omit_sessions}, {date.today()}')
                 plt.grid(True)
                 plt.show()
 
@@ -1133,8 +1137,6 @@ class VisualizationHelper(GLMHelper):
                 plot_folder = f"data_files/visualizations/only_distance/subject_{self.subject_id}/norm_{normalization}"
                 plot_file = f"MSE_plot_over_distance_{normalization}.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
-
-                print(f"avg_losses after plot {normalization}: {avg_losses}")
 
             elif not by_timepoints:
                 # Collect self-prediction MSEs for baseline and prepare average non-self-MSE calculation

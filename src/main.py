@@ -105,9 +105,8 @@ for subject_id in subject_ids:
         #visualization_helper.visualize_meg_ERP_style(plot_norms=["no_norm", "mean_centered_ch_t"])  # ,"robust_scaling_ch_t", "z_score_ch_t", "robust_scaling", "z_score"
 
         # Visualize prediction results
-        #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_session_10=False, separate_plots=True)
-        #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=True, omit_session_10=False, separate_plots=False)
-        visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=True, omit_session_10=True, separate_plots=False)
+        visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
+        visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=True, omit_sessions=["4","10"], separate_plots=False)
         
         # Visualize model perspective (values by timepoint)
         #visualization_helper.visualize_model_perspective(plot_norms=["no_norm"], seperate_plots=False)  # , "no_norm"
