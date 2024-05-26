@@ -21,7 +21,7 @@ from thingsvision import get_extractor
 
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_squared_error
-from sklearn.metrics import explained_variance_score
+from sklearn.metrics import r2_score
 from scipy.stats import linregress
 
 # Logging related
@@ -38,7 +38,7 @@ class BasicOperationsHelper:
     def get_relevant_meg_channels(self, chosen_channels, session_id):
         #{'grad': {}, 'mag': {194: 'MEG1731', 215: 'MEG1921', 236: 'MEG2111', 269: 'MEG2341', 284: 'MEG2511'}}
         session_id_padded = "0" + session_id if session_id != "10" else session_id
-        fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/{self.lock_event}_evoked_{subject_id}_{session_id_padded}_.fif'
+        fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/{self.lock_event}_evoked_{self.subject_id}_{session_id_padded}_.fif'
         
         processing_channels_indices = {"grad": {}, "mag": {}}
         evoked = mne.read_evokeds(fif_file_path)[0]
@@ -609,7 +609,7 @@ class DatasetHelper(MetadataHelper):
 
 
                 # Select relevant channels
-                channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels, session_id=session_id_num, lock_event=self.lock_event)
+                channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels, session_id=session_id_num)
 
                 grad_selected = False
                 mag_selected = False
@@ -911,9 +911,11 @@ class ExtractionHelper(BasicOperationsHelper):
 
 
 class GLMHelper(DatasetHelper, ExtractionHelper):
-    def __init__(self, norms: list, subject_id: str = "02", chosen_channels: list = [1731, 1921, 2111, 2341, 2511]):
+    def __init__(self, norms: list, subject_id: str = "02", chosen_channels: list = [1731, 1921, 2111, 2341, 2511], alpha=0.5):
         DatasetHelper.__init__(self, normalizations=norms, subject_id=subject_id, chosen_channels=chosen_channels)
         ExtractionHelper.__init__(self, subject_id=subject_id)
+
+        self.alpha = alpha
 
 
     def train_mapping(self):
@@ -932,7 +934,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 X_train, Y_train = ann_features['train'], meg_data['train']
 
                 # Initialize Helper class
-                ridge_model = GLMHelper.MultiDimensionalRidge(alpha=0.5)
+                ridge_model = GLMHelper.MultiDimensionalRidge(alpha=self.alpha) #=0.5
 
                 # Fit model on train data
                 ridge_model.fit(X_train, Y_train)
@@ -957,7 +959,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
         for normalization in self.normalizations:
             print(f"Predicting from mapping for normalization {normalization}")
-            variance_explained_dict =self.recursive_defaultdict()
+            variance_explained_dict = self.recursive_defaultdict()
             mse_session_losses = {"session_mapping": {}}
             for session_id_model in self.session_ids_num:
                 mse_session_losses["session_mapping"][session_id_model] = {"session_pred": {}}
@@ -975,7 +977,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     ridge_models_session_1.append(ridge_models)
                 
                 # Initialize MultiDim GLM class with stored models
-                ridge_model = GLMHelper.MultiDimensionalRidge(alpha=0.5, models=ridge_models)
+                ridge_model = GLMHelper.MultiDimensionalRidge(alpha=self.alpha, models=ridge_models)
 
                 # Generate predictions for test features over all sessions and evaluate them 
                 for session_id_pred in self.session_ids_num:
@@ -992,15 +994,22 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         # Calculate loss seperately for each timepoint/model
                         n_timepoints = predictions.shape[2]
                         for t in range(n_timepoints):
-                            mse_timepoint = mean_squared_error(Y_test[:,:,t].reshape(-1), predictions[:,:,t].reshape(-1))
+                            fit_measure_timepoint = mean_squared_error(Y_test[:,:,t].reshape(-1), predictions[:,:,t].reshape(-1))
                             # Save loss
-                            mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = mse_timepoint
+                            mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = fit_measure_timepoint
                     else:
                         # Calculate the mean squared error across all flattened features and timepoints
                         mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
 
                         # Calculate variance explained 
-                        var_explained = explained_variance_score(Y_test.reshape(-1), predictions.reshape(-1))
+                        var_explained = r2_score(Y_test.reshape(-1), predictions.reshape(-1))
+
+                        # Control values
+                        #if var_explained < 0:
+                        #    raise ValueError("Contains negative values for Variance Explained.")
+                        #elif var_explained > 1:
+                        #    raise ValueError("Contains values larger 1 for Variance Explained.")
+
 
                         # Save loss and variance explained
                         mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = mse
@@ -1060,20 +1069,39 @@ class VisualizationHelper(GLMHelper):
         super().__init__(norms=norms, subject_id=subject_id)
 
 
-    def visualize_GLM_results(self, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True):
+    def visualize_GLM_results(self, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True, var_explained:bool = True):
         """
         Visualizes results from GLMHelper.predict_from_mapping
         """
         session_day_differences = self.get_session_date_differences()
-        if not by_timepoints:
-            type_of_content = "mse_losses"
-        else:
+
+        if by_timepoints:
             type_of_content = "mse_losses_timepoint"
-        mse_losses_norms = {}
+        elif var_explained:
+            type_of_content = "var_explained"
+        else:
+            type_of_content = "mse_losses"
+
+        if var_explained:
+            type_of_fit_measure = "Variance Explained"
+        else:
+            type_of_fit_measure = "MSE"
+
+        fit_measure_norms = {}
         for normalization in self.normalizations:
-            # Load loss dict
-            mse_session_losses = self.read_dict_from_json(type_of_content=type_of_content, type_of_norm=normalization)
-            mse_losses_norms[normalization] = mse_session_losses
+            # Load loss/var explained dict
+            session_fit_measures = self.read_dict_from_json(type_of_content=type_of_content, type_of_norm=normalization)
+            fit_measure_norms[normalization] = session_fit_measures
+
+            # Control values
+            if var_explained:
+                for train_session in session_fit_measures['session_mapping']:
+                    for pred_session in session_fit_measures['session_mapping'][train_session]['session_pred']:
+                        variance_explained_val = session_fit_measures['session_mapping'][train_session]['session_pred'][pred_session]
+                        if variance_explained_val < 0:
+                            raise ValueError("Contains negative values for Variance Explained.")
+                        elif variance_explained_val > 1:
+                            raise ValueError("Contains values larger 1 for Variance Explained.")
 
             if only_distance:
                 # Plot loss as a function of distance of predicted session from "training" session
@@ -1081,11 +1109,11 @@ class VisualizationHelper(GLMHelper):
 
                 # Iterate over each training session
                 losses_by_distances = {}
-                for train_session, data in mse_session_losses['session_mapping'].items():
+                for train_session, data in session_fit_measures['session_mapping'].items():
                     if train_session in omit_sessions:
                         continue
                     # Calculate distance and collect corresponding losses
-                    for pred_session, mse in data['session_pred'].items():
+                    for pred_session, fit_measure in data['session_pred'].items():
                         if pred_session in omit_sessions:
                             continue
                         if train_session != pred_session:
@@ -1094,18 +1122,18 @@ class VisualizationHelper(GLMHelper):
                             else:
                                 distance = session_day_differences[train_session][pred_session]
                             if distance not in losses_by_distances:
-                                losses_by_distances[distance] = {"loss": mse, "num_losses": 1}
+                                losses_by_distances[distance] = {"fit_measure": fit_measure, "num_measures": 1}
                             else:
-                                losses_by_distances[distance]["loss"] += mse
-                                losses_by_distances[distance]["num_losses"] += 1
+                                losses_by_distances[distance]["fit_measure"] += fit_measure
+                                losses_by_distances[distance]["num_measures"] += 1
 
                 # Calculate average losses over distances
                 avg_losses = {}
                 num_datapoints = {}
 
                 for distance in losses_by_distances:
-                    avg_losses[distance] = losses_by_distances[distance]["loss"] / losses_by_distances[distance]["num_losses"]
-                    num_datapoints[distance] = losses_by_distances[distance]["num_losses"]
+                    avg_losses[distance] = losses_by_distances[distance]["fit_measure"] / losses_by_distances[distance]["num_measures"]
+                    num_datapoints[distance] = losses_by_distances[distance]["num_measures"]
 
                 # Sort by distance for plot lines
                 avg_losses = dict(sorted(avg_losses.items()))
@@ -1121,16 +1149,16 @@ class VisualizationHelper(GLMHelper):
 
                 # Plot
                 title_addition = "in days" if distance_in_days else ""
-                ax1.plot(x_values, y_values, marker='o', linestyle='-', label=f'Average loss')
+                ax1.plot(x_values, y_values, marker='o', linestyle='-', label=f'Average {type_of_fit_measure}')
                 ax1.plot(x_values, trend_line, color='green', linestyle='-', label=f'Trend line (r={r_value})', linewidth=3)
                 ax1.set_xlabel(f'Distance {title_addition} between "train" and "test" Session')
-                ax1.set_ylabel('Mean Squared Error')
+                ax1.set_ylabel(f'{type_of_fit_measure}')
                 ax1.tick_params(axis='y', labelcolor='b')
                 ax1.grid(True)
         
                 # Add secondary y-axis for datapoints
                 ax2 = ax1.twinx()
-                ax2.plot(num_datapoints.keys(), num_datapoints.values(), 'r--', label='Number of datapoints/losses averaged')
+                ax2.plot(num_datapoints.keys(), num_datapoints.values(), 'r--', label='Number of datapoints averaged')
                 ax2.set_ylabel('Number of Datapoints', color='r')
                 ax2.tick_params(axis='y', labelcolor='r')
 
@@ -1139,65 +1167,65 @@ class VisualizationHelper(GLMHelper):
                 lines2, labels2 = ax2.get_legend_handles_labels()
                 ax1.legend(lines + lines2, labels + labels2, loc='upper right')
                 
-                ax1.set_title(f'MSE vs Distance for Predictions Averaged Across all Sessions with Norm {normalization}, sessions omitted: {omit_sessions}, {date.today()}')
+                ax1.set_title(f'{type_of_fit_measure} vs Distance for Predictions Averaged Across all Sessions with Norm {normalization}, sessions omitted: {omit_sessions}, {date.today()}')
                 plt.grid(True)
                 plt.show()
 
                 # Save the plot to a file
                 plot_folder = f"data_files/visualizations/only_distance/subject_{self.subject_id}/norm_{normalization}"
-                plot_file = f"MSE_plot_over_distance_{normalization}.png"
+                plot_file = f"{type_of_fit_measure}_plot_over_distance_{normalization}.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
             elif not by_timepoints:
-                # Collect self-prediction MSEs for baseline and prepare average non-self-MSE calculation
-                self_prediction_mses = {}
-                average_prediction_mses = {}
-                for session in mse_session_losses['session_mapping']:
-                    self_prediction_mses[session] = mse_session_losses['session_mapping'][session]['session_pred'][session]
-                    average_prediction_mses[session] = 0
+                # Collect self-prediction {type_of_fit_measure}s for baseline and prepare average non-self-{type_of_fit_measure} calculation
+                self_prediction_fit_measures = {}
+                average_prediction_fit_measures = {}
+                for session in session_fit_measures['session_mapping']:
+                    self_prediction_fit_measures[session] = session_fit_measures['session_mapping'][session]['session_pred'][session]
+                    average_prediction_fit_measures[session] = 0
 
-                # Calculate average MSE for each session from all other training sessions
-                for train_session, data in mse_session_losses['session_mapping'].items():
-                    for pred_session, mse in data['session_pred'].items():
+                # Calculate average {type_of_fit_measure} for each session from all other training sessions
+                for train_session, data in session_fit_measures['session_mapping'].items():
+                    for pred_session, fit_measure in data['session_pred'].items():
                         if train_session != pred_session:
-                            average_prediction_mses[pred_session] += mse
+                            average_prediction_fit_measures[pred_session] += fit_measure
                 num_other_sessions = len(self.session_ids_num) - 1
-                for session in average_prediction_mses:
-                    average_prediction_mses[session] /= num_other_sessions
+                for session in average_prediction_fit_measures:
+                    average_prediction_fit_measures[session] /= num_other_sessions
 
                 if separate_plots:
                     # Generate separate plots for each training session
-                    for train_session, data in mse_session_losses['session_mapping'].items():
+                    for train_session, data in session_fit_measures['session_mapping'].items():
                         plt.figure(figsize=(10, 6))
                         sessions = list(data['session_pred'].keys())
-                        losses = list(data['session_pred'].values())
-                        plt.plot(sessions, losses, marker='o', linestyle='-', label=f'Training Session {train_session}')
-                        plt.plot(self_prediction_mses.keys(), self_prediction_mses.values(), 'r--', label='Self-prediction MSE')
-                        plt.plot(average_prediction_mses.keys(), average_prediction_mses.values(), 'g-.', label='Average Non-self-prediction MSE')
+                        fit_measures = list(data['session_pred'].values())
+                        plt.plot(sessions, fit_measures, marker='o', linestyle='-', label=f'Training Session {train_session}')
+                        plt.plot(self_prediction_fit_measures.keys(), self_prediction_fit_measures.values(), 'r--', label=f'Self-prediction {type_of_fit_measure}')
+                        plt.plot(average_prediction_fit_measures.keys(), average_prediction_fit_measures.values(), 'g-.', label=f'Average Non-self-prediction {type_of_fit_measure}')
 
-                        plt.title(f'MSE for Predictions from Training Session {train_session}')
+                        plt.title(f'{type_of_fit_measure} for Predictions from Training Session {train_session}')
                         plt.xlabel('Predicted Session')
-                        plt.ylabel('Mean Squared Error')
+                        plt.ylabel(f'{type_of_fit_measure}')
                         plt.legend()
                         plt.grid(True)
 
                         # Save the plot to a file
                         plot_folder = f"data_files/visualizations/seperate_plots_{separate_plots}/subject_{self.subject_id}/norm_{normalization}"
-                        plot_file = f"MSE_plot_session{train_session}.png"
+                        plot_file = f"{type_of_fit_measure}_plot_session{train_session}.png"
                         self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
                 else:
                     # Generate a single plot with all training sessions
                     plt.figure(figsize=(12, 8))
-                    for train_session, data in mse_session_losses['session_mapping'].items():
+                    for train_session, data in session_fit_measures['session_mapping'].items():
                         sessions = list(data['session_pred'].keys())
-                        losses = list(data['session_pred'].values())
-                        plt.plot(sessions, losses, marker='o', linestyle='-', label=f'Trained on Session {train_session}')
-                    plt.plot(self_prediction_mses.keys(), self_prediction_mses.values(), 'r--', label='Self-prediction MSE')
-                    plt.plot(average_prediction_mses.keys(), average_prediction_mses.values(), 'g-.', label='Average Non-self-prediction MSE')
+                        fit_measures = list(data['session_pred'].values())
+                        plt.plot(sessions, fit_measures, marker='o', linestyle='-', label=f'Trained on Session {train_session}')
+                    plt.plot(self_prediction_fit_measures.keys(), self_prediction_fit_measures.values(), 'r--', label=f'Self-prediction {type_of_fit_measure}')
+                    plt.plot(average_prediction_fit_measures.keys(), average_prediction_fit_measures.values(), 'g-.', label=f'Average Non-self-prediction {type_of_fit_measure}')
                     
-                    plt.title('MSE for Predictions Across All Sessions')
+                    plt.title(f'{type_of_fit_measure} for Predictions Across All Sessions')
                     plt.xlabel('Prediction Session')
-                    plt.ylabel('Mean Squared Error')
+                    plt.ylabel(f'{type_of_fit_measure}')
                     plt.legend()
                     plt.grid(True)
 
@@ -1206,52 +1234,52 @@ class VisualizationHelper(GLMHelper):
                     plot_file = f"MSE_plot_all_sessions.png"
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
             elif by_timepoints:
-                # Collect losses for timepoint models on predictions on the own session
-                losses_by_session_by_timepoint = {"session": {}}
-                for session_id in mse_session_losses['session_mapping']:
-                    losses_by_session_by_timepoint["session"][session_id] = {"timepoint":{}}
-                    for timepoint in mse_session_losses['session_mapping'][session_id]["session_pred"][session_id]["timepoint"]:
-                        mse_timepoint = mse_session_losses['session_mapping'][session_id]["session_pred"][session_id]["timepoint"][timepoint]
-                        losses_by_session_by_timepoint["session"][session_id]["timepoint"][timepoint] = mse_timepoint
+                # Collect fit_measures for timepoint models on predictions on the own session
+                fit_measures_by_session_by_timepoint = {"session": {}}
+                for session_id in session_fit_measures['session_mapping']:
+                    fit_measures_by_session_by_timepoint["session"][session_id] = {"timepoint":{}}
+                    for timepoint in session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]["timepoint"]:
+                        fit_measure_timepoint = session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]["timepoint"][timepoint]
+                        fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"][timepoint] = fit_measure_timepoint
 
                 # Plot results averaged over all sessions
-                num_timepoints = len([timepoint for timepoint in losses_by_session_by_timepoint["session"]["1"]["timepoint"]])
-                timepoint_average_losses = {}
+                num_timepoints = len([timepoint for timepoint in fit_measures_by_session_by_timepoint["session"]["1"]["timepoint"]])
+                timepoint_average_fit_measure = {}
                 for timepoint in range(num_timepoints):
                     # Calculate average over all within session predictions for this timepoint
-                    losses = []
-                    for session in losses_by_session_by_timepoint["session"]:
-                        timepoint_session_loss = losses_by_session_by_timepoint["session"][session]["timepoint"][str(timepoint)]
-                        losses.append(timepoint_session_loss)
-                    avg_loss = np.sum(losses) / len(losses)
-                    timepoint_average_losses[timepoint] = avg_loss
-                timepoint_avg_loss_list = [timepoint_average_losses[timepoint] for timepoint in timepoint_average_losses]
+                    fit_measures = []
+                    for session in fit_measures_by_session_by_timepoint["session"]:
+                        timepoint_session_loss = fit_measures_by_session_by_timepoint["session"][session]["timepoint"][str(timepoint)]
+                        fit_measures.append(timepoint_session_loss)
+                    avg_loss = np.sum(fit_measures) / len(fit_measures)
+                    timepoint_average_fit_measure[timepoint] = avg_loss
+                timepoint_avg_loss_list = [timepoint_average_fit_measure[timepoint] for timepoint in timepoint_average_fit_measure]
 
                 plt.figure(figsize=(10, 6))
                 plt.bar(list(range(num_timepoints)), timepoint_avg_loss_list, color='blue')
-                plt.title('MSE Loss per Timepoint Model. Averaged across all Sessions, predicting themselves.')
+                plt.title(f'{type_of_fit_measure} Loss per Timepoint Model. Averaged across all Sessions, predicting the{type_of_fit_measure}lves.')
                 plt.xlabel('Timepoints')
-                plt.ylabel('MSE Loss')
+                plt.ylabel(f'{type_of_fit_measure} Loss')
                 plt.grid(True)
 
                 # Save the plot to a file
                 plot_folder = f"data_files/visualizations/timepoint_model_comparison/subject_{self.subject_id}/norm_{normalization}"
-                plot_file = f"MSE_timepoint_comparison_{normalization}.png"
+                plot_file = f"fit_measure_timepoint_comparison_{normalization}.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
             else:
                 raise ValueError("[ERROR][visualize_GLM_results] Function called with invalid parameter configuration.")
 
         if not by_timepoints:
-            mse_losses_new = {}
-            for norm, loss in mse_losses_norms.items():
-                if loss in mse_losses_new.values():
+            fit_measures_new = {}
+            for norm, fit_measure in fit_measure_norms.items():
+                if fit_measure in fit_measures_new.values():
                     # get key
-                    for key, value in mse_losses_new.items():
-                        if value == loss:
+                    for key, value in fit_measures_new.items():
+                        if value == fit_measure:
                             norm_new = key
                     print(f"Same loss for norm {norm} and norm {norm_new}")  # raise ValueError()
 
-                mse_losses_new[norm] = loss
+                fit_measures_new[norm] = fit_measure
 
     
     def visualize_meg_epochs_mne(self):

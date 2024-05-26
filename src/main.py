@@ -19,6 +19,7 @@ lock_event = "saccade"
 meg_channels = [1731, 1921, 2111, 2341, 2511]
 timepoint_min = 50
 timepoint_max = 250
+alpha = 0
 
 # Choose Calculations to be performed
 create_metadata = False
@@ -26,8 +27,8 @@ create_train_test_split = False
 create_non_meg_dataset = False
 create_meg_dataset = False
 extract_features = False
-train_GLM = False
-generate_predictions_with_GLM = False
+train_GLM = True
+generate_predictions_with_GLM = True
 visualization = True
 
 for subject_id in subject_ids:
@@ -53,6 +54,8 @@ for subject_id in subject_ids:
         if create_train_test_split:
             # Create train/test split based on sceneIDs (based on trial_ids)
             dataset_helper.create_train_test_split()
+
+            print("Train/Test split created.")
 
         if create_non_meg_dataset:
             # Create crop numpy dataset based on split
@@ -80,7 +83,7 @@ for subject_id in subject_ids:
 
     ##### Train GLM from features to meg #####
     if train_GLM or generate_predictions_with_GLM:
-        glm_helper = GLMHelper(norms=normalizations, subject_id=subject_id, chosen_channels=meg_channels)
+        glm_helper = GLMHelper(norms=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alpha=alpha)
 
         # Train GLM
         if train_GLM:
@@ -106,7 +109,7 @@ for subject_id in subject_ids:
 
         # Visualize prediction results
         #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
-        visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=True, omit_sessions=["4","10"], separate_plots=False)
+        visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=True)
         
         # Visualize model perspective (values by timepoint)
         #visualization_helper.visualize_model_perspective(plot_norms=["no_norm"], seperate_plots=False)  # , "no_norm"
