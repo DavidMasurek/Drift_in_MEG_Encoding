@@ -22,6 +22,7 @@ from thingsvision import get_extractor
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import explained_variance_score
+from scipy.stats import linregress
 
 # Logging related
 mne.set_log_level(verbose="ERROR")
@@ -1110,9 +1111,18 @@ class VisualizationHelper(GLMHelper):
                 avg_losses = dict(sorted(avg_losses.items()))
                 num_datapoints = dict(sorted(num_datapoints.items()))
 
+                x_values = np.array(list(avg_losses.keys()))
+                y_values = np.array(list(avg_losses.values()))
+
+                # Calculate trend line 
+                slope, intercept, r_value, p_value, std_err = linregress(list(avg_losses.keys()), list(avg_losses.values()))
+                trend_line = slope * x_values + intercept
+                r_value = "{:.3f}".format(r_value)  # limit to three decimals
+
                 # Plot
                 title_addition = "in days" if distance_in_days else ""
-                ax1.plot(avg_losses.keys(), avg_losses.values(), marker='o', linestyle='-', label=f'Average loss')
+                ax1.plot(x_values, y_values, marker='o', linestyle='-', label=f'Average loss')
+                ax1.plot(x_values, trend_line, color='green', linestyle='-', label=f'Trend line (r={r_value})', linewidth=3)
                 ax1.set_xlabel(f'Distance {title_addition} between "train" and "test" Session')
                 ax1.set_ylabel('Mean Squared Error')
                 ax1.tick_params(axis='y', labelcolor='b')
