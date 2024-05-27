@@ -19,14 +19,14 @@ lock_event = "saccade"
 meg_channels = [1731, 1921, 2111, 2341, 2511]
 timepoint_min = 50
 timepoint_max = 250
-alpha = 0
+alpha = 0.3
 
 # Choose Calculations to be performed
 create_metadata = False
 create_train_test_split = False
 create_non_meg_dataset = False
-create_meg_dataset = False
-extract_features = False
+create_meg_dataset = True
+extract_features = True
 train_GLM = True
 generate_predictions_with_GLM = True
 visualization = True
@@ -110,6 +110,7 @@ for subject_id in subject_ids:
         # Visualize prediction results
         #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
         visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=True)
+        visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
         
         # Visualize model perspective (values by timepoint)
         #visualization_helper.visualize_model_perspective(plot_norms=["no_norm"], seperate_plots=False)  # , "no_norm"

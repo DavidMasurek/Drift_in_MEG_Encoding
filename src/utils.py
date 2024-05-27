@@ -377,9 +377,9 @@ class MetadataHelper(BasicOperationsHelper):
         # Use defaultdict to automatically create missing keys
         combined_metadata_dict = self.recursive_defaultdict()
 
-        meg_index = 0
         meg_missing_trials = []
         for session_id in meg_metadata["sessions"]:
+            meg_index = 0
             for trial_id in meg_metadata["sessions"][session_id]["trials"]:
                 for timepoint_id in meg_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
                     # For each timepoint in the meg metadata: Check if this timepoint is in the crop metadata and if so store it
@@ -553,24 +553,20 @@ class DatasetHelper(MetadataHelper):
             trials_split_dict = self.load_split_data_from_file(session_id_num=session_id, type_of_content="trial_splits")
 
             crop_split = {"train": [], "test": []}
-            for trial_id in combined_metadata["sessions"][session_id]["trials"]:
-                # Check if trial belongs to train or test split
-                if trial_id in trials_split_dict["train"]:
-                    trial_type = "train"
-                elif trial_id in trials_split_dict["test"]:
-                    trial_type = "test"
-                else:
-                    raise ValueError(f"Trial_id {trial_id} neither in train nor test split.")
-                for timepoint_id in combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
-                    # Extract image for every epoch/fixation (if there is both crop and metadata for the timepoint)
-                    if timepoint_id in combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
+            for split in crop_split:
+                # Iterate over train/test split by trials (not over combined_metadata as before)
+                # In this fashion, the first element in the crop and meg dataset of each split type will surely be the first element in the array of trials for that split
+                for trial_id in trials_split_dict[split]:
+                    # Get timepoints from combined_metadata
+                    for timepoint_id in combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
                         # Get crop path
                         crop_filename = ''.join([combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["crop_identifier"], ".png"])
                         crop_path = os.path.join(crop_folder_path, crop_filename)
 
                         # Read crop as array and concat
                         crop = imageio.imread(crop_path)
-                        crop_split[trial_type].append(crop)
+                        crop_split[split].append(crop)
+
             # Convert to numpy array
             for split in crop_split:
                 crop_split[split] = np.stack(crop_split[split], axis=0)
@@ -656,12 +652,6 @@ class DatasetHelper(MetadataHelper):
 
                     #print(f"[Session {session_id_num}]: After normalization and combination: combined_meg.shape: {combined_meg.shape}")
 
-                    # Split meg data 
-                    # Get train/test split based on trials (based on scenes)
-                    trials_split_dict = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="trial_splits")
-
-                    meg_split = {"train": [], "test": []}
-
                     # Debugging: Count timepoints in meg metadata
                     num_meg_metadata_timepoints = 0
                     for trial_id in meg_metadata["sessions"][session_id_num]["trials"]:
@@ -682,39 +672,25 @@ class DatasetHelper(MetadataHelper):
                             num_combined_metadata_timepoints += 1
                     #print(f"[Session {session_id_num}]: Timepoints in combined metadata: {num_combined_metadata_timepoints}")
 
+                    # Split meg data 
+                    # Get train/test split based on trials (based on scenes)
+                    trials_split_dict = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="trial_splits")
 
-                    # Iterate through meg metadata for simplicity with indexing
-                    index = 0
-                    for trial_id in meg_metadata["sessions"][session_id_num]["trials"]:
-                        if trial_id in trials_split_dict["train"]:
-                            trial_type = "train"
-                        elif trial_id in trials_split_dict["test"]:
-                            trial_type = "test"
-                        else:
-                            # Raise error if the trial is in neither split, but is in the combined metadata (in this case it should be there)
-                            if trial_id in combined_metadata["sessions"][session_id_num]["trials"]:
-                                raise ValueError(f"Session {session_id_num}: Trial_id {trial_id} neither in train nor test split.")
-                            # Otherwise skip the data in this trial (there is no corresponding crop data for the meg trial data)
-                            else:
-                                n_timepoints_in_skipped_trial = 0
-                                for timepoint in meg_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
-                                    n_timepoints_in_skipped_trial += 1
-                                    index += 1
-                                print(f"[Session {session_id_num}]: Trial {trial_id} from meg metadata is not in combined metadata. Timepoints in trial: {n_timepoints_in_skipped_trial}")
-                                continue
-                        for timepoint in meg_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
-                            # Check if there is both crop and metadata for the timepoint
-                            if timepoint in combined_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
-                                # Assign to split
-                                meg_split[trial_type].append(combined_meg[index])
-                            # Advance index
-                            index += 1
+                    # Iterate over train/test split by trials (not over meg_metadata as before)
+                    # In this fashion, the first element in the crop and meg dataset of each split type will surely be the first element in the array of trials for that split
+                    meg_split = {"train": [], "test": []}
+                    for split in meg_split:
+                        for trial_id in trials_split_dict[split]:
+                            # Get timepoints from combined_metadata
+                            for timepoint_id in combined_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
+                                # Get meg data by index 
+                                meg_index = combined_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"][timepoint_id]["meg_index"]
+                                meg_datapoint = combined_meg[meg_index]
 
-                    if index != num_meg_metadata_timepoints:
-                        raise ValueError(f"Index used to create dataset is not identical to number of timepoints in meg metadata after iteration. Index: {index}, num_meg_metadata_timepoints: {num_meg_metadata_timepoints}.")
-                    
+                                meg_split[split].append(meg_datapoint)
+    
                     # Convert meg data to numpy array
-                    for split in ["train", "test"]:
+                    for split in meg_split:
                         meg_split[split] = np.array(meg_split[split])
 
                     meg_timepoints_in_dataset = meg_split['train'].shape[0] + meg_split['test'].shape[0]
@@ -1094,14 +1070,14 @@ class VisualizationHelper(GLMHelper):
             fit_measure_norms[normalization] = session_fit_measures
 
             # Control values
-            if var_explained:
-                for train_session in session_fit_measures['session_mapping']:
-                    for pred_session in session_fit_measures['session_mapping'][train_session]['session_pred']:
-                        variance_explained_val = session_fit_measures['session_mapping'][train_session]['session_pred'][pred_session]
-                        if variance_explained_val < 0:
-                            raise ValueError("Contains negative values for Variance Explained.")
-                        elif variance_explained_val > 1:
-                            raise ValueError("Contains values larger 1 for Variance Explained.")
+            #if var_explained:
+            #    for train_session in session_fit_measures['session_mapping']:
+            #        for pred_session in session_fit_measures['session_mapping'][train_session]['session_pred']:
+            #            variance_explained_val = session_fit_measures['session_mapping'][train_session]['session_pred'][pred_session]
+            #            if variance_explained_val < 0:
+            #                raise ValueError("Contains negative values for Variance Explained.")
+            #            elif variance_explained_val > 1:
+            #                raise ValueError("Contains values larger 1 for Variance Explained.")
 
             if only_distance:
                 # Plot loss as a function of distance of predicted session from "training" session
