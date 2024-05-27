@@ -118,7 +118,7 @@ class BasicOperationsHelper:
         return session_id_num
 
 
-    def read_dict_from_json(self, type_of_content: str, type_of_norm: str = None) -> dict:
+    def read_dict_from_json(self, type_of_content: str, type_of_norm: str = None, alpha:int = None, predict_train_data:bool = False) -> dict:
         """
         Helper function to read json files into dicts.
         """
@@ -126,12 +126,19 @@ class BasicOperationsHelper:
         if type_of_content not in valid_types:
             raise ValueError(f"Function read_dict_from_json called with unrecognized type {type_of_content}.")
 
+        if alpha is not None: 
+            alpha_insert = f"/alpha_{alpha}"
+            alpha_name_insert = f"_alpha_{alpha}"
+        else:
+            alpha_insert = ""
+            alpha_name_insert = ""
+
         if type_of_content == "mse_losses":
-            file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/mse_losses_{type_of_norm}_dict.json"
+            file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}{alpha_insert}/mse_losses_{type_of_norm}_dict.json"
         elif type_of_content == "mse_losses_timepoint":
             file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/timepoints/norm_{type_of_norm}/mse_losses_timepoint_{type_of_norm}_dict.json"
         elif type_of_content == "var_explained":
-            file_path = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/var_explained_{type_of_norm}_dict.json"
+            file_path = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}{alpha_insert}/predict_train_data_{predict_train_data}/var_explained_{type_of_norm}{alpha_name_insert}_dict.json"
         else:
             file_path = f"data_files/metadata/{type_of_content}/subject_{self.subject_id}/{type_of_content}_dict.json"
         
@@ -145,7 +152,7 @@ class BasicOperationsHelper:
         return data_dict
 
 
-    def save_dict_as_json(self, type_of_content: str, dict_to_store: dict, type_of_norm: str = None) -> None:
+    def save_dict_as_json(self, type_of_content: str, dict_to_store: dict, type_of_norm: str = None, alpha:int = None, predict_train_data:bool = False) -> None:
         """
         Helper function to store dicts as json files.
         """
@@ -157,14 +164,25 @@ class BasicOperationsHelper:
             if type_of_content == "mse_losses_timepoint":
                 timepoint_folder = "timepoints/"
                 timepoint_name = "_timepoints"
+                alpha_insert = ""
             else:
                 timepoint_folder = ""
                 timepoint_name = ""
-            storage_folder = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/{timepoint_folder}norm_{type_of_norm}"
+                if alpha is not None:
+                    alpha_insert = f"/alpha_{alpha}"
+                else:
+                    alpha_insert = ""
+            storage_folder = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/{timepoint_folder}norm_{type_of_norm}{alpha_insert}"
             name_addition = f"_{type_of_norm}"
         elif type_of_content == "var_explained":
-            storage_folder = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}"
-            name_addition = f"_{type_of_norm}"
+            if alpha is not None:
+                alpha_insert = f"/alpha_{alpha}"
+                alpha_name_insert = f"_alpha_{alpha}"
+            else:
+                alpha_insert = ""
+                alpha_name_insert= ""
+            storage_folder = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}{alpha_insert}/predict_train_data_{predict_train_data}"
+            name_addition = f"_{type_of_norm}{alpha_name_insert}"
         else:
             storage_folder = f'data_files/metadata/{type_of_content}/subject_{self.subject_id}'
             name_addition = ""
@@ -887,7 +905,7 @@ class ExtractionHelper(BasicOperationsHelper):
 
 
 class GLMHelper(DatasetHelper, ExtractionHelper):
-    def __init__(self, norms: list, subject_id: str = "02", chosen_channels: list = [1731, 1921, 2111, 2341, 2511], alpha=0.5):
+    def __init__(self, norms: list, subject_id: str = "02", chosen_channels: list = [1731, 1921, 2111, 2341, 2511], alpha=1):
         DatasetHelper.__init__(self, normalizations=norms, subject_id=subject_id, chosen_channels=chosen_channels)
         ExtractionHelper.__init__(self, subject_id=subject_id)
 
@@ -909,96 +927,109 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                 X_train, Y_train = ann_features['train'], meg_data['train']
 
-                # Initialize Helper class
-                ridge_model = GLMHelper.MultiDimensionalRidge(alpha=self.alpha) #=0.5
+                alpha = 1
+                while alpha <= self.alpha:
+                    # Initialize Helper class
+                    ridge_model = GLMHelper.MultiDimensionalRidge(alpha=alpha) 
 
-                # Fit model on train data
-                ridge_model.fit(X_train, Y_train)
+                    # Fit model on train data
+                    ridge_model.fit(X_train, Y_train)
 
-                # Store trained models as pickle
-                save_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/session_{session_id_num}"  
-                save_file = "GLM_models.pkl"
-                if not os.path.exists(save_folder):
-                    os.makedirs(save_folder)
-                save_path = os.path.join(save_folder, save_file)
+                    # Store trained models as pickle
+                    save_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/alpha_{alpha}/session_{session_id_num}"  
+                    save_file = "GLM_models.pkl"
+                    if not os.path.exists(save_folder):
+                        os.makedirs(save_folder)
+                    save_path = os.path.join(save_folder, save_file)
 
-                with open(save_path, 'wb') as file:
-                    pickle.dump(ridge_model.models, file)
+                    with open(save_path, 'wb') as file:
+                        pickle.dump(ridge_model.models, file)
+
+                    alpha *= 10
 
         
-    def predict_from_mapping(self, store_timepoint_based_losses=False):
+    def predict_from_mapping(self, store_timepoint_based_losses=False, predict_train_data=False):
         """
         Based on the trained mapping for each session, predicts MEG data over all sessions from their respective test features.
+        If predict_train_data is True, predicts the train data of each session as a sanity check of the complete pipeline. Expect strong overfit.
         """
         # Debugging
         ridge_models_session_1 = []
 
-        for normalization in self.normalizations:
-            print(f"Predicting from mapping for normalization {normalization}")
-            variance_explained_dict = self.recursive_defaultdict()
-            mse_session_losses = {"session_mapping": {}}
-            for session_id_model in self.session_ids_num:
-                mse_session_losses["session_mapping"][session_id_model] = {"session_pred": {}}
-                # Get trained ridge regression model for this session
-                # Load ridge model
-                storage_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/session_{session_id_model}"  
-                storage_file = "GLM_models.pkl"
-                storage_path = os.path.join(storage_folder, storage_file)
-                with open(storage_path, 'rb') as file:
-                    ridge_models = pickle.load(file)
+        alpha = 1
+        while alpha <= self.alpha:
+            for normalization in self.normalizations:
+                print(f"Predicting from mapping for normalization {normalization}")
+                variance_explained_dict = self.recursive_defaultdict()
+                mse_session_losses = {"session_mapping": {}}
+                for session_id_model in self.session_ids_num:
+                    mse_session_losses["session_mapping"][session_id_model] = {"session_pred": {}}
+                    # Get trained ridge regression model for this session
+                    # Load ridge model
+                    storage_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/alpha_{alpha}/session_{session_id_model}"  
+                    storage_file = "GLM_models.pkl"
+                    storage_path = os.path.join(storage_folder, storage_file)
+                    with open(storage_path, 'rb') as file:
+                        ridge_models = pickle.load(file)
 
-                # Debugging
-                if session_id_model == 1:
-                    assert ridge_models not in ridge_models_session_1, "Ridge models doubled."
-                    ridge_models_session_1.append(ridge_models)
-                
-                # Initialize MultiDim GLM class with stored models
-                ridge_model = GLMHelper.MultiDimensionalRidge(alpha=self.alpha, models=ridge_models)
+                    # Debugging
+                    if session_id_model == 1:
+                        assert ridge_models not in ridge_models_session_1, "Ridge models doubled."
+                        ridge_models_session_1.append(ridge_models)
+                    
+                    # Initialize MultiDim GLM class with stored models
+                    ridge_model = GLMHelper.MultiDimensionalRidge(alpha=alpha, models=ridge_models)
 
-                # Generate predictions for test features over all sessions and evaluate them 
-                for session_id_pred in self.session_ids_num:
-                    # Get ANN features and MEG data for session where predictions are to be evaluated
-                    ann_features = self.load_split_data_from_file(session_id_num=session_id_pred, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
-                    meg_data = self.load_split_data_from_file(session_id_num=session_id_pred, type_of_content="meg_data", type_of_norm=normalization)
-                    X_test, Y_test = ann_features['test'], meg_data['test']
+                    # Generate predictions for test features over all sessions and evaluate them 
+                    for session_id_pred in self.session_ids_num:
+                        # Get ANN features and MEG data for session where predictions are to be evaluated
+                        ann_features = self.load_split_data_from_file(session_id_num=session_id_pred, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
+                        meg_data = self.load_split_data_from_file(session_id_num=session_id_pred, type_of_content="meg_data", type_of_norm=normalization)
+                        
+                        if predict_train_data:
+                            X_test, Y_test = ann_features['train'], meg_data['train']
+                        else:
+                            X_test, Y_test = ann_features['test'], meg_data['test']
 
-                    # Generate predictions
-                    predictions = ridge_model.predict(X_test)
+                        # Generate predictions
+                        predictions = ridge_model.predict(X_test)
 
-                    if store_timepoint_based_losses:
-                        mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = {"timepoint":{}}
-                        # Calculate loss seperately for each timepoint/model
-                        n_timepoints = predictions.shape[2]
-                        for t in range(n_timepoints):
-                            fit_measure_timepoint = mean_squared_error(Y_test[:,:,t].reshape(-1), predictions[:,:,t].reshape(-1))
-                            # Save loss
-                            mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = fit_measure_timepoint
-                    else:
-                        # Calculate the mean squared error across all flattened features and timepoints
-                        mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
+                        if store_timepoint_based_losses:
+                            mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = {"timepoint":{}}
+                            # Calculate loss seperately for each timepoint/model
+                            n_timepoints = predictions.shape[2]
+                            for t in range(n_timepoints):
+                                fit_measure_timepoint = mean_squared_error(Y_test[:,:,t].reshape(-1), predictions[:,:,t].reshape(-1))
+                                # Save loss
+                                mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = fit_measure_timepoint
+                        else:
+                            # Calculate the mean squared error across all flattened features and timepoints
+                            mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
 
-                        # Calculate variance explained 
-                        var_explained = r2_score(Y_test.reshape(-1), predictions.reshape(-1))
+                            # Calculate variance explained 
+                            var_explained = r2_score(Y_test.reshape(-1), predictions.reshape(-1))
 
-                        # Control values
-                        #if var_explained < 0:
-                        #    raise ValueError("Contains negative values for Variance Explained.")
-                        #elif var_explained > 1:
-                        #    raise ValueError("Contains values larger 1 for Variance Explained.")
+                            # Control values
+                            #if var_explained < 0:
+                            #    raise ValueError("Contains negative values for Variance Explained.")
+                            #elif var_explained > 1:
+                            #    raise ValueError("Contains values larger 1 for Variance Explained.")
 
 
-                        # Save loss and variance explained
-                        mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = mse
-                        variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = var_explained
+                            # Save loss and variance explained
+                            mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = mse
+                            variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = var_explained
 
-            # Store loss dict
-            if store_timepoint_based_losses:
-                mse_type_of_content = "mse_losses_timepoint"
-            else:
-                mse_type_of_content = "mse_losses"
+                # Store loss dict
+                if store_timepoint_based_losses:
+                    mse_type_of_content = "mse_losses_timepoint"
+                else:
+                    mse_type_of_content = "mse_losses"
 
-            self.save_dict_as_json(type_of_content=mse_type_of_content, dict_to_store=mse_session_losses, type_of_norm=normalization)
-            self.save_dict_as_json(type_of_content="var_explained", dict_to_store=variance_explained_dict, type_of_norm=normalization)
+                self.save_dict_as_json(type_of_content=mse_type_of_content, dict_to_store=mse_session_losses, type_of_norm=normalization, alpha=alpha)
+                self.save_dict_as_json(type_of_content="var_explained", dict_to_store=variance_explained_dict, type_of_norm=normalization, alpha=alpha, predict_train_data=predict_train_data)
+
+            alpha *= 10
 
 
     class MultiDimensionalRidge:
@@ -1041,8 +1072,55 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
 
 class VisualizationHelper(GLMHelper):
-    def __init__(self, norms:list, subject_id: str = "02"):
-        super().__init__(norms=norms, subject_id=subject_id)
+    def __init__(self, norms:list, subject_id: str = "02", alpha=1):
+        super().__init__(norms=norms, subject_id=subject_id, alpha=alpha)
+
+
+    def visualize_self_prediction(self, var_explained:bool = True):
+        if var_explained:
+            type_of_fit_measure = "Variance Explained"
+            type_of_content = "var_explained"
+        else:
+            type_of_fit_measure = "MSE"
+            type_of_content = "mse_losses"
+        for normalization in self.normalizations:
+            self_pred_measures_test = {"alphas": {}}
+            self_pred_measures_train = {"alphas": {}}
+            alpha = 1
+            while alpha <= self.alpha:
+                # Load loss/var explained dict
+                self_pred_measures_test["alphas"][alpha] = {"sessions": {}}
+                self_pred_measures_train["alphas"][alpha] = {"sessions": {}}
+                session_fit_measures_test = self.read_dict_from_json(type_of_content=type_of_content, type_of_norm=normalization, alpha=alpha)
+                session_fit_measures_train = self.read_dict_from_json(type_of_content=type_of_content, type_of_norm=normalization, alpha=alpha, predict_train_data=True)
+                for session_id in session_fit_measures_test['session_mapping']:
+                    test_fit_measure = session_fit_measures_test['session_mapping'][session_id]['session_pred'][session_id]
+                    self_pred_measures_test["alphas"][alpha]["sessions"][session_id] = test_fit_measure
+
+                    train_fit_measure = session_fit_measures_train['session_mapping'][session_id]['session_pred'][session_id]
+                    self_pred_measures_train["alphas"][alpha]["sessions"][session_id] = train_fit_measure
+                alpha *= 10
+
+            # Plot fit measure as of each sessions model (trained on train split) predicting same-sessions test split
+            plt.figure(figsize=(10, 6))
+
+            # Plot values for test prediction
+            for alpha in self_pred_measures_test["alphas"]:
+                plt.plot(self_pred_measures_test["alphas"][alpha]["sessions"].keys(), self_pred_measures_test["alphas"][alpha]["sessions"].values(), marker='o', label=f'Alpha = {alpha} test pred')
+                plt.plot(self_pred_measures_train["alphas"][alpha]["sessions"].keys(), self_pred_measures_train["alphas"][alpha]["sessions"].values(), marker='h', label=f'Alpha = {alpha} train pred')
+            
+            plt.xlabel(f'Number of Sesssion')
+            plt.ylabel(f'{type_of_fit_measure}')
+            plt.grid(True)
+            plt.legend(loc='upper right')
+            plt.title(f'{type_of_fit_measure} Session Self-prediction with Norm {normalization}, alpha {self.alpha}, {date.today()}')
+            plt.grid(True)
+            plt.show()
+
+            # Save the plot to a file
+            plot_folder = f"data_files/visualizations/encoding_performance/subject_{self.subject_id}/norm_{normalization}"
+            plot_file = f"{type_of_fit_measure}_session_self_prediction_{normalization}.png"
+            self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
 
     def visualize_GLM_results(self, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True, var_explained:bool = True):
