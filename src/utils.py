@@ -423,11 +423,8 @@ class MetadataHelper(BasicOperationsHelper):
         """
         Creates the meg metadata dict for the participant and stores it.
         """
-        if self.lock_event == "saccade":
-            time_column = "end_time" 
-        else:
-            time_column = "time_in_trial"
-
+        # Define which column holds the relevant data to match crops and meg epochs
+        time_column = "end_time" if self.lock_event == "saccade" else "time_in_trial"
 
         data_dict = {"sessions": {}}
         # Read metadata for each session from csv
@@ -465,10 +462,8 @@ class MetadataHelper(BasicOperationsHelper):
         """
         Creates the crop metadata dict for the participant and stores it.
         """
-        if self.lock_event == "saccade":
-            time_column = "start_time"
-        else:
-            time_column = "time_in_trial"
+        # Define which column holds the relevant data to match crops and meg epochs
+        time_column = "end_time" if self.lock_event == "saccade" else "time_in_trial"
 
         # Read data from csv and set index to crop filename (crop_identifier before .png)
         df = pd.read_csv(self.crop_metadata_path, index_col = 'crop_filename')
@@ -611,22 +606,20 @@ class DatasetHelper(MetadataHelper):
                 # Select relevant channels
                 channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels, session_id=session_id_num)
 
-                grad_selected = False
-                mag_selected = False
-                if channel_indices['grad']:
-                    grad_selected = True
-                    meg_data["grad"] = meg_data["grad"][:, list(channel_indices['grad'].keys()),:]
-                if channel_indices['mag']:
-                    mag_selected = True
-                    meg_data["mag"] = meg_data["mag"][:, list(channel_indices['mag'].keys()),:]
+                sensor_selected = {"grad": False, "mag": False}
+                for sensor_type in sensor_selected:
+                    # Check if this type of sensor is part of the selected channels
+                    if channel_indices[sensor_type]:
+                        sensor_selected[sensor_type] = True
+                        # Filter meg data by selected channels
+                        meg_data[sensor_type] = meg_data[sensor_type][:, list(channel_indices[sensor_type].keys()),:]
 
                 # Cut relevant timepoints. Range is -0.5 – 0.3 s. We want timepoints 50-250
                 if self.timepoint_min is not None and self.timepoint_max is not None:
-                    if grad_selected:
-                        meg_data["grad"] = meg_data["grad"][:,:,self.timepoint_min:self.timepoint_max+1]
-                    if mag_selected:
-                        meg_data["mag"] = meg_data["mag"][:,:,self.timepoint_min:self.timepoint_max+1]
-                    if not grad_selected and not mag_selected:
+                    for sensor_type in sensor_selected:
+                        if sensor_selected[sensor_type]:
+                            meg_data[sensor_type] = meg_data[sensor_type][:,:,self.timepoint_min:self.timepoint_max+1]
+                    if not sensor_selected["grad"] and not sensor_selected["mag"]:
                         raise ValueError("Neither mag or grad channels selected.")
                 
 
@@ -634,40 +627,33 @@ class DatasetHelper(MetadataHelper):
                 for normalization in self.normalizations:
                     # Debugging
                     if session_id_num == "1" and normalization == "no_norm":
-                        if grad_selected:
-                            print(f"[Session {session_id_num}]: Post filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
-                        if mag_selected:
-                            print(f"[Session {session_id_num}]: Post filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
+                        for sensor_type in sensor_selected:
+                            if sensor_selected[sensor_type]:
+                                print(f"[Session {session_id_num}]: Post filtering: meg_data['{sensor_type}'].shape: {meg_data[sensor_type].shape}")
 
                     meg_data_norm = {}
                     # Normalize grad and mag independently
-                    if grad_selected:
-                        meg_data_norm["grad"] = self.normalize_array(np.array(meg_data['grad']), normalization=normalization, session_id=session_id_num)
-                    if mag_selected:
-                        meg_data_norm["mag"] = self.normalize_array(np.array(meg_data['mag']), normalization=normalization, session_id=session_id_num)
+                    for sensor_type in sensor_selected:
+                        if sensor_selected[sensor_type]:
+                            meg_data_norm[sensor_type] = self.normalize_array(np.array(meg_data[sensor_type]), normalization=normalization, session_id=session_id_num)
 
                     # Combine grad and mag data
-                    if grad_selected and mag_selected:
+                    if sensor_selected["grad"] and sensor_selected["mag"]:
                         combined_meg = np.concatenate([meg_data_norm["grad"], meg_data_norm["mag"]], axis=1) #(2874, 306, 601)
-                    elif grad_selected:
+                    elif sensor_selected["grad"]:
                         combined_meg = meg_data_norm["grad"]
-                    elif mag_selected:
+                    elif sensor_selected["mag"]:
                         combined_meg = meg_data_norm["mag"]
-
-                    #print(f"[Session {session_id_num}]: After normalization and combination: combined_meg.shape: {combined_meg.shape}")
 
                     # Debugging: Count timepoints in meg metadata
                     num_meg_metadata_timepoints = 0
                     for trial_id in meg_metadata["sessions"][session_id_num]["trials"]:
                         for timepoint in meg_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
                             num_meg_metadata_timepoints += 1
+                    #print(f"[Session {session_id_num}]: Timepoints in meg metadata: {num_meg_metadata_timepoints}")
                     if num_meg_metadata_timepoints != combined_meg.shape[0]:
                         raise ValueError("Number of timepoints in meg metadata and in meg data loaded from h5 file are not identical.")
 
-
-                    #print(f"[Session {session_id_num}]: Timepoints in meg metadata: {num_meg_metadata_timepoints}")
-                    #if num_meg_timepoints != num_meg_metadata_timepoints:
-                    #    raise ValueError(f"The number of datapoints in the meg data and in the meg metadata is not identical. Dataset: {num_meg_timepoints}. Metadata: {num_meg_metadata_timepoints}") 
 
                     # Debugging: Count timepoints in combined metadata
                     num_combined_metadata_timepoints = 0
@@ -701,11 +687,6 @@ class DatasetHelper(MetadataHelper):
 
                     if meg_timepoints_in_dataset != num_combined_metadata_timepoints:
                         raise ValueError("Number of timepoints in meg dataset and in combined metadata are not identical.")
-
-                    #print(f"[Session {session_id_num}]: Index after dataset creation: {index}")
-                    #print(f"[Session {session_id_num}]: meg_split['train'].shape: {meg_split['train'].shape}")
-                    #print(f"[Session {session_id_num}]: meg_split['test'].shape: {meg_split['test'].shape}")
-                    #print(f"[Session {session_id_num}]: Meg timepoints after dataset creation: {meg_split['train'].shape[0] + meg_split['test'].shape[0]}")
 
 
                     # Export meg dataset arrays to .npz
@@ -773,8 +754,8 @@ class DatasetHelper(MetadataHelper):
 
             # To-do: Make sure that scenes only double in the same split
 
-            # Debugging
             """
+            # Debugging
             if session_id == "1":
                 print(f"Session {session_id}: len train_split_trials: {len(train_split_trials)}")
                 print(f"Session {session_id}: len test_split_trials: {len(test_split_trials)}")
