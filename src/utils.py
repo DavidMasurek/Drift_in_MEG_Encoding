@@ -194,7 +194,7 @@ class BasicOperationsHelper:
                 storage_folder = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}{alpha_folder_insert}/predict_train_data_{predict_train_data}"
             name_addition = f"_{type_of_norm}{alpha_name_insert}"
         # metadata
-        else if type_of_content in ["combined_metadata", "meg_metadata", "crop_metadata"]:
+        elif type_of_content in ["combined_metadata", "meg_metadata", "crop_metadata"]:
             storage_folder = f'data_files/metadata/{type_of_content}/subject_{self.subject_id}'
             name_addition = ""
 
@@ -872,7 +872,7 @@ class ExtractionHelper(BasicOperationsHelper):
 
 
 class GLMHelper(DatasetHelper, ExtractionHelper):
-    def __init__(self, norms: list, subject_id: str = "02", chosen_channels: list = [1731, 1921, 2111, 2341, 2511], alphas: list):
+    def __init__(self, norms: list, alphas: list, subject_id: str = "02", chosen_channels: list = [1731, 1921, 2111, 2341, 2511]):
         DatasetHelper.__init__(self, normalizations=norms, subject_id=subject_id, chosen_channels=chosen_channels)
         ExtractionHelper.__init__(self, subject_id=subject_id)
 
@@ -1036,7 +1036,7 @@ class VisualizationHelper(GLMHelper):
         super().__init__(norms=norms, subject_id=subject_id, alphas=alphas)
 
 
-    def visualize_self_prediction(self, var_explained:bool = True):
+    def visualize_self_prediction(self, var_explained:bool=True, only_self_pred:bool=False):
         if var_explained:
             type_of_fit_measure = "Variance Explained"
             type_of_content = "var_explained"
@@ -1044,28 +1044,28 @@ class VisualizationHelper(GLMHelper):
             type_of_fit_measure = "MSE"
             type_of_content = "mse_losses"
         for normalization in self.normalizations:
-            self_pred_measures_test = {"alphas": {}}
-            self_pred_measures_train = {"alphas": {}}
-            for alpha in self.alphas:
-                # Load loss/var explained dict
-                self_pred_measures_test["alphas"][alpha] = {"sessions": {}}
-                self_pred_measures_train["alphas"][alpha] = {"sessions": {}}
-                session_fit_measures_test = self.read_dict_from_json(type_of_content=type_of_content, type_of_norm=normalization, alpha=alpha)
-                session_fit_measures_train = self.read_dict_from_json(type_of_content=type_of_content, type_of_norm=normalization, alpha=alpha, predict_train_data=True)
-                for session_id in session_fit_measures_test['session_mapping']:
-                    test_fit_measure = session_fit_measures_test['session_mapping'][session_id]['session_pred'][session_id]
-                    self_pred_measures_test["alphas"][alpha]["sessions"][session_id] = test_fit_measure
-
-                    train_fit_measure = session_fit_measures_train['session_mapping'][session_id]['session_pred'][session_id]
-                    self_pred_measures_train["alphas"][alpha]["sessions"][session_id] = train_fit_measure
+            if not only_self_pred:
+                self_pred_measures = {"test": {"alphas": {}}, "train": {"alphas": {}}}
+            else:
+                self_pred_measures = {"train": {"alphas": {}}}
+            for pred_type in self_pred_measures:
+                for alpha in self.alphas:
+                    # Load loss/var explained dict
+                    self_pred_measures[pred_type]["alphas"][alpha] = {"sessions": {}}
+                    predict_train_data = True if pred_type == "train" else False
+                    session_fit_measures = self.read_dict_from_json(type_of_content=type_of_content, type_of_norm=normalization, alpha=alpha, predict_train_data=predict_train_data)
+                    for session_id in session_fit_measures_test['session_mapping']:
+                        fit_measure = session_fit_measures_test['session_mapping'][session_id]['session_pred'][session_id]
+                        self_pred_measures[pred_type]["alphas"][alpha]["sessions"][session_id] = fit_measure
 
             # Plot fit measure as of each sessions model (trained on train split) predicting same-sessions test split
             plt.figure(figsize=(10, 6))
 
             # Plot values for test prediction
             for alpha in self.alphas:
-                plt.plot(self_pred_measures_test["alphas"][alpha]["sessions"].keys(), self_pred_measures_test["alphas"][alpha]["sessions"].values(), marker='o', label=f'Alpha = {alpha} test pred')
-                plt.plot(self_pred_measures_train["alphas"][alpha]["sessions"].keys(), self_pred_measures_train["alphas"][alpha]["sessions"].values(), marker='*', label=f'Alpha = {alpha} train pred')
+                for pred_type in self_pred_measures:
+                    markertype = 'o' if pred_type == "test" else '*'
+                    plt.plot(self_pred_measures[pred_type]["alphas"][alpha]["sessions"].keys(), self_pred_measures[pred_type]["alphas"][alpha]["sessions"].values(), marker=markertype, label=f'Alpha = {alpha} {pred_type} pred')
             
             plt.xlabel(f'Number of Sesssion')
             plt.ylabel(f'{type_of_fit_measure}')
@@ -1077,7 +1077,7 @@ class VisualizationHelper(GLMHelper):
 
             # Save the plot to a file
             plot_folder = f"data_files/visualizations/encoding_performance/subject_{self.subject_id}/norm_{normalization}"
-            plot_file = f"{type_of_fit_measure}_session_self_prediction_{normalization}.png"
+            plot_file = f"{type_of_fit_measure}_session_self_prediction_{normalization}_only_self_pred_{only_self_pred}.png"
             self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
 

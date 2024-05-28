@@ -23,12 +23,12 @@ alphas = [1,10,100,1000,10000,100000,1000000]
 
 # Choose Calculations to be performed
 create_metadata = False
-create_train_test_split = False
-create_non_meg_dataset = False
-create_meg_dataset = False
-extract_features = False
-train_GLM = False
-generate_predictions_with_GLM = False
+create_train_test_split = True
+create_non_meg_dataset = True
+create_meg_dataset = True
+extract_features = True
+train_GLM = True
+generate_predictions_with_GLM = True
 visualization = True
 
 for subject_id in subject_ids:
@@ -83,7 +83,7 @@ for subject_id in subject_ids:
 
     ##### Train GLM from features to meg #####
     if train_GLM or generate_predictions_with_GLM:
-        glm_helper = GLMHelper(norms=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alpha=alpha)
+        glm_helper = GLMHelper(norms=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas)
 
         # Train GLM
         if train_GLM:
@@ -100,7 +100,7 @@ for subject_id in subject_ids:
 
     ##### Visualization #####
     if visualization:
-        visualization_helper = VisualizationHelper(norms=normalizations, subject_id=subject_id, alpha=alpha)
+        visualization_helper = VisualizationHelper(norms=normalizations, subject_id=subject_id, alphas=alphas)
 
         # Visualize meg data with mne
         #visualization_helper.visualize_meg_epochs_mne()
@@ -109,7 +109,7 @@ for subject_id in subject_ids:
         #visualization_helper.visualize_meg_ERP_style(plot_norms=["no_norm", "mean_centered_ch_t"])  # ,"robust_scaling_ch_t", "z_score_ch_t", "robust_scaling", "z_score"
 
         # Visualize encoding model performance
-        visualization_helper.visualize_self_prediction(var_explained=True)
+        visualization_helper.visualize_self_prediction(var_explained=True, only_self_pred=True)
 
         # Visualize prediction results
         #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
