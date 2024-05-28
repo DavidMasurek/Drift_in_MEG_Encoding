@@ -7,13 +7,13 @@ import numpy as np
 import imageio
 import mne
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D  # Import Line2D for custom legend
+from matplotlib.lines import Line2D  
 from collections import defaultdict
 from typing import Tuple, Dict
 from datetime import date
 import random
 
-# ANN specific imports
+# ML specific imports
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
@@ -252,21 +252,11 @@ class BasicOperationsHelper:
         if type_of_content not in valid_types:
             raise ValueError(f"Function load_split_data_from_file called with unrecognized type {type_of_content}.")
 
-        if type_of_content == "torch_dataset":
-            file_type = ".pt"
-        else:
-            file_type = ".npy"
+        file_type = ".pt" if type_of_content == "torch_dataset" else ".npy"
 
-        # Add additional folder for model type and extraction layer for ann_features
-        if type_of_content == "ann_features":
-            additional_model_folders = f"/{ann_model}/{module}/"
-        else:
-            additional_model_folders = "/"
-
-        if type_of_content == "meg_data":
-            additional_norm_folder = f"norm_{type_of_norm}/"
-        else:
-            additional_norm_folder = ""
+        # Add additional folder for norm and for model type and extraction layer for ann_features
+        additional_model_folders = f"/{ann_model}/{module}/" if type_of_content == "ann_features" else "/"
+        additional_norm_folder = f"norm_{type_of_norm}/" if type_of_content == "meg_data" else ""
 
         split_dict = {}
         for split in ["train", "test"]:
@@ -313,8 +303,6 @@ class BasicOperationsHelper:
                 q75, q25 = np.percentile(data, [75, 25], axis=None)
                 iqr = q75 - q25
                 normalized_data = (data - medians) / iqr  # Subtract medians and divide by IQR
-                if (normalized_data == data).all():
-                    raise ValueError(f"normalize_array: data the same before and after norm {normalization}")
 
             case "z_score":
                 means = np.mean(data, axis=None)
