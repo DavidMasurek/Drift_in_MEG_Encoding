@@ -35,8 +35,13 @@ class BasicOperationsHelper:
         self.lock_event = lock_event
 
 
-    def get_relevant_meg_channels(self, chosen_channels, session_id):
-        #{'grad': {}, 'mag': {194: 'MEG1731', 215: 'MEG1921', 236: 'MEG2111', 269: 'MEG2341', 284: 'MEG2511'}}
+    def get_relevant_meg_channels(self, chosen_channels: list, session_id: str):
+        """
+        Returns names of the chosen channels and their index in the meg dataset.
+
+        Example out: {'grad': {}, 'mag': {194: 'MEG1731', 215: 'MEG1921', 236: 'MEG2111', 269: 'MEG2341', 284: 'MEG2511'}}
+        """
+        
         session_id_padded = "0" + session_id if session_id != "10" else session_id
         fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/{self.lock_event}_evoked_{self.subject_id}_{session_id_padded}_.fif'
         
@@ -47,9 +52,6 @@ class BasicOperationsHelper:
         grad_indices = mne.pick_types(evoked.info, meg='grad')
         mag_indices = mne.pick_types(evoked.info, meg='mag')
 
-        #print(f"grad_indices: {grad_indices}")
-        #print(f"mag_indices: {mag_indices}")
-
         for sensor_type in processing_channels_indices: # grad, mag
             channel_indices = mne.pick_types(evoked.info, meg=sensor_type)
             sensor_index = 0
@@ -59,12 +61,13 @@ class BasicOperationsHelper:
                     processing_channels_indices[sensor_type][sensor_index] = ch_name
                 sensor_index += 1
 
-        #print(f"processing_channels_indices: {processing_channels_indices}")
-
         return processing_channels_indices
 
     
     def get_session_date_differences(self):
+        """
+        Calculates the rounded differences in days between all sessions.
+        """
         fif_folder = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/erf/filter_0.2_200/'
         session_dates = {str(num_session): None for num_session in range(1,11)}
         
@@ -99,6 +102,9 @@ class BasicOperationsHelper:
 
 
     def recursive_defaultdict(self) -> dict:
+        """
+        Helper function to initialize a defaultdict that automatically adds missing intermediate dicts.
+        """
         return defaultdict(self.recursive_defaultdict)
 
 
@@ -120,25 +126,28 @@ class BasicOperationsHelper:
 
     def read_dict_from_json(self, type_of_content: str, type_of_norm: str = None, alpha:int = None, predict_train_data:bool = False) -> dict:
         """
-        Helper function to read json files into dicts.
+        Helper function to read json files of various content types into dicts.
         """
         valid_types = ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses", "mse_losses_timepoint", "var_explained"]
         if type_of_content not in valid_types:
             raise ValueError(f"Function read_dict_from_json called with unrecognized type {type_of_content}.")
 
+        # If alpha is specified, access the respective subfolder for var_explained and mse_losses
         if alpha is not None: 
-            alpha_insert = f"/alpha_{alpha}"
-            alpha_name_insert = f"_alpha_{alpha}"
+            assert (type_of_content == "var_explained") or (type_of_content == "mse_losses"), f"Invalid parameter configuration: alpha was specified but type_of_content is {type_of_content}"
+            alpha_suffix = f"alpha_{alpha}"
+            alpha_folder_insert = f"/{alpha_suffix}"
+            alpha_name_insert = f"_{alpha_suffix}"
         else:
-            alpha_insert = ""
+            alpha_folder_insert = ""
             alpha_name_insert = ""
 
         if type_of_content == "mse_losses":
-            file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}{alpha_insert}/mse_losses_{type_of_norm}_dict.json"
+            file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}{alpha_folder_insert}/mse_losses_{type_of_norm}_dict.json"
         elif type_of_content == "mse_losses_timepoint":
             file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/timepoints/norm_{type_of_norm}/mse_losses_timepoint_{type_of_norm}_dict.json"
         elif type_of_content == "var_explained":
-            file_path = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}{alpha_insert}/predict_train_data_{predict_train_data}/var_explained_{type_of_norm}{alpha_name_insert}_dict.json"
+            file_path = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}{alpha_folder_insert}/predict_train_data_{predict_train_data}/var_explained_{type_of_norm}{alpha_name_insert}_dict.json"
         else:
             file_path = f"data_files/metadata/{type_of_content}/subject_{self.subject_id}/{type_of_content}_dict.json"
         
@@ -154,40 +163,42 @@ class BasicOperationsHelper:
 
     def save_dict_as_json(self, type_of_content: str, dict_to_store: dict, type_of_norm: str = None, alpha:int = None, predict_train_data:bool = False) -> None:
         """
-        Helper function to store dicts as json files.
+        Helper function to store dicts of various content types as json files.
         """
         valid_types = ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses", "mse_losses_timepoint", "var_explained"]
         if type_of_content not in valid_types:
             raise ValueError(f"Function save_dict_as_json called with unrecognized type {type_of_content}.")
 
-        if type_of_content == "mse_losses" or type_of_content == "mse_losses_timepoint":
-            if type_of_content == "mse_losses_timepoint":
-                timepoint_folder = "timepoints/"
-                timepoint_name = "_timepoints"
-                alpha_insert = ""
-            else:
-                timepoint_folder = ""
-                timepoint_name = ""
-                if alpha is not None:
-                    alpha_insert = f"/alpha_{alpha}"
-                else:
-                    alpha_insert = ""
-            storage_folder = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/{timepoint_folder}norm_{type_of_norm}{alpha_insert}"
-            name_addition = f"_{type_of_norm}"
-        elif type_of_content == "var_explained":
-            if alpha is not None:
-                alpha_insert = f"/alpha_{alpha}"
-                alpha_name_insert = f"_alpha_{alpha}"
-            else:
-                alpha_insert = ""
-                alpha_name_insert= ""
-            storage_folder = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}{alpha_insert}/predict_train_data_{predict_train_data}"
-            name_addition = f"_{type_of_norm}{alpha_name_insert}"
+         # If alpha is specified, store in the respective subfolder for var_explained and mse_losses
+        if alpha is not None: 
+            assert (type_of_content == "var_explained") or (type_of_content == "mse_losses"), f"Invalid parameter configuration: alpha was specified but type_of_content is {type_of_content}"
+            alpha_suffix = f"alpha_{alpha}"
+            alpha_folder_insert = f"/{alpha_suffix}"
+            alpha_name_insert = f"_{alpha_suffix}"
         else:
+            alpha_folder_insert = ""
+            alpha_name_insert = ""
+
+        # losses and variance explained
+        if type_of_content in ["mse_losses", "mse_losses_timepoint", "var_explained"]:
+            # losses
+            if type_of_content.startswith('mse'):
+                if type_of_content == "mse_losses_timepoint":
+                    timepoint_folder = "timepoints/"
+                    timepoint_name = "_timepoints"
+                else:
+                    timepoint_folder = ""
+                    timepoint_name = ""
+                storage_folder = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/{timepoint_folder}norm_{type_of_norm}{alpha_folder_insert}"
+            elif type_of_content == "var_explained":
+                storage_folder = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}{alpha_folder_insert}/predict_train_data_{predict_train_data}"
+            name_addition = f"_{type_of_norm}{alpha_name_insert}"
+        # metadata
+        else if type_of_content in ["combined_metadata", "meg_metadata", "crop_metadata"]:
             storage_folder = f'data_files/metadata/{type_of_content}/subject_{self.subject_id}'
             name_addition = ""
-        if not os.path.exists(storage_folder):
-            os.makedirs(storage_folder)
+
+        os.makedirs(storage_folder, exist_ok=True)
         json_storage_file = f"{type_of_content}{name_addition}_dict.json"
         json_storage_path = os.path.join(storage_folder, json_storage_file)
 
@@ -210,35 +221,23 @@ class BasicOperationsHelper:
             raise ValueError(f"Function export_split_data_as_file called with unrecognized type {type_of_content}.")
 
         # Set file type
-        if type_of_content == "torch_dataset":
-            file_type = ".pt"
-        else:
-            file_type = ".npy"
+        file_type = ".pt" if type_of_content == "torch_dataset" else ".npy"
         
-        # Add additional folder for model type and extraction layer for ann_features
-        if type_of_content == "ann_features":
-            additional_model_folders = f"/{ann_model}/{module}/"
-        else:
-            additional_model_folders = "/"
-
-        if type_of_content == "meg_data":
-            additional_norm_folder = f"norm_{type_of_norm}/"
-        else:
-            additional_norm_folder = ""
+        # Add additional folder for norm and for model type and extraction layer for ann_features
+        additional_model_folders = f"/{ann_model}/{module}/" if type_of_content == "ann_features" else "/"
+        additional_norm_folder = f"norm_{type_of_norm}/" if type_of_content == "meg_data" else ""
 
         # Export train/test split arrays to .npz
         for split in array_dict:
             save_folder = f"data_files/{type_of_content}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}/session_{session_id}/{split}"  
             save_file = f"{type_of_content}{file_type}"
-            if not os.path.exists(save_folder):
-                os.makedirs(save_folder)
+            os.makedirs(save_folder, exist_ok=True)
             save_path = os.path.join(save_folder, save_file)
 
             if file_type == ".npy":
                 np.save(save_path, array_dict[split])
             else:
                 torch.save(array_dict[split], save_path)
-
 
     
     def load_split_data_from_file(self, session_id_num: str, type_of_content: str, type_of_norm:str = None, ann_model: str = None, module: str = None) -> dict:
@@ -286,8 +285,7 @@ class BasicOperationsHelper:
         """
         Helper function to save a plot as file.
         """
-        if not os.path.exists(plot_folder):
-            os.makedirs(plot_folder)
+        os.makedirs(plot_folder, exist_ok=True)
         plot_path = os.path.join(plot_folder, plot_file)
         plt.savefig(plot_path)
         # Mne plots cannot be closed
@@ -938,8 +936,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     # Store trained models as pickle
                     save_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/alpha_{alpha}/session_{session_id_num}"  
                     save_file = "GLM_models.pkl"
-                    if not os.path.exists(save_folder):
-                        os.makedirs(save_folder)
+                    os.makedirs(save_folder, exist_ok=True)
                     save_path = os.path.join(save_folder, save_file)
 
                     with open(save_path, 'wb') as file:
@@ -1107,7 +1104,7 @@ class VisualizationHelper(GLMHelper):
             # Plot values for test prediction
             for alpha in self_pred_measures_test["alphas"]:
                 plt.plot(self_pred_measures_test["alphas"][alpha]["sessions"].keys(), self_pred_measures_test["alphas"][alpha]["sessions"].values(), marker='o', label=f'Alpha = {alpha} test pred')
-                plt.plot(self_pred_measures_train["alphas"][alpha]["sessions"].keys(), self_pred_measures_train["alphas"][alpha]["sessions"].values(), marker='h', label=f'Alpha = {alpha} train pred')
+                plt.plot(self_pred_measures_train["alphas"][alpha]["sessions"].keys(), self_pred_measures_train["alphas"][alpha]["sessions"].values(), marker='*', label=f'Alpha = {alpha} train pred')
             
             plt.xlabel(f'Number of Sesssion')
             plt.ylabel(f'{type_of_fit_measure}')
