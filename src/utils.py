@@ -872,11 +872,11 @@ class ExtractionHelper(BasicOperationsHelper):
 
 
 class GLMHelper(DatasetHelper, ExtractionHelper):
-    def __init__(self, norms: list, subject_id: str = "02", chosen_channels: list = [1731, 1921, 2111, 2341, 2511], alpha=1):
+    def __init__(self, norms: list, subject_id: str = "02", chosen_channels: list = [1731, 1921, 2111, 2341, 2511], alphas: list):
         DatasetHelper.__init__(self, normalizations=norms, subject_id=subject_id, chosen_channels=chosen_channels)
         ExtractionHelper.__init__(self, subject_id=subject_id)
 
-        self.alpha = alpha
+        self.alphas = alphas
 
 
     def train_mapping(self):
@@ -894,8 +894,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                 X_train, Y_train = ann_features['train'], meg_data['train']
 
-                alpha = 1
-                while alpha <= self.alpha:
+                for alpha in self.alphas:
                     # Initialize Helper class
                     ridge_model = GLMHelper.MultiDimensionalRidge(alpha=alpha) 
 
@@ -911,8 +910,6 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     with open(save_path, 'wb') as file:
                         pickle.dump(ridge_model.models, file)
 
-                    alpha *= 10
-
         
     def predict_from_mapping(self, store_timepoint_based_losses=False, predict_train_data=False):
         """
@@ -922,8 +919,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         # Debugging
         ridge_models_session_1 = []
 
-        alpha = 1
-        while alpha <= self.alpha:
+        for alpha in self.alphas:
             for normalization in self.normalizations:
                 print(f"Predicting from mapping for normalization {normalization}")
                 variance_explained_dict = self.recursive_defaultdict()
@@ -995,15 +991,13 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 self.save_dict_as_json(type_of_content=mse_type_of_content, dict_to_store=mse_session_losses, type_of_norm=normalization, alpha=alpha)
                 self.save_dict_as_json(type_of_content="var_explained", dict_to_store=variance_explained_dict, type_of_norm=normalization, alpha=alpha, predict_train_data=predict_train_data)
 
-            alpha *= 10
-
 
     class MultiDimensionalRidge:
         """
         Inner class to apply Ridge Regression over all timepoints. Enables training and prediction, as well as initialization of random weights for baseline comparison.
         """
-        def __init__(self, alpha=0.5, models=[], random_weights=False):
-            self.alpha = alpha
+        def __init__(self, alpha:int, models:list=[], random_weights:bool=False):
+            self.current_alpha = alpha
             self.random_weights = random_weights
             self.models = models  # Standardly initialized as empty list, otherwise with passed, previously trained models
 
@@ -1011,7 +1005,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
             n_features = X.shape[1]
             n_sensors = Y.shape[1]
             n_timepoints = Y.shape[2]
-            self.models = [Ridge(alpha=self.alpha) for _ in range(n_timepoints)]
+            self.models = [Ridge(alpha=self.current_alpha) for _ in range(n_timepoints)]
             if self.random_weights:
                 # Randomly initialize weights and intercepts
                 for model in self.models:
@@ -1038,8 +1032,8 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
 
 class VisualizationHelper(GLMHelper):
-    def __init__(self, norms:list, subject_id: str = "02", alpha=1):
-        super().__init__(norms=norms, subject_id=subject_id, alpha=alpha)
+    def __init__(self, norms:list, alphas:list, subject_id: str = "02"):
+        super().__init__(norms=norms, subject_id=subject_id, alphas=alphas)
 
 
     def visualize_self_prediction(self, var_explained:bool = True):
@@ -1052,8 +1046,7 @@ class VisualizationHelper(GLMHelper):
         for normalization in self.normalizations:
             self_pred_measures_test = {"alphas": {}}
             self_pred_measures_train = {"alphas": {}}
-            alpha = 1
-            while alpha <= self.alpha:
+            for alpha in self.alphas:
                 # Load loss/var explained dict
                 self_pred_measures_test["alphas"][alpha] = {"sessions": {}}
                 self_pred_measures_train["alphas"][alpha] = {"sessions": {}}
@@ -1065,13 +1058,12 @@ class VisualizationHelper(GLMHelper):
 
                     train_fit_measure = session_fit_measures_train['session_mapping'][session_id]['session_pred'][session_id]
                     self_pred_measures_train["alphas"][alpha]["sessions"][session_id] = train_fit_measure
-                alpha *= 10
 
             # Plot fit measure as of each sessions model (trained on train split) predicting same-sessions test split
             plt.figure(figsize=(10, 6))
 
             # Plot values for test prediction
-            for alpha in self_pred_measures_test["alphas"]:
+            for alpha in self.alphas:
                 plt.plot(self_pred_measures_test["alphas"][alpha]["sessions"].keys(), self_pred_measures_test["alphas"][alpha]["sessions"].values(), marker='o', label=f'Alpha = {alpha} test pred')
                 plt.plot(self_pred_measures_train["alphas"][alpha]["sessions"].keys(), self_pred_measures_train["alphas"][alpha]["sessions"].values(), marker='*', label=f'Alpha = {alpha} train pred')
             
