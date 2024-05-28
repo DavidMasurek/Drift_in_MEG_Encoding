@@ -463,7 +463,7 @@ class MetadataHelper(BasicOperationsHelper):
         Creates the crop metadata dict for the participant and stores it.
         """
         # Define which column holds the relevant data to match crops and meg epochs
-        time_column = "end_time" if self.lock_event == "saccade" else "time_in_trial"
+        time_column = "start_time" if self.lock_event == "saccade" else "time_in_trial"
 
         # Read data from csv and set index to crop filename (crop_identifier before .png)
         df = pd.read_csv(self.crop_metadata_path, index_col = 'crop_filename')
@@ -879,117 +879,194 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         self.alphas = alphas
 
 
-    def train_mapping(self):
+    def train_mapping(self, all_sessions_combined:bool=False):
         """
         Trains a mapping from ANN features to MEG data over all sessions.
         """
-        for session_id_num in self.session_ids_num:
-            print(f"Training mapping for session {session_id_num}")
+        if not all_sessions_combined:
+            for session_id_num in self.session_ids_num:
+                print(f"Training mapping for session {session_id_num}")
+                for normalization in self.normalizations:
+                    # Get ANN features for session
+                    ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
+
+                    # Get MEG data for sesssion
+                    meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
+
+                    X_train, Y_train = ann_features['train'], meg_data['train']
+
+                    train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined, session_id_num=session_id_num)
+        else:
             for normalization in self.normalizations:
-                # Get ANN features for session
-                ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
+                ann_features_train_combined = None
+                meg_data_train_combined = None
+                # Collect ANN features and MEG data over sessions
+                for session_id_num in self.session_ids_num:
+                    ann_features_train = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)['train']
+                    meg_data_train = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)['train']
 
-                # Get MEG data for sesssion
-                meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
+                    if session_id_num == "1":
+                        ann_combined = ann_features_train
+                        meg_data_train_combined = meg_data_train
+                    else:
+                        ann_features_train_combined = np.concatenate([ann_features_train_combined, ann_features_train], axis=0)
+                        meg_data_train_combined = np.concatenate([meg_data_train_combined, meg_data_train], axis=0)
 
-                X_train, Y_train = ann_features['train'], meg_data['train']
+                X_train, Y_train = ann_features_train, meg_data_train
 
-                for alpha in self.alphas:
-                    # Initialize Helper class
-                    ridge_model = GLMHelper.MultiDimensionalRidge(alpha=alpha) 
+                train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined)
 
-                    # Fit model on train data
-                    ridge_model.fit(X_train, Y_train)
+        def train_model(X_train:np.ndarray, Y_train: np.ndarray, normalization:str, all_sessions_combined:bool, session_id_num:str=None):
+            for alpha in self.alphas:
+                # Initialize Helper class
+                ridge_model = GLMHelper.MultiDimensionalRidge(alpha=alpha) 
 
-                    # Store trained models as pickle
-                    save_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/alpha_{alpha}/session_{session_id_num}"  
-                    save_file = "GLM_models.pkl"
-                    os.makedirs(save_folder, exist_ok=True)
-                    save_path = os.path.join(save_folder, save_file)
+                # Fit model on train data
+                ridge_model.fit(X_train, Y_train)
 
-                    with open(save_path, 'wb') as file:
-                        pickle.dump(ridge_model.models, file)
+                all_session_folder = f"/all_sessions_combined" if all_sessions_combined else ""
+                session_addition = f"/session_{session_id_num}" if not all_sessions_combined else ""
+
+                # Store trained models as pickle
+                save_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}{all_session_folder}/norm_{normalization}/alpha_{alpha}{session_addition}"  
+                save_file = "GLM_models.pkl"
+                os.makedirs(save_folder, exist_ok=True)
+                save_path = os.path.join(save_folder, save_file)
+
+                with open(save_path, 'wb') as file:
+                    pickle.dump(ridge_model.models, file)
 
         
-    def predict_from_mapping(self, store_timepoint_based_losses=False, predict_train_data=False):
+    def predict_from_mapping(self, store_timepoint_based_losses:bool=False, predict_train_data:bool=False, all_sessions_combined:bool=False):
         """
         Based on the trained mapping for each session, predicts MEG data over all sessions from their respective test features.
         If predict_train_data is True, predicts the train data of each session as a sanity check of the complete pipeline. Expect strong overfit.
         """
-        # Debugging
-        ridge_models_session_1 = []
-
-        for alpha in self.alphas:
+        if not all_sessions_combined:
             for normalization in self.normalizations:
                 print(f"Predicting from mapping for normalization {normalization}")
-                variance_explained_dict = self.recursive_defaultdict()
-                mse_session_losses = {"session_mapping": {}}
-                for session_id_model in self.session_ids_num:
-                    mse_session_losses["session_mapping"][session_id_model] = {"session_pred": {}}
-                    # Get trained ridge regression model for this session
-                    # Load ridge model
-                    storage_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/alpha_{alpha}/session_{session_id_model}"  
+                for alpha in self.alphas:
+                    variance_explained_dict = self.recursive_defaultdict()
+                    mse_session_losses = {"session_mapping": {}}
+                    for session_id_model in self.session_ids_num:
+                        mse_session_losses["session_mapping"][session_id_model] = {"session_pred": {}}
+                        # Get trained ridge regression model for this session
+                        # Load ridge model
+                        storage_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/alpha_{alpha}/session_{session_id_model}"  
+                        storage_file = "GLM_models.pkl"
+                        storage_path = os.path.join(storage_folder, storage_file)
+                        with open(storage_path, 'rb') as file:
+                            ridge_models = pickle.load(file)
+                        
+                        # Initialize MultiDim GLM class with stored models
+                        ridge_model = GLMHelper.MultiDimensionalRidge(alpha=alpha, models=ridge_models)
+
+                        # Generate predictions for test features over all sessions and evaluate them 
+                        for session_id_pred in self.session_ids_num:
+                            # Get ANN features and MEG data for session where predictions are to be evaluated
+                            ann_features = self.load_split_data_from_file(session_id_num=session_id_pred, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
+                            meg_data = self.load_split_data_from_file(session_id_num=session_id_pred, type_of_content="meg_data", type_of_norm=normalization)
+                            
+                            if predict_train_data:
+                                X_test, Y_test = ann_features['train'], meg_data['train']
+                            else:
+                                X_test, Y_test = ann_features['test'], meg_data['test']
+
+                            # Generate predictions
+                            predictions = ridge_model.predict(X_test)
+
+                            if store_timepoint_based_losses:
+                                mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = {"timepoint":{}}
+                                # Calculate loss seperately for each timepoint/model
+                                n_timepoints = predictions.shape[2]
+                                for t in range(n_timepoints):
+                                    fit_measure_timepoint = mean_squared_error(Y_test[:,:,t].reshape(-1), predictions[:,:,t].reshape(-1))
+                                    # Save loss
+                                    mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = fit_measure_timepoint
+                            else:
+                                # Calculate the mean squared error across all flattened features and timepoints
+                                mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
+
+                                # Calculate variance explained 
+                                var_explained = r2_score(Y_test.reshape(-1), predictions.reshape(-1))
+
+                                # Control values
+                                #if var_explained < 0:
+                                #    raise ValueError("Contains negative values for Variance Explained.")
+                                #elif var_explained > 1:
+                                #    raise ValueError("Contains values larger 1 for Variance Explained.")
+
+
+                                # Save loss and variance explained
+                                mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = mse
+                                variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = var_explained
+
+                    # Store loss dict
+                    if store_timepoint_based_losses:
+                        mse_type_of_content = "mse_losses_timepoint"
+                    else:
+                        mse_type_of_content = "mse_losses"
+
+                    self.save_dict_as_json(type_of_content=mse_type_of_content, dict_to_store=mse_session_losses, type_of_norm=normalization, alpha=alpha)
+                    self.save_dict_as_json(type_of_content="var_explained", dict_to_store=variance_explained_dict, type_of_norm=normalization, alpha=alpha, predict_train_data=predict_train_data)
+        else:
+            for normalization in self.normalizations:
+                print(f"Predicting from mapping for normalization {normalization}")
+                mse_dict["alphas"] = {}
+                var_explained_dict["alphas"] = {}
+                for alpha in self.alphas:
+                    variance_explained_dict = self.recursive_defaultdict()
+
+                    # Get trained ridge regression models 
+                    storage_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}/alpha_{alpha}"  
                     storage_file = "GLM_models.pkl"
                     storage_path = os.path.join(storage_folder, storage_file)
                     with open(storage_path, 'rb') as file:
                         ridge_models = pickle.load(file)
 
-                    # Debugging
-                    if session_id_model == 1:
-                        assert ridge_models not in ridge_models_session_1, "Ridge models doubled."
-                        ridge_models_session_1.append(ridge_models)
-                    
                     # Initialize MultiDim GLM class with stored models
                     ridge_model = GLMHelper.MultiDimensionalRidge(alpha=alpha, models=ridge_models)
 
-                    # Generate predictions for test features over all sessions and evaluate them 
-                    for session_id_pred in self.session_ids_num:
-                        # Get ANN features and MEG data for session where predictions are to be evaluated
-                        ann_features = self.load_split_data_from_file(session_id_num=session_id_pred, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
-                        meg_data = self.load_split_data_from_file(session_id_num=session_id_pred, type_of_content="meg_data", type_of_norm=normalization)
-                        
-                        if predict_train_data:
-                            X_test, Y_test = ann_features['train'], meg_data['train']
+                    # Generate predictions for test features evaluate them 
+                    # Collect ANN features and MEG data over sessions
+                    ann_features_test_combined = None
+                    meg_data_test_combined = None
+                    for session_id_num in self.session_ids_num:
+                        pred_type = "train" if predict_train_data else "test"
+                        ann_features_test = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)[pred_type]
+                        meg_data_test = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)[pred_type]
+
+                        if session_id_num == "1":
+                            ann_features_test_combined = ann_features_test
+                            meg_data_test_combined = meg_data_test
                         else:
-                            X_test, Y_test = ann_features['test'], meg_data['test']
+                            ann_features_test_combined = np.concatenate([ann_features_test_combined, ann_features_test], axis=0)
+                            meg_data_test_combined = np.concatenate([meg_data_test_combined, meg_data_test], axis=0)
 
-                        # Generate predictions
-                        predictions = ridge_model.predict(X_test)
+                    X_test, Y_test = ann_features_test, meg_data_test_combined
 
-                        if store_timepoint_based_losses:
-                            mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = {"timepoint":{}}
-                            # Calculate loss seperately for each timepoint/model
-                            n_timepoints = predictions.shape[2]
-                            for t in range(n_timepoints):
-                                fit_measure_timepoint = mean_squared_error(Y_test[:,:,t].reshape(-1), predictions[:,:,t].reshape(-1))
-                                # Save loss
-                                mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = fit_measure_timepoint
-                        else:
-                            # Calculate the mean squared error across all flattened features and timepoints
-                            mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
+                    # Generate predictions
+                    predictions = ridge_model.predict(X_test)
 
-                            # Calculate variance explained 
-                            var_explained = r2_score(Y_test.reshape(-1), predictions.reshape(-1))
+                     # Calculate the mean squared error across all flattened features and timepoints
+                    mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
+                    # Calculate variance explained 
+                    var_explained = r2_score(Y_test.reshape(-1), predictions.reshape(-1))
 
-                            # Control values
-                            #if var_explained < 0:
-                            #    raise ValueError("Contains negative values for Variance Explained.")
-                            #elif var_explained > 1:
-                            #    raise ValueError("Contains values larger 1 for Variance Explained.")
+                    # Save results in dict
+                    mse_dict["alphas"][alpha] = {"mse_losses": mse}
+                    var_explained_dict["alphas"][alpha] = {"var_explained": var_explained}
 
+                for fit_measure in ["var_explained", "mse_losses"]:
+                    storage_folder = f"data_files/{fit_measure}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/all_sessions_combined/norm_{type_of_norm}/predict_train_data_{predict_train_data}"
+                    os.makedirs(storage_folder, exist_ok=True)
+                    json_storage_file = f"{fit_measure}_all_sessions_combined_dict.json"
+                    json_storage_path = os.path.join(storage_folder, json_storage_file)
 
-                            # Save loss and variance explained
-                            mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = mse
-                            variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = var_explained
-
-                # Store loss dict
-                if store_timepoint_based_losses:
-                    mse_type_of_content = "mse_losses_timepoint"
-                else:
-                    mse_type_of_content = "mse_losses"
-
-                self.save_dict_as_json(type_of_content=mse_type_of_content, dict_to_store=mse_session_losses, type_of_norm=normalization, alpha=alpha)
-                self.save_dict_as_json(type_of_content="var_explained", dict_to_store=variance_explained_dict, type_of_norm=normalization, alpha=alpha, predict_train_data=predict_train_data)
+                    dict_to_store = var_explained_dict if fit_measure == "var_explained" else mse_dict
+                    with open(json_storage_path, 'w') as file:
+                        # Serialize and save the dictionary to the file
+                        json.dump(dict_to_store, file, indent=4)
 
 
     class MultiDimensionalRidge:
@@ -1036,7 +1113,7 @@ class VisualizationHelper(GLMHelper):
         super().__init__(norms=norms, subject_id=subject_id, alphas=alphas)
 
 
-    def visualize_self_prediction(self, var_explained:bool=True, only_self_pred:bool=False):
+    def visualize_self_prediction(self, var_explained:bool=True, only_self_pred:bool=False, all_sessions_combined:bool=False):
         if var_explained:
             type_of_fit_measure = "Variance Explained"
             type_of_content = "var_explained"
@@ -1044,42 +1121,74 @@ class VisualizationHelper(GLMHelper):
             type_of_fit_measure = "MSE"
             type_of_content = "mse_losses"
         for normalization in self.normalizations:
-            if not only_self_pred:
-                self_pred_measures = {"test": {"alphas": {}}, "train": {"alphas": {}}}
-            else:
-                self_pred_measures = {"train": {"alphas": {}}}
-            for pred_type in self_pred_measures:
-                for alpha in self.alphas:
-                    # Load loss/var explained dict
-                    self_pred_measures[pred_type]["alphas"][alpha] = {"sessions": {}}
+            if not all_sessions_combined:
+                if not only_self_pred:
+                    self_pred_measures = {"test": {"alphas": {}}, "train": {"alphas": {}}}
+                else:
+                    self_pred_measures = {"train": {"alphas": {}}}
+                for pred_type in self_pred_measures:
                     predict_train_data = True if pred_type == "train" else False
-                    session_fit_measures = self.read_dict_from_json(type_of_content=type_of_content, type_of_norm=normalization, alpha=alpha, predict_train_data=predict_train_data)
-                    for session_id in session_fit_measures_test['session_mapping']:
-                        fit_measure = session_fit_measures_test['session_mapping'][session_id]['session_pred'][session_id]
-                        self_pred_measures[pred_type]["alphas"][alpha]["sessions"][session_id] = fit_measure
+                    for alpha in self.alphas:
+                        # Load loss/var explained dict
+                        self_pred_measures[pred_type]["alphas"][alpha] = {"sessions": {}}
+                            # Read fit measures for each session
+                            session_fit_measures = self.read_dict_from_json(type_of_content=type_of_content, type_of_norm=normalization, alpha=alpha, predict_train_data=predict_train_data)
+                            for session_id in session_fit_measures['session_mapping']:
+                                fit_measure = session_fit_measures['session_mapping'][session_id]['session_pred'][session_id]
+                                self_pred_measures[pred_type]["alphas"][alpha]["sessions"][session_id] = fit_measure
+            else:
+                self_pred_measures = {"train": {}, "test": {}} if not only_self_pred else {"train": {}}
+                    for pred_type in self_pred_measures:
+                    predict_train_data = True if pred_type == "train" else False
+                    # Read fit measure combined over all sessions
+                    storage_folder = f"data_files/{type_of_content}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/all_sessions_combined/norm_{type_of_norm}/predict_train_data_{predict_train_data}"
+                    json_storage_file = f"{type_of_content}_all_sessions_combined_dict.json"
+                    json_storage_path = os.path.join(storage_folder, json_storage_file)
 
+                    with open(json_storage_path, 'r') as file:
+                        fit_measure = json.load(file)
+                    self_pred_measures[pred_type]
+            
             # Plot fit measure as of each sessions model (trained on train split) predicting same-sessions test split
             plt.figure(figsize=(10, 6))
 
-            # Plot values for test prediction
-            for alpha in self.alphas:
+            if not all_sessions_combined:
+                # Plot values for test prediction
+                for alpha in self.alphas:
+                    for pred_type in self_pred_measures:
+                        markertype = 'o' if pred_type == "test" else '*'
+                        plt.plot(self_pred_measures[pred_type]["alphas"][alpha]["sessions"].keys(), self_pred_measures[pred_type]["alphas"][alpha]["sessions"].values(), marker=markertype, label=f'Alpha = {alpha}, {pred_type} pred')
+                
+                plt.xlabel(f'Number of Sesssion')
+                plt.ylabel(f'{type_of_fit_measure}')
+                plt.grid(True)
+                plt.legend(loc='upper right')
+                plt.title(f'{type_of_fit_measure} Session Self-prediction with Norm {normalization}, {date.today()}')
+                plt.grid(True)
+                plt.show()
+
+                # Save the plot to a file
+                plot_folder = f"data_files/visualizations/encoding_performance/subject_{self.subject_id}/norm_{normalization}"
+                plot_file = f"{type_of_fit_measure}_session_self_prediction_{normalization}_only_self_pred_{only_self_pred}.png"
+                self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+            else:
+                # Plot values for test prediction
                 for pred_type in self_pred_measures:
                     markertype = 'o' if pred_type == "test" else '*'
-                    plt.plot(self_pred_measures[pred_type]["alphas"][alpha]["sessions"].keys(), self_pred_measures[pred_type]["alphas"][alpha]["sessions"].values(), marker=markertype, label=f'Alpha = {alpha} {pred_type} pred')
-            
-            plt.xlabel(f'Number of Sesssion')
-            plt.ylabel(f'{type_of_fit_measure}')
-            plt.grid(True)
-            plt.legend(loc='upper right')
-            plt.title(f'{type_of_fit_measure} Session Self-prediction with Norm {normalization}, alpha {self.alpha}, {date.today()}')
-            plt.grid(True)
-            plt.show()
+                    plt.plot(self_pred_measures[pred_type]["alphas"].keys(), self_pred_measures[pred_type]["alphas"].values(), marker=markertype, label=f'Alpha = {alpha}, {pred_type} pred')
 
-            # Save the plot to a file
-            plot_folder = f"data_files/visualizations/encoding_performance/subject_{self.subject_id}/norm_{normalization}"
-            plot_file = f"{type_of_fit_measure}_session_self_prediction_{normalization}_only_self_pred_{only_self_pred}.png"
-            self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+                plt.xlabel(f'Alpha Value')
+                plt.ylabel(f'{type_of_fit_measure}')
+                plt.grid(True)
+                plt.legend(loc='upper right')
+                plt.title(f'{type_of_fit_measure} Self-prediction combined over all Sessions with Norm {normalization}, {date.today()}')
+                plt.grid(True)
+                plt.show()
 
+                # Save the plot to a file
+                plot_folder = f"data_files/visualizations/encoding_performance/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}"
+                plot_file = f"{type_of_fit_measure}_all_sessions_combined_self_prediction_{normalization}_only_self_pred_{only_self_pred}.png"
+                self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
     def visualize_GLM_results(self, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True, var_explained:bool = True):
         """

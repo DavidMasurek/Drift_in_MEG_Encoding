@@ -19,14 +19,14 @@ lock_event = "saccade"
 meg_channels = [1731, 1921, 2111, 2341, 2511]
 timepoint_min = 50
 timepoint_max = 250
-alphas = [1,10,100,1000,10000,100000,1000000]
+alphas = [1,10,100,1000,10000] 
 
 # Choose Calculations to be performed
 create_metadata = False
-create_train_test_split = True
-create_non_meg_dataset = True
-create_meg_dataset = True
-extract_features = True
+create_train_test_split = False
+create_non_meg_dataset = False
+create_meg_dataset = False
+extract_features = False
 train_GLM = True
 generate_predictions_with_GLM = True
 visualization = True
@@ -87,14 +87,14 @@ for subject_id in subject_ids:
 
         # Train GLM
         if train_GLM:
-            glm_helper.train_mapping()
+            glm_helper.train_mapping(all_sessions_combined=True)
 
             print("GLMs trained.")
 
         # Generate meg predictions from GLMs
         if generate_predictions_with_GLM:
-            glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=False)
-            glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=True)
+            glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=False, all_sessions_combined=True)
+            glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=True, all_sessions_combined=True)
 
             print("Predictions generated.")
 
@@ -109,12 +109,13 @@ for subject_id in subject_ids:
         #visualization_helper.visualize_meg_ERP_style(plot_norms=["no_norm", "mean_centered_ch_t"])  # ,"robust_scaling_ch_t", "z_score_ch_t", "robust_scaling", "z_score"
 
         # Visualize encoding model performance
-        visualization_helper.visualize_self_prediction(var_explained=True, only_self_pred=True)
+        visualization_helper.visualize_self_prediction(var_explained=True, only_self_pred=True, all_sessions_combined=True)
+        visualization_helper.visualize_self_prediction(var_explained=True, only_self_pred=False, all_sessions_combined=True)
 
         # Visualize prediction results
-        #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
-        #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=True)
-        #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
+        visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
+        visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=True)
+        visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
         
         # Visualize model perspective (values by timepoint)
         #visualization_helper.visualize_model_perspective(plot_norms=["no_norm"], seperate_plots=False)  # , "no_norm"
