@@ -27,8 +27,8 @@ create_train_test_split = False
 create_non_meg_dataset = False
 create_meg_dataset = False
 extract_features = False
-train_GLM = True
-generate_predictions_with_GLM = True
+train_GLM = False
+generate_predictions_with_GLM = False
 visualization = True
 
 for subject_id in subject_ids:
@@ -49,7 +49,7 @@ for subject_id in subject_ids:
 
     ##### Create crop and meg dataset based on metadata #####
     if create_non_meg_dataset or create_meg_dataset or create_train_test_split:
-        dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations, chosen_channels=meg_channels, lock_event=lock_event)
+        dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations, chosen_channels=meg_channels, lock_event=lock_event, timepoint_min=timepoint_min, timepoint_max=timepoint_max)
 
         if create_train_test_split:
             # Create train/test split based on sceneIDs (based on trial_ids)
@@ -83,7 +83,7 @@ for subject_id in subject_ids:
 
     ##### Train GLM from features to meg #####
     if train_GLM or generate_predictions_with_GLM:
-        glm_helper = GLMHelper(norms=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas)
+        glm_helper = GLMHelper(norms=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max)
 
         # Train GLM
         if train_GLM:
@@ -100,7 +100,7 @@ for subject_id in subject_ids:
 
     ##### Visualization #####
     if visualization:
-        visualization_helper = VisualizationHelper(norms=normalizations, subject_id=subject_id, alphas=alphas)
+        visualization_helper = VisualizationHelper(norms=normalizations, subject_id=subject_id, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max)
 
         # Visualize meg data with mne
         #visualization_helper.visualize_meg_epochs_mne()
