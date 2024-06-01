@@ -197,7 +197,7 @@ class BasicOperationsHelper:
             type_of_content (str): Type of data in arrays. Allowed values: ["trial_splits", "crop_data", "meg_data", "torch_dataset", "ann_features"]
             np_array (Dict[str, ndarray]): Arrays in format split, array. split is "train" or "test".
         """
-        valid_types = ["trial_splits", "crop_data", "meg_data", "torch_dataset", "ann_features", "ann_features_pca"]
+        valid_types = ["trial_splits", "crop_data", "meg_data", "torch_dataset", "ann_features", "ann_features_pca", "ann_features_pca_all_sessions_combined"]
         if type_of_content not in valid_types:
             raise ValueError(f"Function export_split_data_as_file called with unrecognized type {type_of_content}.")
 
@@ -208,9 +208,15 @@ class BasicOperationsHelper:
         additional_model_folders = f"/{ann_model}/{module}/" if type_of_content.startswith("ann_features") else "/"
         additional_norm_folder = f"norm_{type_of_norm}/" if type_of_content == "meg_data" else ""
 
+        if type_of_content.endswith("_all_sessions_combined"):
+            all_sessions_combined_folder = "/all_sessions_combined" 
+            type_of_content = type_of_content.replace("_all_sessions_combined", "")
+        else:
+            all_sessions_combined_folder = ""
+
         # Export train/test split arrays to .npz
         for split in array_dict:
-            save_folder = f"data_files/{type_of_content}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}/session_{session_id}/{split}"  
+            save_folder = f"data_files/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}/session_{session_id}/{split}"  
             save_file = f"{type_of_content}{file_type}"
             os.makedirs(save_folder, exist_ok=True)
             save_path = os.path.join(save_folder, save_file)
@@ -227,22 +233,28 @@ class BasicOperationsHelper:
 
         Parameters: 
             session_id_num (str): id of session that the arrays belong to
-            type_of_content (str): Type of data in arrays. Allowed values: ["trial_splits", "crop_data", "meg_data", "torch_dataset", "ann_features"]
+            type_of_content (str): Type of data in arrays
         """
-        valid_types = ["trial_splits", "crop_data", "meg_data", "torch_dataset", "ann_features"]
+        valid_types = ["trial_splits", "crop_data", "meg_data", "torch_dataset", "ann_features", "ann_features_pca", "ann_features_pca_all_sessions_combined"]
         if type_of_content not in valid_types:
             raise ValueError(f"Function load_split_data_from_file called with unrecognized type {type_of_content}.")
 
         file_type = ".pt" if type_of_content == "torch_dataset" else ".npy"
 
         # Add additional folder for norm and for model type and extraction layer for ann_features
-        additional_model_folders = f"/{ann_model}/{module}/" if type_of_content == "ann_features" else "/"
+        additional_model_folders = f"/{ann_model}/{module}/" if type_of_content.startswith("ann_features") else "/"
         additional_norm_folder = f"norm_{type_of_norm}/" if type_of_content == "meg_data" else ""
+
+        if type_of_content.endswith("_all_sessions_combined"):
+            all_sessions_combined_folder = "/all_sessions_combined" 
+            type_of_content = type_of_content.replace("_all_sessions_combined", "")
+        else:
+            all_sessions_combined_folder = ""
 
         split_dict = {}
         for split in ["train", "test"]:
             # Load split trial array
-            split_path = f"data_files/{type_of_content}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}/session_{session_id_num}/{split}/{type_of_content}{file_type}"  
+            split_path = f"data_files/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}/session_{session_id_num}/{split}/{type_of_content}{file_type}"  
             if file_type == ".npy":
                 split_data = np.load(split_path)
             else:
@@ -850,44 +862,62 @@ class ExtractionHelper(BasicOperationsHelper):
             # Export numpy array to .npz
             self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features", array_dict=features_split, ann_model=self.ann_model, module=self.module_name)
 
-    def reduce_feature_dimensionality(self):
+    def reduce_feature_dimensionality(self, all_sessions_combined:bool = False):
         """
         Reduces dimensionality of extracted features using PCA. This seems to be necessary to avoid overfit in the ridge Regression.
         """
-        for session_id_num in self.session_ids_num:
+        def apply_pca_to_features(ann_features):
+            pca = PCA()
+            pca.fit(ann_features)
+
+            # Keep components that explain 90% of variance
+            required_var_explained = 0.9
+            explained_var = 0
+            component_index = 0
+            component_vars = [explained_var_component for explained_var_component in pca.explained_variance_ratio_]
+            while explained_var < required_var_explained:
+                explained_var += component_vars[component_index]
+                component_index += 1
+            n_components = component_index
+
+            # Now fit again with n components (explaining 90% of variance) and transform
+            pca = PCA(n_components=n_components)
+            pca.fit(ann_features)
+            pca_features = pca.transform(ann_features)
+
+            return pca_features
+
+        if not all_sessions_combined:
+            for session_id_num in self.session_ids_num:
+                pca_features = {"train": None, "test": None}
+                for pred_type in pca_features:
+                    # Get ANN features for session
+                    ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)[pred_type]
+                    ann_features_pca = apply_pca_to_features(ann_features)
+                    pca_features[pred_type] = ann_features_pca
+
+                self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features_pca", array_dict=pca_features, ann_model=self.ann_model, module=self.module_name)
+        else:
+            # Concat features over all sessions, only then apply pca
             pca_features = {"train": None, "test": None}
             for pred_type in pca_features:
-                # Get ANN features for session
-                ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)[pred_type]
+                for session_id_num in self.session_ids_num:
+                    # Get ANN features for session
+                    ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)[pred_type]
+                    if pca_features[pred_type] is None:
+                        pca_features[pred_type] = ann_features
+                    else:
+                        pca_features[pred_type] = np.concatenate((pca_features[pred_type], ann_features))
+                ann_features_pca = apply_pca_to_features(pca_features[pred_type])
+                pca_features[pred_type] = ann_features_pca
 
-                pca = PCA()
-                pca.fit(ann_features)
-
-                # Keep components that explain 90% of variance
-                required_var_explained = 0.9
-
-                explained_var = 0
-                component_index = 0
-                component_vars = [explained_var_component for explained_var_component in pca.explained_variance_ratio_]
-                while explained_var < required_var_explained:
-                    explained_var += component_vars[component_index]
-                    component_index += 1
-                n_components = component_index
-
-                # Now fit again with n components (explaining 90% of variance) and transform
-                pca = PCA(n_components=n_components)
-                pca.fit(ann_features)
-                low_dim_features = pca.transform(ann_features)
-
-                pca_features[pred_type] = low_dim_features
-
-            self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features_pca", array_dict=pca_features, ann_model=self.ann_model, module=self.module_name)
+            self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features_pca_all_sessions_combined", array_dict=pca_features, ann_model=self.ann_model, module=self.module_name)
 
 
 
 class GLMHelper(DatasetHelper, ExtractionHelper):
     def __init__(self, norms: list, alphas: list, timepoint_min:int, timepoint_max:int, pca_features:bool = True, subject_id: str = "02", chosen_channels: list = [1731, 1921, 2111, 2341, 2511]):
-        DatasetHelper.__init__(self, normalizations=norms, subject_id=subject_id, chosen_channels=chosen_channels)
+        DatasetHelper.__init__(self, normalizations=norms, subject_id=subject_id, chosen_channels=chosen_channels, timepoint_min=timepoint_min, timepoint_max=timepoint_max)
         ExtractionHelper.__init__(self, subject_id=subject_id)
 
         self.alphas = alphas
@@ -937,7 +967,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                     selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined, session_id_num=session_id_num)
                     session_alphas[session_id_num] = selected_alphas
-                self.save_dict_as_json(type_of_content="selected_alphas_by_session", dict_to_store=session_alphas, type_of_norm=normalization, predict_train_data=predict_train_data)
+                #self.save_dict_as_json(type_of_content="selected_alphas_by_session", dict_to_store=session_alphas, type_of_norm=normalization, predict_train_data=predict_train_data)
 
         else:
             for normalization in self.normalizations:

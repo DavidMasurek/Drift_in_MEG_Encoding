@@ -27,7 +27,7 @@ create_train_test_split = False
 create_non_meg_dataset = False
 create_meg_dataset = False
 extract_features = False
-perform_pca = True
+perform_pca = False
 train_GLM = True
 generate_predictions_with_GLM = True
 visualization = True
@@ -82,7 +82,8 @@ for subject_id in subject_ids:
             print("Features extracted.")
 
         if perform_pca:
-            extraction_helper.reduce_feature_dimensionality()
+            extraction_helper.reduce_feature_dimensionality(all_sessions_combined=True)
+            extraction_helper.reduce_feature_dimensionality(all_sessions_combined=False)
             print("PCA applied to features.")
         
 
@@ -92,14 +93,14 @@ for subject_id in subject_ids:
 
         # Train GLM
         if train_GLM:
-            glm_helper.train_mapping(all_sessions_combined=True)
+            glm_helper.train_mapping(all_sessions_combined=False)
 
             print("GLMs trained.")
 
         # Generate meg predictions from GLMs
         if generate_predictions_with_GLM:
-            glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=False, all_sessions_combined=True)
-            glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=True, all_sessions_combined=True)
+            glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=False, all_sessions_combined=False)
+            glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=True, all_sessions_combined=False)
 
             print("Predictions generated.")
 
@@ -114,8 +115,8 @@ for subject_id in subject_ids:
         #visualization_helper.visualize_meg_ERP_style(plot_norms=["no_norm", "mean_centered_ch_t"])  # ,"robust_scaling_ch_t", "z_score_ch_t", "robust_scaling", "z_score"
 
         # Visualize encoding model performance
-        visualization_helper.visualize_self_prediction(var_explained=True, only_self_pred=True, all_sessions_combined=True)
-        visualization_helper.visualize_self_prediction(var_explained=True, only_self_pred=False, all_sessions_combined=True)
+        visualization_helper.visualize_self_prediction(var_explained=True, only_self_pred=True, all_sessions_combined=False)
+        visualization_helper.visualize_self_prediction(var_explained=True, only_self_pred=False, all_sessions_combined=False)
 
         # Visualize prediction results
         visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
