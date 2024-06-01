@@ -19,7 +19,7 @@ lock_event = "saccade"
 meg_channels = [1731, 1921, 2111, 2341, 2511]
 timepoint_min = 50
 timepoint_max = 250
-alphas = [1,10,100,1000,10000] 
+alphas = [1,10,100,1000,10000,100000] 
 
 # Choose Calculations to be performed
 create_metadata = False
