@@ -1203,6 +1203,8 @@ class VisualizationHelper(GLMHelper):
                     with open(json_storage_path, 'r') as file:
                         fit_measure = json.load(file)
                     self_pred_measures[pred_type] = fit_measure
+
+                print(f"self_pred_measures: {self_pred_measures}")
             
         # Plot fit measure as of each sessions model (trained on train split) predicting same-sessions test split
         plt.figure(figsize=(10, 6))
@@ -1223,19 +1225,17 @@ class VisualizationHelper(GLMHelper):
 
             # Save the plot to a file
             plot_folder = f"data_files/visualizations/encoding_performance/subject_{self.subject_id}/norm_{normalization}"
-            plot_file = f"{type_o_fit_measure}_session_self_prediction_{normalization}_only_self_pred_{only_self_pred}.png"
+            plot_file = f"{type_of_fit_measure}_session_self_prediction_{normalization}_only_self_pred_{only_self_pred}.png"
             self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
         else:
             print(f"all_sessions_combined: self_pred_measures: {self_pred_measures}")
             
-
             # Plot values for test prediction
-            for pred_type in self_pred_measures:
-                self_pred_vals = [self_pred_measures[pred_type][type_of_content] for alpha in self_pred_measures[pred_type]["alphas"].keys()]
-                markertype = 'o' if pred_type == "test" else '*'
-                plt.plot(self_pred_measures[pred_type]["alphas"].keys(), self_pred_vals, marker=markertype, label=f'{pred_type} pred')
+            self_pred_vals = [self_pred_measures[pred_type][type_of_content] for pred_type in self_pred_measures]
+            markertype = 'o' if pred_type == "test" else '*'
+            plt.plot(self_pred_measures.keys(), self_pred_vals, marker=markertype, label=f'{pred_type} pred')
 
-            plt.xlabel(f'Alpha Value')
+            plt.xlabel(f'Predicted Datasplit')
             plt.ylabel(f'{type_of_fit_measure}')
             plt.grid(True)
             plt.legend(loc='upper right')
