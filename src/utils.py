@@ -893,10 +893,11 @@ class ExtractionHelper(BasicOperationsHelper):
             for session_id_num in self.session_ids_num:
                 # Get ANN features for session
                 ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
-                if pca_features[pred_type] is None:
-                    pca_features[pred_type] = ann_features[pred_type]
-                else:
-                    pca_features[pred_type] = np.concatenate((pca_features[pred_type], ann_features[pred_type]))
+                for split in pca_features:
+                    if pca_features[split] is None:
+                        pca_features[split] = ann_features[split]
+                    else:
+                        pca_features[split] = np.concatenate((pca_features[split], ann_features[split]))
             ann_features_pca = apply_pca_to_features(pca_features)
 
             self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features_pca_all_sessions_combined", array_dict=ann_features_pca, ann_model=self.ann_model, module=self.module_name)
@@ -980,8 +981,8 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                 selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined)
                 # For continuity with session alphas store combined alphas as dict aswell
-                selected_alphas_dict = {"all_sessions": selected_alphas}
-                self.save_dict_as_json(type_of_content="selected_alphas_all_sessions_combined", dict_to_store=selected_alphas_dict, type_of_norm=normalization, predict_train_data=predict_train_data)
+                #selected_alphas_dict = {"all_sessions": selected_alphas}
+                #self.save_dict_as_json(type_of_content="selected_alphas_all_sessions_combined", dict_to_store=selected_alphas_dict, type_of_norm=normalization, predict_train_data=predict_train_data)
 
 
         

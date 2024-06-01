@@ -20,6 +20,7 @@ meg_channels = [1731, 1921, 2111, 2341, 2511]
 timepoint_min = 50
 timepoint_max = 250
 alphas = [1,10,100,1000,10000,100000] 
+all_sessions_combined = True
 
 # Choose Calculations to be performed
 create_metadata = False
@@ -82,8 +83,7 @@ for subject_id in subject_ids:
             print("Features extracted.")
 
         if perform_pca:
-            #extraction_helper.reduce_feature_dimensionality(all_sessions_combined=True)
-            extraction_helper.reduce_feature_dimensionality(all_sessions_combined=False)
+            extraction_helper.reduce_feature_dimensionality(all_sessions_combined=all_sessions_combined)
             print("PCA applied to features.")
         
 
@@ -93,14 +93,14 @@ for subject_id in subject_ids:
 
         # Train GLM
         if train_GLM:
-            glm_helper.train_mapping(all_sessions_combined=False)
+            glm_helper.train_mapping(all_sessions_combined=all_sessions_combined)
 
             print("GLMs trained.")
 
         # Generate meg predictions from GLMs
         if generate_predictions_with_GLM:
-            glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=False, all_sessions_combined=False)
-            glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=True, all_sessions_combined=False)
+            glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=False, all_sessions_combined=all_sessions_combined)
+            glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=True, all_sessions_combined=all_sessions_combined)
 
             print("Predictions generated.")
 
