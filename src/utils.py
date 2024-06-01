@@ -125,7 +125,7 @@ class BasicOperationsHelper:
         return session_id_num
 
 
-    def read_dict_from_json(self, type_of_content: str, type_of_norm: str = None, alpha:int = None, predict_train_data:bool = False) -> dict:
+    def read_dict_from_json(self, type_of_content: str, type_of_norm: str = None, predict_train_data:bool = False) -> dict:
         """
         Helper function to read json files of various content types into dicts.
         """
@@ -133,22 +133,12 @@ class BasicOperationsHelper:
         if type_of_content not in valid_types:
             raise ValueError(f"Function read_dict_from_json called with unrecognized type {type_of_content}.")
 
-        # If alpha is specified, access the respective subfolder for var_explained and mse_losses
-        if alpha is not None: 
-            assert (type_of_content == "var_explained") or (type_of_content == "mse_losses"), f"Invalid parameter configuration: alpha was specified but type_of_content is {type_of_content}"
-            alpha_suffix = f"alpha_{alpha}"
-            alpha_folder_insert = f"/{alpha_suffix}"
-            alpha_name_insert = f"_{alpha_suffix}"
-        else:
-            alpha_folder_insert = ""
-            alpha_name_insert = ""
-
         if type_of_content == "mse_losses":
-            file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}{alpha_folder_insert}/mse_losses_{type_of_norm}_dict.json"
+            file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/mse_losses_{type_of_norm}_dict.json"
         elif type_of_content == "mse_losses_timepoint":
             file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/timepoints/norm_{type_of_norm}/mse_losses_timepoint_{type_of_norm}_dict.json"
         elif type_of_content == "var_explained":
-            file_path = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}{alpha_folder_insert}/predict_train_data_{predict_train_data}/var_explained_{type_of_norm}{alpha_name_insert}_dict.json"
+            file_path = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/predict_train_data_{predict_train_data}/var_explained_{type_of_norm}_dict.json"
         else:
             file_path = f"data_files/metadata/{type_of_content}/subject_{self.subject_id}/{type_of_content}_dict.json"
         
@@ -162,23 +152,13 @@ class BasicOperationsHelper:
         return data_dict
 
 
-    def save_dict_as_json(self, type_of_content: str, dict_to_store: dict, type_of_norm: str = None, alpha:int = None, predict_train_data:bool = False) -> None:
+    def save_dict_as_json(self, type_of_content: str, dict_to_store: dict, type_of_norm: str = None, predict_train_data:bool = False) -> None:
         """
         Helper function to store dicts of various content types as json files.
         """
         valid_types = ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses", "mse_losses_timepoint", "var_explained"]
         if type_of_content not in valid_types:
             raise ValueError(f"Function save_dict_as_json called with unrecognized type {type_of_content}.")
-
-         # If alpha is specified, store in the respective subfolder for var_explained and mse_losses
-        if alpha is not None: 
-            assert (type_of_content == "var_explained") or (type_of_content == "mse_losses"), f"Invalid parameter configuration: alpha was specified but type_of_content is {type_of_content}"
-            alpha_suffix = f"alpha_{alpha}"
-            alpha_folder_insert = f"/{alpha_suffix}"
-            alpha_name_insert = f"_{alpha_suffix}"
-        else:
-            alpha_folder_insert = ""
-            alpha_name_insert = ""
 
         # losses and variance explained
         if type_of_content in ["mse_losses", "mse_losses_timepoint", "var_explained"]:
@@ -190,10 +170,10 @@ class BasicOperationsHelper:
                 else:
                     timepoint_folder = ""
                     timepoint_name = ""
-                storage_folder = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/{timepoint_folder}norm_{type_of_norm}{alpha_folder_insert}"
+                storage_folder = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/{timepoint_folder}norm_{type_of_norm}"
             elif type_of_content == "var_explained":
-                storage_folder = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}{alpha_folder_insert}/predict_train_data_{predict_train_data}"
-            name_addition = f"_{type_of_norm}{alpha_name_insert}"
+                storage_folder = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/predict_train_data_{predict_train_data}"
+            name_addition = f"_{type_of_norm}"
         # metadata
         elif type_of_content in ["combined_metadata", "meg_metadata", "crop_metadata"]:
             storage_folder = f'data_files/metadata/{type_of_content}/subject_{self.subject_id}'
@@ -217,7 +197,7 @@ class BasicOperationsHelper:
             type_of_content (str): Type of data in arrays. Allowed values: ["trial_splits", "crop_data", "meg_data", "torch_dataset", "ann_features"]
             np_array (Dict[str, ndarray]): Arrays in format split, array. split is "train" or "test".
         """
-        valid_types = ["trial_splits", "crop_data", "meg_data", "torch_dataset", "ann_features"]
+        valid_types = ["trial_splits", "crop_data", "meg_data", "torch_dataset", "ann_features", "ann_features_pca"]
         if type_of_content not in valid_types:
             raise ValueError(f"Function export_split_data_as_file called with unrecognized type {type_of_content}.")
 
@@ -225,7 +205,7 @@ class BasicOperationsHelper:
         file_type = ".pt" if type_of_content == "torch_dataset" else ".npy"
         
         # Add additional folder for norm and for model type and extraction layer for ann_features
-        additional_model_folders = f"/{ann_model}/{module}/" if type_of_content == "ann_features" else "/"
+        additional_model_folders = f"/{ann_model}/{module}/" if type_of_content.startswith("ann_features") else "/"
         additional_norm_folder = f"norm_{type_of_norm}/" if type_of_content == "meg_data" else ""
 
         # Export train/test split arrays to .npz
@@ -875,31 +855,33 @@ class ExtractionHelper(BasicOperationsHelper):
         Reduces dimensionality of extracted features using PCA. This seems to be necessary to avoid overfit in the ridge Regression.
         """
         for session_id_num in self.session_ids_num:
-            # Get ANN features for session
-            ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
+            pca_features = {"train": None, "test": None}
+            for pred_type in pca_features:
+                # Get ANN features for session
+                ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)[pred_type]
 
-            pca = PCA()
-            pca.fit(ann_features)
+                pca = PCA()
+                pca.fit(ann_features)
 
-            # Keep components that explain 90% of variance
-            required_var_explained = 0.9
+                # Keep components that explain 90% of variance
+                required_var_explained = 0.9
 
-            explained_var = 0
-            component_index = 0
-            component_vars = [explained_var_component for explained_var_component in pca.explained_variance_ratio_]
-            while explained_var < required_var_explained:
-                explained_var += component_vars[component_index]
-                component_index += 1
-            n_components = component_index
+                explained_var = 0
+                component_index = 0
+                component_vars = [explained_var_component for explained_var_component in pca.explained_variance_ratio_]
+                while explained_var < required_var_explained:
+                    explained_var += component_vars[component_index]
+                    component_index += 1
+                n_components = component_index
 
-            # Now fit again with n components (explaining 90% of variance) and transform
-            pca = PCA(n_components=n_components)
-            pca.fit(ann_features)
-            low_dim_features = pca.transform(ann_features)
+                # Now fit again with n components (explaining 90% of variance) and transform
+                pca = PCA(n_components=n_components)
+                pca.fit(ann_features)
+                low_dim_features = pca.transform(ann_features)
 
-            self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features_pca", array_dict=low_dim_features, ann_model=self.ann_model, module=self.module_name)
+                pca_features[pred_type] = low_dim_features
 
-
+            self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features_pca", array_dict=pca_features, ann_model=self.ann_model, module=self.module_name)
 
 
 
@@ -931,7 +913,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
             # Store trained models as pickle
             save_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}{all_session_folder}/norm_{normalization}{session_addition}"  
-            save_file = "GLM_models.pkl.pkl"
+            save_file = "GLM_models.pkl"
             os.makedirs(save_folder, exist_ok=True)
             save_path = os.path.join(save_folder, save_file)
 
@@ -1000,7 +982,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     # Get trained ridge regression model for this session
                     # Load ridge model
                     storage_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/session_{session_id_model}"  
-                    storage_file = "GLM_models.pkl.pkl"
+                    storage_file = "GLM_models.pkl"
                     storage_path = os.path.join(storage_folder, storage_file)
                     with open(storage_path, 'rb') as file:
                         ridge_model = pickle.load(file)
@@ -1064,7 +1046,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 var_explained_dict = {}
                 # Get trained ridge regression models 
                 storage_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}"  
-                storage_file = "GLM_models.pkl.pkl"
+                storage_file = "GLM_models.pkl"
                 storage_path = os.path.join(storage_folder, storage_file)
                 with open(storage_path, 'rb') as file:
                     ridge_models = pickle.load(file)

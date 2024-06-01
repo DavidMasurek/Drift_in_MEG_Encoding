@@ -27,8 +27,9 @@ create_train_test_split = False
 create_non_meg_dataset = False
 create_meg_dataset = False
 extract_features = False
-train_GLM = False
-generate_predictions_with_GLM = False
+perform_pca = True
+train_GLM = True
+generate_predictions_with_GLM = True
 visualization = True
 
 for subject_id in subject_ids:
@@ -72,14 +73,18 @@ for subject_id in subject_ids:
             print("MEG datasets created.")
 
 
-    ##### Extract features from crops #####
-    if extract_features:
+    ##### Extract features from crops and perform pca #####
+    if extract_features or perform_pca:
         extraction_helper = ExtractionHelper(subject_id=subject_id)
 
-        # Extract features
-        extraction_helper.extract_features()
+        if extract_features:
+            extraction_helper.extract_features()
+            print("Features extracted.")
 
-        print("Features extracted.")
+        if perform_pca:
+            extraction_helper.reduce_feature_dimensionality()
+            print("PCA applied to features.")
+        
 
     ##### Train GLM from features to meg #####
     if train_GLM or generate_predictions_with_GLM:
