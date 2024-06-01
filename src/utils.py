@@ -867,51 +867,39 @@ class ExtractionHelper(BasicOperationsHelper):
         Reduces dimensionality of extracted features using PCA. This seems to be necessary to avoid overfit in the ridge Regression.
         """
         def apply_pca_to_features(ann_features):
-            pca = PCA()
-            pca.fit(ann_features)
+            """
+            Fits pca on train and test features  combined. Use fix amount of components to allow cross-session predictions
+            """
+            pca = PCA(n_components=5)
+            pca.fit(np.concatenate((ann_features["train"], ann_features["test"])))
 
-            # Keep components that explain 90% of variance
-            required_var_explained = 0.9
-            explained_var = 0
-            component_index = 0
-            component_vars = [explained_var_component for explained_var_component in pca.explained_variance_ratio_]
-            while explained_var < required_var_explained:
-                explained_var += component_vars[component_index]
-                component_index += 1
-            n_components = component_index
+            # Transform splits
+            for split in ann_features:
+                ann_features[split] = pca.transform(ann_features[split])
 
-            # Now fit again with n components (explaining 90% of variance) and transform
-            pca = PCA(n_components=n_components)
-            pca.fit(ann_features)
-            pca_features = pca.transform(ann_features)
-
-            return pca_features
+            return ann_features
 
         if not all_sessions_combined:
             for session_id_num in self.session_ids_num:
                 pca_features = {"train": None, "test": None}
-                for pred_type in pca_features:
-                    # Get ANN features for session
-                    ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)[pred_type]
-                    ann_features_pca = apply_pca_to_features(ann_features)
-                    pca_features[pred_type] = ann_features_pca
+                # Get ANN features for session
+                ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
+                ann_features_pca = apply_pca_to_features(ann_features)
 
-                self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features_pca", array_dict=pca_features, ann_model=self.ann_model, module=self.module_name)
+                self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features_pca", array_dict=ann_features_pca, ann_model=self.ann_model, module=self.module_name)
         else:
             # Concat features over all sessions, only then apply pca
             pca_features = {"train": None, "test": None}
-            for pred_type in pca_features:
-                for session_id_num in self.session_ids_num:
-                    # Get ANN features for session
-                    ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)[pred_type]
-                    if pca_features[pred_type] is None:
-                        pca_features[pred_type] = ann_features
-                    else:
-                        pca_features[pred_type] = np.concatenate((pca_features[pred_type], ann_features))
-                ann_features_pca = apply_pca_to_features(pca_features[pred_type])
-                pca_features[pred_type] = ann_features_pca
+            for session_id_num in self.session_ids_num:
+                # Get ANN features for session
+                ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
+                if pca_features[pred_type] is None:
+                    pca_features[pred_type] = ann_features[pred_type]
+                else:
+                    pca_features[pred_type] = np.concatenate((pca_features[pred_type], ann_features[pred_type]))
+            ann_features_pca = apply_pca_to_features(pca_features)
 
-            self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features_pca_all_sessions_combined", array_dict=pca_features, ann_model=self.ann_model, module=self.module_name)
+            self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features_pca_all_sessions_combined", array_dict=ann_features_pca, ann_model=self.ann_model, module=self.module_name)
 
 
 
@@ -1015,7 +1003,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     storage_file = "GLM_models.pkl"
                     storage_path = os.path.join(storage_folder, storage_file)
                     with open(storage_path, 'rb') as file:
-                        ridge_model = pickle.load(file)
+                        ridge_models = pickle.load(file)
 
                     # Initialize MultiDim GLM class with stored models
                     ridge_model = GLMHelper.MultiDimensionalRidge(self, models=ridge_models)

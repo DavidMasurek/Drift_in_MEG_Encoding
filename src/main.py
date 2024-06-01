@@ -27,7 +27,7 @@ create_train_test_split = False
 create_non_meg_dataset = False
 create_meg_dataset = False
 extract_features = False
-perform_pca = False
+perform_pca = True
 train_GLM = True
 generate_predictions_with_GLM = True
 visualization = True
@@ -82,7 +82,7 @@ for subject_id in subject_ids:
             print("Features extracted.")
 
         if perform_pca:
-            extraction_helper.reduce_feature_dimensionality(all_sessions_combined=True)
+            #extraction_helper.reduce_feature_dimensionality(all_sessions_combined=True)
             extraction_helper.reduce_feature_dimensionality(all_sessions_combined=False)
             print("PCA applied to features.")
         
