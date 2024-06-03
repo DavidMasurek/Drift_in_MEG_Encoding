@@ -824,12 +824,13 @@ class DatasetHelper(MetadataHelper):
 
 
 class ExtractionHelper(BasicOperationsHelper):
-    def __init__(self, subject_id: str = "02", ann_model: str = "Resnet50", module_name : str = "fc", batch_size: int = 32):
+    def __init__(self, pca_components, subject_id: str = "02", ann_model: str = "Resnet50", module_name : str = "fc", batch_size: int = 32):
         super().__init__(subject_id)
 
         self.ann_model = ann_model
         self.module_name = module_name  # Name of Layer to extract features from
         self.batch_size = batch_size
+        self.pca_components = pca_components
 
     
     def extract_features(self):
@@ -881,16 +882,13 @@ class ExtractionHelper(BasicOperationsHelper):
             """
             Fits pca on train and test features  combined. Use fix amount of components to allow cross-session predictions
             """
-            pca = PCA(n_components=4)
+            pca = PCA(n_components=self.pca_components)
             pca.fit(np.concatenate((ann_features["train"], ann_features["test"])))
 
             # Transform splits
             for split in ann_features:
                 ann_features[split] = pca.transform(ann_features[split])
 
-                logger.debug(msg=f"Resulting shape of pca: {ann_features[split].shape}.")
-
-        
             return ann_features
 
         if not all_sessions_combined:
@@ -921,7 +919,7 @@ class ExtractionHelper(BasicOperationsHelper):
 class GLMHelper(DatasetHelper, ExtractionHelper):
     def __init__(self, norms: list, alphas: list, timepoint_min:int, timepoint_max:int, pca_features:bool = True, subject_id: str = "02", chosen_channels: list = [1731, 1921, 2111, 2341, 2511]):
         DatasetHelper.__init__(self, normalizations=norms, subject_id=subject_id, chosen_channels=chosen_channels, timepoint_min=timepoint_min, timepoint_max=timepoint_max)
-        ExtractionHelper.__init__(self, subject_id=subject_id)
+        ExtractionHelper.__init__(self, subject_id=subject_id, pca_components)
 
         self.alphas = alphas
         self.ann_features_type = "ann_features_pca" if pca_features else "ann_features"

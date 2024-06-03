@@ -23,6 +23,7 @@ timepoint_min = 50
 timepoint_max = 250
 alphas = [1,10,100,1000,10000,100000,1000000] 
 all_sessions_combined = False
+pca_components = 4
 
 logger_level=logging.DEBUG
 
@@ -40,7 +41,6 @@ visualization = False
 # Handle logger
 logger = logging.getLogger(__name__)
 logging.root.handlers = []
-
 filename = (
         "logs/pipeline_" + datetime.now().strftime("%d-%m-%Y_%H-%M-%S") + ".log"
     )
@@ -97,7 +97,7 @@ for subject_id in subject_ids:
 
     ##### Extract features from crops and perform pca #####
     if extract_features or perform_pca:
-        extraction_helper = ExtractionHelper(subject_id=subject_id)
+        extraction_helper = ExtractionHelper(subject_id=subject_id, pca_components=pca_components)
 
         if extract_features:
             extraction_helper.extract_features()
