@@ -211,17 +211,21 @@ class BasicOperationsHelper:
         if type_of_content.endswith("_all_sessions_combined"):
             all_sessions_combined_folder = "/all_sessions_combined" 
             type_of_content = type_of_content.replace("_all_sessions_combined", "")
+            session_folder = ""
         else:
+            session_folder = f"/session_{session_id}"
             all_sessions_combined_folder = ""
 
         # Export train/test split arrays to .npz
         for split in array_dict:
-            save_folder = f"data_files/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}/session_{session_id}/{split}"  
+            save_folder = f"data_files/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}{session_folder}/{split}"  
             save_file = f"{type_of_content}{file_type}"
             os.makedirs(save_folder, exist_ok=True)
             save_path = os.path.join(save_folder, save_file)
 
             if file_type == ".npy":
+                if all_sessions_combined_folder != "":
+                    print(f"saving array of shape {array_dict[split].shape} to {save_path}")
                 np.save(save_path, array_dict[split])
             else:
                 torch.save(array_dict[split], save_path)
@@ -248,15 +252,19 @@ class BasicOperationsHelper:
         if type_of_content.endswith("_all_sessions_combined"):
             all_sessions_combined_folder = "/all_sessions_combined" 
             type_of_content = type_of_content.replace("_all_sessions_combined", "")
+            session_folder = ""
         else:
+            session_folder = f"/session_{session_id_num}"
             all_sessions_combined_folder = ""
 
         split_dict = {}
         for split in ["train", "test"]:
             # Load split trial array
-            split_path = f"data_files/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}/session_{session_id_num}/{split}/{type_of_content}{file_type}"  
+            split_path = f"data_files/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}{session_folder}/{split}/{type_of_content}{file_type}"  
             if file_type == ".npy":
                 split_data = np.load(split_path)
+                if all_sessions_combined_folder != "":
+                    print(f"loaded array of shape {split_data.shape} from {split_path}")
             else:
                 split_data = torch.load(split_path)
             split_dict[split] = split_data
@@ -870,7 +878,7 @@ class ExtractionHelper(BasicOperationsHelper):
             """
             Fits pca on train and test features  combined. Use fix amount of components to allow cross-session predictions
             """
-            pca = PCA(n_components=5)
+            pca = PCA(n_components=3)
             pca.fit(np.concatenate((ann_features["train"], ann_features["test"])))
 
             # Transform splits
@@ -900,7 +908,7 @@ class ExtractionHelper(BasicOperationsHelper):
                         pca_features[split] = np.concatenate((pca_features[split], ann_features[split]))
             ann_features_pca = apply_pca_to_features(pca_features)
 
-            self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features_pca_all_sessions_combined", array_dict=ann_features_pca, ann_model=self.ann_model, module=self.module_name)
+            self.export_split_data_as_file(session_id=None, type_of_content="ann_features_pca_all_sessions_combined", array_dict=ann_features_pca, ann_model=self.ann_model, module=self.module_name)
 
 
 
@@ -960,19 +968,20 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
         else:
             for normalization in self.normalizations:
-                ann_features_train_combined = None
                 meg_data_train_combined = None
                 # Collect ANN features and MEG data over sessions
                 for session_id_num in self.session_ids_num:
-                    ann_features_train = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content=self.ann_features_type, ann_model=self.ann_model, module=self.module_name)['train']
                     meg_data_train = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)['train']
 
                     if session_id_num == "1":
-                        ann_features_train_combined = ann_features_train
                         meg_data_train_combined = meg_data_train
                     else:
-                        ann_features_train_combined = np.concatenate([ann_features_train_combined, ann_features_train], axis=0)
                         meg_data_train_combined = np.concatenate([meg_data_train_combined, meg_data_train], axis=0)
+
+                ann_features_train_combined = self.load_split_data_from_file(session_id_num=None, type_of_content=self.ann_features_type+"_all_sessions_combined" , ann_model=self.ann_model, module=self.module_name)['train']
+
+                print(f"Train_mapping: ann_features_train_combined.shape: {ann_features_train_combined.shape}")
+                print(f"Train_mapping: meg_data_train_combined.shape: {meg_data_train_combined.shape}")
 
                 X_train, Y_train = ann_features_train_combined, meg_data_train_combined
 
@@ -1075,19 +1084,17 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                 # Generate predictions for test features evaluate them (or for train features to evaluate overfit)
                 # Collect ANN features and MEG data over sessions
-                ann_features_pred_combined = None
                 meg_data_pred_combined = None
+                pred_type = "train" if predict_train_data else "test"
                 for session_id_num in self.session_ids_num:
-                    pred_type = "train" if predict_train_data else "test"
-                    ann_features_pred = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content=self.ann_features_type, ann_model=self.ann_model, module=self.module_name)[pred_type]
                     meg_data_pred = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)[pred_type]
 
                     if session_id_num == "1":
-                        ann_features_pred_combined = ann_features_pred
                         meg_data_pred_combined = meg_data_pred
                     else:
-                        ann_features_pred_combined = np.concatenate([ann_features_pred_combined, ann_features_pred], axis=0)
                         meg_data_pred_combined = np.concatenate([meg_data_pred_combined, meg_data_pred], axis=0)
+
+                ann_features_pred_combined = self.load_split_data_from_file(session_id_num=None, type_of_content=self.ann_features_type+"_all_sessions_combined" , ann_model=self.ann_model, module=self.module_name)[pred_type]
 
                 X_test, Y_test = ann_features_pred_combined, meg_data_pred_combined
 

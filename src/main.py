@@ -19,7 +19,7 @@ lock_event = "saccade"
 meg_channels = [1731, 1921, 2111, 2341, 2511]
 timepoint_min = 50
 timepoint_max = 250
-alphas = [1,10,100,1000,10000,100000] 
+alphas = [1,10,100,1000,10000,100000,1000000] 
 all_sessions_combined = True
 
 # Choose Calculations to be performed
@@ -28,9 +28,9 @@ create_train_test_split = False
 create_non_meg_dataset = False
 create_meg_dataset = False
 extract_features = False
-perform_pca = False
-train_GLM = False
-generate_predictions_with_GLM = False
+perform_pca = True
+train_GLM = True
+generate_predictions_with_GLM = True
 visualization = True
 
 for subject_id in subject_ids:
@@ -89,7 +89,7 @@ for subject_id in subject_ids:
 
     ##### Train GLM from features to meg #####
     if train_GLM or generate_predictions_with_GLM:
-        glm_helper = GLMHelper(norms=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max)
+        glm_helper = GLMHelper(norms=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=True)
 
         # Train GLM
         if train_GLM:
