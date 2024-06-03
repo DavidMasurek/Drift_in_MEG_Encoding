@@ -25,7 +25,11 @@ alphas = [1,10,100,1000,10000,100000,1000000]
 all_sessions_combined = False
 pca_components = 4
 
-logger_level=logging.DEBUG
+ann_model = "Resnet50"
+module_name = "fc"
+batch_size = 32
+
+logger_level=logging.INFO
 
 # Choose Calculations to be performed
 create_metadata = False
@@ -33,10 +37,12 @@ create_train_test_split = False
 create_non_meg_dataset = False
 create_meg_dataset = False
 extract_features = False
-perform_pca = True
+perform_pca = False
 train_GLM = False
 generate_predictions_with_GLM = False
-visualization = False
+visualization = True
+
+use_pca_features = True
 
 # Handle logger
 logger = logging.getLogger(__name__)
@@ -44,8 +50,7 @@ logging.root.handlers = []
 filename = (
         "logs/pipeline_" + datetime.now().strftime("%d-%m-%Y_%H-%M-%S") + ".log"
     )
-handlers = [logging.FileHandler(filename=filename, encoding="utf-8", mode="w"),
-            logging.StreamHandler(),    ]
+handlers = [logging.StreamHandler()]  # logging.FileHandler(filename=filename, encoding="utf-8", mode="w"),
 logging.basicConfig(
     format="[%(asctime)s] [%(name)s] [%(levelname)s] [%(funcName)s] %(message)s",
     datefmt="%d/%m/%Y %H:%M:%S",
@@ -97,7 +102,7 @@ for subject_id in subject_ids:
 
     ##### Extract features from crops and perform pca #####
     if extract_features or perform_pca:
-        extraction_helper = ExtractionHelper(subject_id=subject_id, pca_components=pca_components)
+        extraction_helper = ExtractionHelper(subject_id=subject_id, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, lock_event=lock_event)
 
         if extract_features:
             extraction_helper.extract_features()
@@ -110,7 +115,7 @@ for subject_id in subject_ids:
 
     ##### Train GLM from features to meg #####
     if train_GLM or generate_predictions_with_GLM:
-        glm_helper = GLMHelper(norms=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=True)
+        glm_helper = GLMHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, lock_event=lock_event, ann_model=ann_model, module_name=module_name, batch_size=batch_size)
 
         # Train GLM
         if train_GLM:
@@ -127,7 +132,7 @@ for subject_id in subject_ids:
 
     ##### Visualization #####
     if visualization:
-        visualization_helper = VisualizationHelper(norms=normalizations, subject_id=subject_id, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max)
+        visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size)
 
         # Visualize meg data with mne
         #visualization_helper.visualize_meg_epochs_mne()

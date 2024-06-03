@@ -32,11 +32,11 @@ logger = logging.getLogger(__name__)
 mne.set_log_level(verbose="ERROR")
 
 class BasicOperationsHelper:
-    def __init__(self, subject_id: str = "02", lock_event: str = "saccade"):
+    def __init__(self, subject_id:str, lock_event:str):
         self.subject_id = subject_id
+        self.lock_event = lock_event
         self.session_ids_char = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
         self.session_ids_num = [str(session_id) for session_id in range(1,11)]
-        self.lock_event = lock_event
 
 
     def get_relevant_meg_channels(self, chosen_channels: list, session_id: str):
@@ -266,8 +266,7 @@ class BasicOperationsHelper:
             split_path = f"data_files/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}{session_folder}/{split}/{type_of_content}{file_type}"  
             if file_type == ".npy":
                 split_data = np.load(split_path)
-                if all_sessions_combined_folder != "":
-                    print(f"loaded array of shape {split_data.shape} from {split_path}")
+                logger.info(msg=f"Loaded array of shape {split_data.shape} from {split_path}")
             else:
                 split_data = torch.load(split_path)
             split_dict[split] = split_data
@@ -363,11 +362,11 @@ class BasicOperationsHelper:
 
 
 class MetadataHelper(BasicOperationsHelper):
-    def __init__(self, subject_id: str = "02", lock_event: str = "saccade"):
-        super().__init__(subject_id, lock_event)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
-        self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{subject_id}_crops_metadata.csv"
-        self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{subject_id}/sensor/filter_0.2_200"
+        self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{self.subject_id}_crops_metadata.csv"
+        self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
 
 
     def create_combined_metadata_dict(self, investigate_missing_data=False) -> None:
@@ -531,8 +530,8 @@ class MetadataHelper(BasicOperationsHelper):
 
         
 class DatasetHelper(MetadataHelper):
-    def __init__(self, normalizations:list,  timepoint_min: int, timepoint_max:int, subject_id: str = "02", chosen_channels:list = [1731, 1921, 2111, 2341, 2511], lock_event: str = "saccade"):
-        super().__init__(subject_id=subject_id, lock_event=lock_event)
+    def __init__(self, normalizations:list,  chosen_channels:list , timepoint_min: int, timepoint_max:int, **kwargs):
+        super().__init__(**kwargs)  # subject_id=subject_id, lock_event=lock_event
 
         self.normalizations = normalizations
         self.chosen_channels = chosen_channels
@@ -824,8 +823,8 @@ class DatasetHelper(MetadataHelper):
 
 
 class ExtractionHelper(BasicOperationsHelper):
-    def __init__(self, pca_components, subject_id: str = "02", ann_model: str = "Resnet50", module_name : str = "fc", batch_size: int = 32):
-        super().__init__(subject_id)
+    def __init__(self, ann_model:str, module_name:str, batch_size:int, pca_components:int, **kwargs):
+        super().__init__(**kwargs)
 
         self.ann_model = ann_model
         self.module_name = module_name  # Name of Layer to extract features from
@@ -917,9 +916,10 @@ class ExtractionHelper(BasicOperationsHelper):
 
 
 class GLMHelper(DatasetHelper, ExtractionHelper):
-    def __init__(self, norms: list, alphas: list, timepoint_min:int, timepoint_max:int, pca_features:bool = True, subject_id: str = "02", chosen_channels: list = [1731, 1921, 2111, 2341, 2511]):
-        DatasetHelper.__init__(self, normalizations=norms, subject_id=subject_id, chosen_channels=chosen_channels, timepoint_min=timepoint_min, timepoint_max=timepoint_max)
-        ExtractionHelper.__init__(self, subject_id=subject_id, pca_components)
+    def __init__(self, alphas: list, pca_features:bool, **kwargs):
+        super().__init__(**kwargs)
+        #DatasetHelper.__init__(self, **kwargs)
+        #ExtractionHelper.__init__(self, **kwargs)
 
         self.alphas = alphas
         self.ann_features_type = "ann_features_pca" if pca_features else "ann_features"
@@ -958,14 +958,14 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 print(f"Training mapping for normalization {normalization}")
                 session_alphas = {}
                 for session_id_num in self.session_ids_num:
+                    logger.info(msg=f"[Session {session_id_num}] Before relevant load_split_data_from_file")
                     # Get ANN features for session
                     ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content=self.ann_features_type, ann_model=self.ann_model, module=self.module_name)
-
                     # Get MEG data for sesssion
                     meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
 
                     X_train, Y_train = ann_features['train'], meg_data['train']
-
+                    logger.info(msg=f"[Session {session_id_num}] X_train.shape: {X_train.shape}, Y_train.shape: {Y_train.shape}")
                     selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined, session_id_num=session_id_num)
                     session_alphas[session_id_num] = selected_alphas
                 #self.save_dict_as_json(type_of_content="selected_alphas_by_session", dict_to_store=session_alphas, type_of_norm=normalization, predict_train_data=predict_train_data)
@@ -1178,8 +1178,8 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
 
 class VisualizationHelper(GLMHelper):
-    def __init__(self, norms:list, alphas:list, timepoint_min:int , timepoint_max:int, subject_id: str = "02"):
-        super().__init__(norms=norms, subject_id=subject_id, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     def visualize_self_prediction(self, var_explained:bool=True, only_self_pred:bool=False, all_sessions_combined:bool=False):
         if var_explained:
