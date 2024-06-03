@@ -7,11 +7,12 @@ import numpy as np
 import imageio
 import mne
 import matplotlib.pyplot as plt
+import logging
+import random
 from matplotlib.lines import Line2D  
 from collections import defaultdict
 from typing import Tuple, Dict
 from datetime import date
-import random
 
 # ML specific imports
 import torch
@@ -26,6 +27,8 @@ from sklearn.metrics import r2_score
 from scipy.stats import linregress
 
 # Logging related
+logger = logging.getLogger(__name__)
+
 mne.set_log_level(verbose="ERROR")
 
 class BasicOperationsHelper:
@@ -878,13 +881,16 @@ class ExtractionHelper(BasicOperationsHelper):
             """
             Fits pca on train and test features  combined. Use fix amount of components to allow cross-session predictions
             """
-            pca = PCA(n_components=3)
+            pca = PCA(n_components=4)
             pca.fit(np.concatenate((ann_features["train"], ann_features["test"])))
 
             # Transform splits
             for split in ann_features:
                 ann_features[split] = pca.transform(ann_features[split])
 
+                logger.debug(msg=f"Resulting shape of pca: {ann_features[split].shape}.")
+
+        
             return ann_features
 
         if not all_sessions_combined:
@@ -1028,6 +1034,10 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                             X_test, Y_test = ann_features['train'], meg_data['train']
                         else:
                             X_test, Y_test = ann_features['test'], meg_data['test']
+
+                        print(f"Predict_from_mapping: X_test.shape: {X_test.shape}")
+                        print(f"Predict_from_mapping: Y_test.shape: {Y_test.shape}")
+
 
                         # Generate predictions
                         predictions = ridge_model.predict(X_test)
