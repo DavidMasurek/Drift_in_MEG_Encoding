@@ -209,7 +209,18 @@ class BasicOperationsHelper:
         
         # Add additional folder for norm and for model type and extraction layer for ann_features
         additional_model_folders = f"/{ann_model}/{module}/" if type_of_content.startswith("ann_features") else "/"
-        additional_norm_folder = f"norm_{type_of_norm}/" if type_of_content == "meg_data" else ""
+        # Add a folder for norm for meg data and folder that indicates an intermediate step in normalisation: Additional steps will later be performed across all sessions combined
+        if type_of_content == "meg_data"
+            additional_norm_folder = f"norm_{type_of_norm}/" 
+            if type_of_norm.endswith("_intermediate"):
+                intermediate_norm_folder = "/intermediate_norm_True"  
+                type_of_norm = type_of_norm[:-len("_intermediate")]
+                print(f"type_of_norm: {type_of_norm}")
+            else:
+                intermediate_norm_folder = ""
+        else:
+            additional_norm_folder = "" 
+            intermediate_norm_folder = ""
 
         if type_of_content.endswith("_all_sessions_combined"):
             all_sessions_combined_folder = "/all_sessions_combined" 
@@ -221,14 +232,14 @@ class BasicOperationsHelper:
 
         # Export train/test split arrays to .npz
         for split in array_dict:
-            save_folder = f"data_files/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}{session_folder}/{split}"  
+            save_folder = f"data_files/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}{intermediate_norm_folder}subject_{self.subject_id}{session_folder}/{split}"  
             save_file = f"{type_of_content}{file_type}"
             os.makedirs(save_folder, exist_ok=True)
             save_path = os.path.join(save_folder, save_file)
 
             if file_type == ".npy":
-                if all_sessions_combined_folder != "":
-                    print(f"saving array of shape {array_dict[split].shape} to {save_path}")
+                #if all_sessions_combined_folder != "":
+                #    print(f"saving array of shape {array_dict[split].shape} to {save_path}")
                 np.save(save_path, array_dict[split])
             else:
                 torch.save(array_dict[split], save_path)
@@ -250,7 +261,18 @@ class BasicOperationsHelper:
 
         # Add additional folder for norm and for model type and extraction layer for ann_features
         additional_model_folders = f"/{ann_model}/{module}/" if type_of_content.startswith("ann_features") else "/"
-        additional_norm_folder = f"norm_{type_of_norm}/" if type_of_content == "meg_data" else ""
+        # Add a folder for norm for meg data and folder that indicates an intermediate step in normalisation: Additional steps will later be performed across all sessions combined
+        if type_of_content == "meg_data"
+            additional_norm_folder = f"norm_{type_of_norm}/" 
+            if type_of_norm.endswith("_intermediate"):
+                intermediate_norm_folder = "/intermediate_norm_True"  
+                type_of_norm = type_of_norm[:-len("_intermediate")]
+                print(f"type_of_norm: {type_of_norm}")
+            else:
+                intermediate_norm_folder = ""
+        else:
+            additional_norm_folder = "" 
+            intermediate_norm_folder = ""
 
         if type_of_content.endswith("_all_sessions_combined"):
             all_sessions_combined_folder = "/all_sessions_combined" 
@@ -292,9 +314,17 @@ class BasicOperationsHelper:
         normalization options: mean centered per channel and per timepoint, min-max over complete session, robust scaling, no normalization
                                 ["min_max", "mean_centered_ch_t", "robust_scaling", "no_norm", "median_centered_ch_t"]
         """
-        normalized_data = None
+        logger.info(msg=f"[session {session_id}] data.shape: {data.shape}.")  
 
         match normalization: 
+
+            case "0_centering_per_sensor_then_complete_z_intermediate":
+                # 0 Center each sensor over all epochs and timepoints
+                means_per_sensor = np.mean(data, axis=(0,2)).reshape(1,5,1)
+                normalized_data = data - means_per_sensor
+
+                # Debugging
+                #logger.info(msg=f"[session {session_id}] means_per_sensor.shape: {means_per_sensor.shape}.") 
 
             case "min_max":
                 data_min = data.min()
@@ -628,6 +658,7 @@ class DatasetHelper(MetadataHelper):
 
                 # Create datasets based on specified normalizations
                 for normalization in self.normalizations:
+                    normalization_stage = normalization if normalization != "0_centering_per_sensor_then_complete_z" else normalization+"_intermediate"
                     # Debugging
                     if session_id_num == "1" and normalization == "no_norm":
                         for sensor_type in sensor_selected:
@@ -638,7 +669,10 @@ class DatasetHelper(MetadataHelper):
                     # Normalize grad and mag independently
                     for sensor_type in sensor_selected:
                         if sensor_selected[sensor_type]:
-                            meg_data_norm[sensor_type] = self.normalize_array(np.array(meg_data[sensor_type]), normalization=normalization, session_id=session_id_num)
+                            meg_data_norm[sensor_type] = self.normalize_array(np.array(meg_data[sensor_type]), normalization=normalization_stage, session_id=session_id_num)
+
+                            if normalization == "0_centering_per_sensor_then_complete_z":
+                                meg_data_norm[sensor_type] = apply_z_score_to_complete_dataset(meg_data_norm[sensor_type])
 
                     # Combine grad and mag data
                     if sensor_selected["grad"] and sensor_selected["mag"]:
@@ -691,12 +725,41 @@ class DatasetHelper(MetadataHelper):
                     if meg_timepoints_in_dataset != num_combined_metadata_timepoints:
                         raise ValueError("Number of timepoints in meg dataset and in combined metadata are not identical.")
 
-
                     # Export meg dataset arrays to .npz
                     self.export_split_data_as_file(session_id=session_id_num, 
                                                 type_of_content="meg_data",
                                                 array_dict=meg_split,
-                                                type_of_norm=normalization)
+                                                type_of_norm=normalization_stage)
+
+            # For norms that will be applied over all sensors after intermediate within session operations:
+            def apply_z_score_to_complete_dataset():
+                # Apply z normalization to complete dataset to get the values to a reasonable scale
+                meg_data_intermediate_norm = {"train": None, "test": None}
+                epochs_by_session = {}
+                for session_id_num in self.session_ids_num:
+                    # Get ANN features for session
+                    meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm="0_centering_per_sensor_then_complete_z_intermediate")
+                    epochs_by_session["session_id_num"] = np.shape(meg_data)[0]
+                    for split in meg_data_intermediate_norm:
+                        if meg_data_intermediate_norm[split] is None:
+                            meg_data_intermediate_norm[split] = meg_data[split]
+                        else:
+                            meg_data_intermediate_norm[split] = np.concatenate((meg_data_intermediate_norm[split], meg_data[split]))
+                meg_data_final_norm = self.normalize_array(meg_data_intermediate_norm, normalization="z_score")
+
+                # Seperate Sessions again
+                meg_data_by_sessions = {}
+                start_epoch_index = 0
+                for session_id_num in self.session_ids_num:
+
+
+                return meg_data_by_sessions
+
+
+       
+
+       
+
 
 
     def create_train_test_split(self):

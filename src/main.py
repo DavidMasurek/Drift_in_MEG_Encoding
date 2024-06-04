@@ -16,7 +16,7 @@ os.chdir(__location__)
 
 # Choose params
 subject_ids = ["02"]
-normalizations = ["no_norm"] # ["min_max", "mean_centered_ch_t", "median_centered_ch_t", "robust_scaling", "no_norm"]
+normalizations = ["0_centering_per_sensor_then_complete_z"]  # "no_norm",  # ["min_max", "mean_centered_ch_t", "median_centered_ch_t", "robust_scaling", "no_norm"]
 lock_event = "saccade"
 meg_channels = [1731, 1921, 2111, 2341, 2511]
 timepoint_min = 50
@@ -35,12 +35,12 @@ logger_level=logging.INFO
 create_metadata = False
 create_train_test_split = False
 create_non_meg_dataset = False
-create_meg_dataset = False
+create_meg_dataset = True
 extract_features = False
 perform_pca = False
 train_GLM = False
 generate_predictions_with_GLM = False
-visualization = True
+visualization = False
 
 use_pca_features = True
 
