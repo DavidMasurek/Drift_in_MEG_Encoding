@@ -39,15 +39,15 @@ class BasicOperationsHelper:
         self.session_ids_num = [str(session_id) for session_id in range(1,11)]
 
 
-    def get_relevant_meg_channels(self, chosen_channels: list, session_id: str):
+    def get_relevant_meg_channels(self, chosen_channels: list):
         """
         Returns names of the chosen channels and their index in the meg dataset.
 
         Example out: {'grad': {}, 'mag': {194: 'MEG1731', 215: 'MEG1921', 236: 'MEG2111', 269: 'MEG2341', 284: 'MEG2511'}}
         """
         
-        session_id_padded = "0" + session_id if session_id != "10" else session_id
-        fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/{self.lock_event}_evoked_{self.subject_id}_{session_id_padded}_.fif'
+        # pick first session, the sensors should always be the same
+        fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/{self.lock_event}_evoked_{self.subject_id}_01_.fif'
         
         processing_channels_indices = {"grad": {}, "mag": {}}
         evoked = mne.read_evokeds(fif_file_path)[0]
@@ -210,7 +210,7 @@ class BasicOperationsHelper:
         # Add additional folder for norm and for model type and extraction layer for ann_features
         additional_model_folders = f"/{ann_model}/{module}/" if type_of_content.startswith("ann_features") else "/"
         # Add a folder for norm for meg data and folder that indicates an intermediate step in normalisation: Additional steps will later be performed across all sessions combined
-        if type_of_content == "meg_data"
+        if type_of_content == "meg_data":
             additional_norm_folder = f"norm_{type_of_norm}/" 
             if type_of_norm.endswith("_intermediate"):
                 intermediate_norm_folder = "/intermediate_norm_True"  
@@ -262,7 +262,7 @@ class BasicOperationsHelper:
         # Add additional folder for norm and for model type and extraction layer for ann_features
         additional_model_folders = f"/{ann_model}/{module}/" if type_of_content.startswith("ann_features") else "/"
         # Add a folder for norm for meg data and folder that indicates an intermediate step in normalisation: Additional steps will later be performed across all sessions combined
-        if type_of_content == "meg_data"
+        if type_of_content == "meg_data":
             additional_norm_folder = f"norm_{type_of_norm}/" 
             if type_of_norm.endswith("_intermediate"):
                 intermediate_norm_folder = "/intermediate_norm_True"  
@@ -288,7 +288,7 @@ class BasicOperationsHelper:
             split_path = f"data_files/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}{session_folder}/{split}/{type_of_content}{file_type}"  
             if file_type == ".npy":
                 split_data = np.load(split_path)
-                logger.info(msg=f"Loaded array of shape {split_data.shape} from {split_path}")
+                #logger.info(msg=f"Loaded array of shape {split_data.shape} from {split_path}")
             else:
                 split_data = torch.load(split_path)
             split_dict[split] = split_data
@@ -314,17 +314,15 @@ class BasicOperationsHelper:
         normalization options: mean centered per channel and per timepoint, min-max over complete session, robust scaling, no normalization
                                 ["min_max", "mean_centered_ch_t", "robust_scaling", "no_norm", "median_centered_ch_t"]
         """
-        logger.info(msg=f"[session {session_id}] data.shape: {data.shape}.")  
+        if session_id != None:
+            logger.info(msg=f"[session {session_id}] data.shape: {data.shape}.")  
 
         match normalization: 
 
-            case "0_centering_per_sensor_then_complete_z_intermediate":
-                # 0 Center each sensor over all epochs and timepoints
+            case "mean_centered_ch":
+                # 0 centered by mean for each over all epochs and timepoints
                 means_per_sensor = np.mean(data, axis=(0,2)).reshape(1,5,1)
                 normalized_data = data - means_per_sensor
-
-                # Debugging
-                #logger.info(msg=f"[session {session_id}] means_per_sensor.shape: {means_per_sensor.shape}.") 
 
             case "min_max":
                 data_min = data.min()
@@ -620,6 +618,9 @@ class DatasetHelper(MetadataHelper):
 
         meg_data_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
 
+        # Select relevant channels
+        selected_channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
+
         for session_id_char in self.session_ids_char:
             session_id_num = self.map_session_letter_id_to_num(session_id_char)
             print(f"Creating meg dataset for session {session_id_num}")
@@ -635,51 +636,45 @@ class DatasetHelper(MetadataHelper):
                 #print(f"[Session {session_id_num}]: Pre filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
                 #print(f"[Session {session_id_num}]: Pre filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
 
-
                 # Select relevant channels
-                channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels, session_id=session_id_num)
+                channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
 
-                sensor_selected = {"grad": False, "mag": False}
-                for sensor_type in sensor_selected:
+                for sensor_type in channel_indices:
                     # Check if this type of sensor is part of the selected channels
                     if channel_indices[sensor_type]:
-                        sensor_selected[sensor_type] = True
                         # Filter meg data by selected channels
                         meg_data[sensor_type] = meg_data[sensor_type][:, list(channel_indices[sensor_type].keys()),:]
 
                 # Cut relevant timepoints. Range is -0.5 – 0.3 s. We want timepoints 50-250
                 if self.timepoint_min is not None and self.timepoint_max is not None:
-                    for sensor_type in sensor_selected:
-                        if sensor_selected[sensor_type]:
+                    for sensor_type in channel_indices:
+                        if channel_indices[sensor_type]:
                             meg_data[sensor_type] = meg_data[sensor_type][:,:,self.timepoint_min:self.timepoint_max+1]
-                    if not sensor_selected["grad"] and not sensor_selected["mag"]:
+                    if not channel_indices["grad"] and not channel_indices["mag"]:
                         raise ValueError("Neither mag or grad channels selected.")
                 
 
                 # Create datasets based on specified normalizations
                 for normalization in self.normalizations:
-                    normalization_stage = normalization if normalization != "0_centering_per_sensor_then_complete_z" else normalization+"_intermediate"
+                    normalization_stage = normalization if normalization != "mean_centered_ch_then_global_z" else "mean_centered_ch"
                     # Debugging
                     if session_id_num == "1" and normalization == "no_norm":
-                        for sensor_type in sensor_selected:
-                            if sensor_selected[sensor_type]:
+                        for sensor_type in channel_indices:
+                            if channel_indices[sensor_type]:
                                 print(f"[Session {session_id_num}]: Post filtering: meg_data['{sensor_type}'].shape: {meg_data[sensor_type].shape}")
 
                     meg_data_norm = {}
                     # Normalize grad and mag independently
-                    for sensor_type in sensor_selected:
-                        if sensor_selected[sensor_type]:
+                    for sensor_type in channel_indices:
+                        if channel_indices[sensor_type]:
                             meg_data_norm[sensor_type] = self.normalize_array(np.array(meg_data[sensor_type]), normalization=normalization_stage, session_id=session_id_num)
 
-                            if normalization == "0_centering_per_sensor_then_complete_z":
-                                meg_data_norm[sensor_type] = apply_z_score_to_complete_dataset(meg_data_norm[sensor_type])
-
                     # Combine grad and mag data
-                    if sensor_selected["grad"] and sensor_selected["mag"]:
+                    if channel_indices["grad"] and channel_indices["mag"]:
                         combined_meg = np.concatenate([meg_data_norm["grad"], meg_data_norm["mag"]], axis=1) #(2874, 306, 601)
-                    elif sensor_selected["grad"]:
+                    elif channel_indices["grad"]:
                         combined_meg = meg_data_norm["grad"]
-                    elif sensor_selected["mag"]:
+                    elif channel_indices["mag"]:
                         combined_meg = meg_data_norm["mag"]
 
                     # Debugging: Count timepoints in meg metadata
@@ -731,35 +726,76 @@ class DatasetHelper(MetadataHelper):
                                                 array_dict=meg_split,
                                                 type_of_norm=normalization_stage)
 
-            # For norms that will be applied over all sensors after intermediate within session operations:
-            def apply_z_score_to_complete_dataset():
-                # Apply z normalization to complete dataset to get the values to a reasonable scale
-                meg_data_intermediate_norm = {"train": None, "test": None}
-                epochs_by_session = {}
-                for session_id_num in self.session_ids_num:
-                    # Get ANN features for session
-                    meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm="0_centering_per_sensor_then_complete_z_intermediate")
-                    epochs_by_session["session_id_num"] = np.shape(meg_data)[0]
-                    for split in meg_data_intermediate_norm:
-                        if meg_data_intermediate_norm[split] is None:
-                            meg_data_intermediate_norm[split] = meg_data[split]
-                        else:
-                            meg_data_intermediate_norm[split] = np.concatenate((meg_data_intermediate_norm[split], meg_data[split]))
-                meg_data_final_norm = self.normalize_array(meg_data_intermediate_norm, normalization="z_score")
+        if "mean_centered_ch_then_global_z" in self.normalizations:
+            #n_grad = len(selected_channel_indices["grad"])  # Needed when seperating sensor types
+            #n_mag = len(selected_channel_indices["mag"])  # Needed when seperating sensor types
+            # Load data for all sessions with mean_centering_ch already applied
+            meg_mean_centered_all_sessions = None
+            metadata_by_session = self.recursive_defaultdict()
+            for session_id_num in self.session_ids_num:
+                # Get mean centered data for session
+                meg_data_session = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm="mean_centered_ch")
+                # Combine train and test
+                # Store num of epochs for later concatenation
+                metadata_by_session["session_id_num"][session_id_num]["n_train_epochs"] = np.shape(meg_data_session["train"])[0] 
+                metadata_by_session["session_id_num"][session_id_num]["n_test_epochs"] = np.shape(meg_data_session["test"])[0] 
 
-                # Seperate Sessions again
-                meg_data_by_sessions = {}
-                start_epoch_index = 0
-                for session_id_num in self.session_ids_num:
+                print(f"[{session_id_num}]: np.shape(meg_data_session['train']): {np.shape(meg_data_session['train'])}")
+                print(f"[{session_id_num}]: np.shape(meg_data_session['test']): {np.shape(meg_data_session['test'])}")
 
+                #print(f"np.shape(meg_data_session['test'])[0] : {np.shape(meg_data_session['test'])[0] }")
+                #print("n_train_epochs:", metadata_by_session["session_id_num"]["n_train_epochs"])   
+                #print("n_test_epochs:", metadata_by_session["session_id_num"]["n_test_epochs"]) 
 
-                return meg_data_by_sessions
+                meg_data_session = np.concatenate((meg_data_session["train"], meg_data_session["test"]))
+                
+                # TODO: Seperate sensor types if required
 
+                # Concatenate over sessions
+                if meg_mean_centered_all_sessions is None:
+                    meg_mean_centered_all_sessions = meg_data_session
+                else:
+                    meg_mean_centered_all_sessions = np.concatenate((meg_mean_centered_all_sessions, meg_data_session))
+            # Apply z-norm across complete dataset (all sessions)
+            meg_data_normalized = self.normalize_array(meg_mean_centered_all_sessions, normalization="z_score")
 
-       
+            print(f"meg_data_normalized.shape: {meg_data_normalized.shape}")
 
-       
+            # Seperate into sessions and train/split again
+            meg_data_normalized_by_session = self.recursive_defaultdict()
+            epoch_start_index = 0
+            for session_id in self.session_ids_num:
+                n_train_epochs = metadata_by_session["session_id_num"][session_id]["n_train_epochs"]
+                n_test_epochs = metadata_by_session["session_id_num"][session_id]["n_test_epochs"]
 
+                print(f"n_train_epochs: {n_train_epochs}")
+                print(f"n_test_epochs: {n_test_epochs}")
+
+                end_train_index = epoch_start_index + n_train_epochs
+                end_test_index = end_train_index + n_test_epochs
+
+                print(f"end_train_index: {end_train_index}")
+                print(f"end_test_index: {end_test_index}")
+
+                meg_data_session_train = meg_data_normalized[epoch_start_index:end_train_index,:,:]
+                meg_data_session_test = meg_data_normalized[end_train_index:end_test_index,:,:]
+
+                meg_data_normalized_by_session[session_id]["train"] = meg_data_session_train
+                meg_data_normalized_by_session[session_id]["test"] = meg_data_session_test
+
+                print(f"meg_data_normalized['train'].shape: {meg_data_normalized_by_session[session_id]['train'].shape}")
+                print(f"meg_data_normalized['test'].shape: {meg_data_normalized_by_session[session_id]['test'].shape}")
+
+                # Export meg dataset arrays to .npz
+                self.export_split_data_as_file(session_id=session_id, 
+                                                type_of_content="meg_data",
+                                                array_dict=meg_data_normalized_by_session[session_id],
+                                                type_of_norm="mean_centered_ch_then_global_z")
+
+                epoch_start_index = end_test_index
+          
+                # TODO: Combine grad and mag if both selected
+        
 
 
     def create_train_test_split(self):
