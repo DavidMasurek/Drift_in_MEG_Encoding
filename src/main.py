@@ -34,10 +34,11 @@ logger_level=logging.INFO
 # Choose Calculations to be performed
 create_metadata = False
 create_train_test_split = False
-create_non_meg_dataset = False
-create_meg_dataset = True
+create_crop_datset_numpy = False
+create_crop_datset_pytorch = False
+create_meg_dataset = False
 extract_features = False
-perform_pca = False
+perform_pca = True
 train_GLM = True
 generate_predictions_with_GLM = True
 visualization = True
@@ -76,7 +77,7 @@ for subject_id in subject_ids:
         logger.info(msg="Metadata created.")
 
     ##### Create crop and meg dataset based on metadata #####
-    if create_non_meg_dataset or create_meg_dataset or create_train_test_split:
+    if create_train_test_split or create_crop_datset_numpy or create_crop_datset_pytorch  or create_meg_dataset:
         dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations, chosen_channels=meg_channels, lock_event=lock_event, timepoint_min=timepoint_min, timepoint_max=timepoint_max)
 
         if create_train_test_split:
@@ -85,13 +86,17 @@ for subject_id in subject_ids:
 
             logger.info(msg="Train/Test split created.")
 
-        if create_non_meg_dataset:
+        if create_crop_datset_numpy:
             # Create crop dataset with images as numpy arrays
             dataset_helper.create_crop_dataset()
+
+            logger.info(msg="Numpy crop datasets created.")
+
+        if create_crop_datset_pytorch:
             # Covert numpy arrays to pytorch tensors
             dataset_helper.create_pytorch_dataset()
 
-            logger.info(msg="Non-MEG datasets created.")
+            logger.info(msg="PyTorch crop datasets created.")
 
         if create_meg_dataset:
             # Create meg dataset based on split

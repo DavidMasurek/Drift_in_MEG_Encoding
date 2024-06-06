@@ -239,10 +239,14 @@ class BasicOperationsHelper:
 
             if file_type == ".npy":
                 #if all_sessions_combined_folder != "":
-                #    print(f"saving array of shape {array_dict[split].shape} to {save_path}")
                 np.save(save_path, array_dict[split])
             else:
                 torch.save(array_dict[split], save_path)
+            if split == "train" and (type_of_content == "crop_data" or type_of_content.startswith("ann_features")):
+                print(f"[Session {session_id}]: Train: Storing array of shape {array_dict[split].shape} to {save_path}")
+            if split == "train" and type_of_content == "torch_dataset":
+                print(f"[Session {session_id}][Content TorchDataset]: Train: Saving dataset to {save_path}")
+
 
     
     def load_split_data_from_file(self, session_id_num: str, type_of_content: str, type_of_norm:str = None, ann_model: str = None, module: str = None) -> dict:
@@ -293,6 +297,13 @@ class BasicOperationsHelper:
                 split_data = torch.load(split_path)
             split_dict[split] = split_data
 
+            if split == "train" and (type_of_content == "crop_data" or type_of_content.startswith("ann_features")):
+                #data_shape = split_data.shape if type_of_content != "type_of_content" else tf.  # or type_of_content == "torch_dataset" 
+                print(f"[Session {session_id_num}][Content {type_of_content}]: Train: Loaded array of shape {split_data.shape} from {split_path}")
+            
+            if split == "train" and type_of_content == "torch_dataset":
+                print(f"[Session {session_id_num}][Content TorchDataset]: Train: Loading dataset from {split_path}")
+                
         return split_dict
 
     
@@ -412,8 +423,11 @@ class MetadataHelper(BasicOperationsHelper):
         # Use defaultdict to automatically create missing keys
         combined_metadata_dict = self.recursive_defaultdict()
 
+        total_combined_datapoints = 0
+
         meg_missing_trials = []
         for session_id in meg_metadata["sessions"]:
+            combined_datapoints_session = 0
             meg_index = 0
             for trial_id in meg_metadata["sessions"][session_id]["trials"]:
                 for timepoint_id in meg_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
@@ -424,12 +438,18 @@ class MetadataHelper(BasicOperationsHelper):
                         combined_metadata_dict["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["crop_identifier"] = crop_identifier
                         combined_metadata_dict["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["sceneID"] = sceneID
                         combined_metadata_dict["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["meg_index"] = meg_index
-                    except:
+
+                        total_combined_datapoints += 1
+                        combined_datapoints_session += 1
+                    except Exception as e:
                         if trial_id not in meg_missing_trials and investigate_missing_data:
                             print(f"[Session {session_id}][Trial {trial_id}]: Within this Trial, data for at least one timepoint exists only in the meg-, and not the crop metadata.")
                             meg_missing_trials.append(trial_id)
                         pass
                     meg_index += 1
+            print(f"[Session {session_id}]: combined_datapoints_session: {combined_datapoints_session}")
+
+        logger.info(msg=f"total_combined_datapoints: {total_combined_datapoints}")
 
         if investigate_missing_data:
             crop_missing_trials = []
@@ -601,6 +621,8 @@ class DatasetHelper(MetadataHelper):
             for split in crop_split:
                 crop_split[split] = np.stack(crop_split[split], axis=0)
 
+            print(f"[Session {session_id}]: Train: Crop Numpy dataset is array of shape {crop_split['train'].shape}")
+
             # Export numpy array to .npz
             self.export_split_data_as_file(session_id=session_id, 
                                         type_of_content="crop_data",
@@ -620,6 +642,9 @@ class DatasetHelper(MetadataHelper):
 
         # Select relevant channels
         selected_channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
+
+        # Debugging:
+        n_epochs_two_step_norm = {"train": 0, "test": 0}
 
         for session_id_char in self.session_ids_char:
             session_id_num = self.map_session_letter_id_to_num(session_id_char)
@@ -714,6 +739,11 @@ class DatasetHelper(MetadataHelper):
                     # Convert meg data to numpy array
                     for split in meg_split:
                         meg_split[split] = np.array(meg_split[split])
+                        # Debugging
+                        if normalization == "mean_centered_ch_then_global_z":
+                            n_epochs_two_step_norm[split] += meg_split[split].shape[0]
+
+                    print(f"[Session {session_id_num}]: Storing (intermediate) meg array with train shape {meg_split['train'].shape}")
 
                     meg_timepoints_in_dataset = meg_split['train'].shape[0] + meg_split['test'].shape[0]
 
@@ -725,6 +755,9 @@ class DatasetHelper(MetadataHelper):
                                                 type_of_content="meg_data",
                                                 array_dict=meg_split,
                                                 type_of_norm=normalization_stage)
+
+        print(f"meg_timepoints_in_dataset after per-session normalization: {n_epochs_two_step_norm}")
+        print(f"combined train+test: {n_epochs_two_step_norm['train'] + n_epochs_two_step_norm['test']}")
 
         if "mean_centered_ch_then_global_z" in self.normalizations:
             #n_grad = len(selected_channel_indices["grad"])  # Needed when seperating sensor types
@@ -740,8 +773,8 @@ class DatasetHelper(MetadataHelper):
                 metadata_by_session["session_id_num"][session_id_num]["n_train_epochs"] = np.shape(meg_data_session["train"])[0] 
                 metadata_by_session["session_id_num"][session_id_num]["n_test_epochs"] = np.shape(meg_data_session["test"])[0] 
 
-                print(f"[{session_id_num}]: np.shape(meg_data_session['train']): {np.shape(meg_data_session['train'])}")
-                print(f"[{session_id_num}]: np.shape(meg_data_session['test']): {np.shape(meg_data_session['test'])}")
+                print(f"[Session {session_id_num}]: np.shape(meg_data_session['train']): {np.shape(meg_data_session['train'])}")
+                print(f"[Session {session_id_num}]: np.shape(meg_data_session['test']): {np.shape(meg_data_session['test'])}")
 
                 #print(f"np.shape(meg_data_session['test'])[0] : {np.shape(meg_data_session['test'])[0] }")
                 #print("n_train_epochs:", metadata_by_session["session_id_num"]["n_train_epochs"])   
@@ -760,6 +793,7 @@ class DatasetHelper(MetadataHelper):
             meg_data_normalized = self.normalize_array(meg_mean_centered_all_sessions, normalization="z_score")
 
             print(f"meg_data_normalized.shape: {meg_data_normalized.shape}")
+            print(f"meg_timepoints_in_dataset after final norm, before split into sessions: {meg_data_normalized.shape[0]}")
 
             # Seperate into sessions and train/split again
             meg_data_normalized_by_session = self.recursive_defaultdict()
@@ -768,14 +802,14 @@ class DatasetHelper(MetadataHelper):
                 n_train_epochs = metadata_by_session["session_id_num"][session_id]["n_train_epochs"]
                 n_test_epochs = metadata_by_session["session_id_num"][session_id]["n_test_epochs"]
 
-                print(f"n_train_epochs: {n_train_epochs}")
-                print(f"n_test_epochs: {n_test_epochs}")
+                #print(f"n_train_epochs: {n_train_epochs}")
+                #print(f"n_test_epochs: {n_test_epochs}")
 
                 end_train_index = epoch_start_index + n_train_epochs
                 end_test_index = end_train_index + n_test_epochs
 
-                print(f"end_train_index: {end_train_index}")
-                print(f"end_test_index: {end_test_index}")
+                #print(f"end_train_index: {end_train_index}")
+                #print(f"end_test_index: {end_test_index}")
 
                 meg_data_session_train = meg_data_normalized[epoch_start_index:end_train_index,:,:]
                 meg_data_session_test = meg_data_normalized[end_train_index:end_test_index,:,:]
@@ -783,8 +817,8 @@ class DatasetHelper(MetadataHelper):
                 meg_data_normalized_by_session[session_id]["train"] = meg_data_session_train
                 meg_data_normalized_by_session[session_id]["test"] = meg_data_session_test
 
-                print(f"meg_data_normalized['train'].shape: {meg_data_normalized_by_session[session_id]['train'].shape}")
-                print(f"meg_data_normalized['test'].shape: {meg_data_normalized_by_session[session_id]['test'].shape}")
+                print(f"[Session {session_id}]: meg_data_normalized['train'].shape: {meg_data_normalized_by_session[session_id]['train'].shape}")
+                print(f"[Session {session_id}]: meg_data_normalized['test'].shape: {meg_data_normalized_by_session[session_id]['test'].shape}")
 
                 # Export meg dataset arrays to .npz
                 self.export_split_data_as_file(session_id=session_id, 
@@ -795,6 +829,8 @@ class DatasetHelper(MetadataHelper):
                 epoch_start_index = end_test_index
           
                 # TODO: Combine grad and mag if both selected
+            
+            print(f"end_test_index: {end_test_index}")
         
 
 
@@ -868,6 +904,9 @@ class DatasetHelper(MetadataHelper):
 
             # Export trial_split arrays to .npz
             split_dict = {"train": train_split_trials, "test": test_split_trials}
+
+            print(f"[Session {session_id}]: len train_split: {len(train_split_trials)}, len test_split: {len(test_split_trials)}")
+
             self.export_split_data_as_file(session_id=session_id, 
                                         type_of_content="trial_splits",
                                         array_dict=split_dict)
@@ -886,6 +925,8 @@ class DatasetHelper(MetadataHelper):
             torch_dataset = {}
             torch_dataset["train"] = DatasetHelper.TorchDatasetHelper(crop_ds['train'])
             torch_dataset["test"] = DatasetHelper.TorchDatasetHelper(crop_ds['test'])
+
+            print(f"[Session {session_id_num}][Content TorchDataset]: Train: Contains array of shape {torch_dataset['train'].numpy_array.shape}")
 
             # Store datasets
             self.export_split_data_as_file(session_id=session_id_num, type_of_content="torch_dataset", array_dict=torch_dataset)
@@ -1068,7 +1109,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined, session_id_num=session_id_num)
                     session_alphas[session_id_num] = selected_alphas
                 #self.save_dict_as_json(type_of_content="selected_alphas_by_session", dict_to_store=session_alphas, type_of_norm=normalization, predict_train_data=predict_train_data)
-
+        # all sessions combined
         else:
             for normalization in self.normalizations:
                 meg_data_train_combined = None
@@ -1083,13 +1124,12 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                 ann_features_train_combined = self.load_split_data_from_file(session_id_num=None, type_of_content=self.ann_features_type+"_all_sessions_combined" , ann_model=self.ann_model, module=self.module_name)['train']
 
-                print(f"Train_mapping: ann_features_train_combined.shape: {ann_features_train_combined.shape}")
-                print(f"Train_mapping: meg_data_train_combined.shape: {meg_data_train_combined.shape}")
-
                 X_train, Y_train = ann_features_train_combined, meg_data_train_combined
 
                 print(f"Train_mapping: X_train.shape: {X_train.shape}")
                 print(f"Train_mapping: Y_train.shape: {Y_train.shape}")
+
+                assert X_train.shape[0] == Y_train.shape[0], "Different number of samples for features and meg data."
 
                 selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined)
                 # For continuity with session alphas store combined alphas as dict aswell
