@@ -871,6 +871,7 @@ class DatasetHelper(MetadataHelper):
 
             # Choose split size (80/20)
             num_trials_train = int(num_trials*0.8)
+            print(f"[Session {session_id}]: Num_trials_train: {num_trials_train}")
             num_trials_test = num_trials - num_trials_train
 
             # Split based on scene ids, but trial information is sufficient to identify datapoint
