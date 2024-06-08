@@ -1066,7 +1066,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         self.ann_features_type = "ann_features_pca" if pca_features else "ann_features"
 
 
-    def train_mapping(self, all_sessions_combined:bool=False):
+    def train_mapping(self, all_sessions_combined:bool=False, shuffle_train_labels:bool=False):
         """
         Trains a mapping from ANN features to MEG data over all sessions.
         """
@@ -1106,6 +1106,10 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
 
                     X_train, Y_train = ann_features['train'], meg_data['train']
+
+                    if shuffle_train_labels:
+                        np.random.shuffle(Y_train)
+
                     logger.info(msg=f"[Session {session_id_num}] X_train.shape: {X_train.shape}, Y_train.shape: {Y_train.shape}")
                     selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined, session_id_num=session_id_num)
                     session_alphas[session_id_num] = selected_alphas
@@ -1132,6 +1136,9 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                 assert X_train.shape[0] == Y_train.shape[0], "Different number of samples for features and meg data."
 
+                if shuffle_train_labels:
+                    np.random.shuffle(Y_train)
+
                 selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined)
                 # For continuity with session alphas store combined alphas as dict aswell
                 #selected_alphas_dict = {"all_sessions": selected_alphas}
@@ -1139,7 +1146,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
 
         
-    def predict_from_mapping(self, store_timepoint_based_losses:bool=False, predict_train_data:bool=False, all_sessions_combined:bool=False):
+    def predict_from_mapping(self, store_timepoint_based_losses:bool=False, predict_train_data:bool=False, all_sessions_combined:bool=False, shuffle_test_labels:bool=False):
         """
         Based on the trained mapping for each session, predicts MEG data over all sessions from their respective test features.
         If predict_train_data is True, predicts the train data of each session as a sanity check of the complete pipeline. Expect strong overfit.
@@ -1176,6 +1183,8 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         print(f"Predict_from_mapping: X_test.shape: {X_test.shape}")
                         print(f"Predict_from_mapping: Y_test.shape: {Y_test.shape}")
 
+                        if shuffle_test_labels:
+                            np.random.shuffle(Y_test)
 
                         # Generate predictions
                         predictions = ridge_model.predict(X_test)
@@ -1248,6 +1257,10 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                 print(f"Predict_from_mapping: X_test.shape: {X_test.shape}")
                 print(f"Predict_from_mapping: Y_test.shape: {Y_test.shape}")
+
+                if shuffle_test_labels:
+                    np.random.shuffle(Y_test)
+
 
                 # Generate predictions
                 predictions = ridge_model.predict(X_test)
@@ -1357,7 +1370,7 @@ class VisualizationHelper(GLMHelper):
 
                     with open(json_storage_path, 'r') as file:
                         fit_measure = json.load(file)
-                    self_pred_measures[pred_type] = fit_measure
+                    self_pred_measures[pred_type] = {type_of_content: format(fit_measure[type_of_content], '.15f')}   # format to keep decimal notation in prints
 
                 print(f"self_pred_measures: {self_pred_measures}")
             

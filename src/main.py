@@ -22,7 +22,7 @@ meg_channels = [1731, 1921, 2111, 2341, 2511]
 timepoint_min = 50
 timepoint_max = 250
 alphas = [1,10,100,1000,10000,100000,1000000] 
-all_sessions_combined = True
+all_sessions_combined = False
 pca_components = 4
 
 ann_model = "Resnet50"
@@ -30,11 +30,10 @@ module_name = "fc"
 batch_size = 32
 
 logger_level=logging.INFO
-run_pipeline_n_times = 1
 
 # Choose Calculations to be performed
 create_metadata = True
-create_train_test_split = True
+create_train_test_split = False  # Careful! Everytime this is set to true, all following steps will be misalligned
 create_crop_datset_numpy = True
 create_crop_datset_pytorch = True
 create_meg_dataset = True
@@ -45,6 +44,11 @@ generate_predictions_with_GLM = True
 visualization = True
 
 use_pca_features = True
+# Debugging
+run_pipeline_n_times = 2
+shuffle_train_labels = True
+shuffle_test_labels = False
+
 
 # Handle logger
 logger = logging.getLogger(__name__)
@@ -125,14 +129,14 @@ for run in range(run_pipeline_n_times):
 
             # Train GLM
             if train_GLM:
-                glm_helper.train_mapping(all_sessions_combined=all_sessions_combined)
+                glm_helper.train_mapping(all_sessions_combined=all_sessions_combined, shuffle_train_labels=shuffle_train_labels)
 
                 logger.info(msg="GLMs trained. \n \n")
 
             # Generate meg predictions from GLMs
             if generate_predictions_with_GLM:
-                glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=False, all_sessions_combined=all_sessions_combined)
-                glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=True, all_sessions_combined=all_sessions_combined)
+                glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels)
+                glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=True, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels)
 
                 logger.info(msg="Predictions generated. \n \n")
 
