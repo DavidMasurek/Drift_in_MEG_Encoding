@@ -8,8 +8,6 @@ import logging
 from setup_logger import setup_logger
 from datetime import datetime
 from collections import defaultdict
-logger_level = 21
-logging_setup = setup_logger(logger_level)
 from utils import BasicOperationsHelper, MetadataHelper, DatasetHelper, ExtractionHelper, GLMHelper, VisualizationHelper
 
 # Add parent folder of src to path and change cwd
@@ -31,8 +29,7 @@ ann_model = "Resnet50"
 module_name = "fc"
 batch_size = 32
 
-#logger_level = 21
-logger = logging.getLogger(__name__)
+logger_level = 25
 
 # Choose Calculations to be performed
 create_metadata = False
@@ -53,6 +50,9 @@ run_pipeline_n_times = 1
 all_sessions_combined = True
 shuffle_train_labels = True
 shuffle_test_labels = False  # shuffles the data that is to be predicted! (In control, this can be the train split aswell)
+
+logging_setup = setup_logger(logger_level)
+logger = logging.getLogger(__name__)
 
 for run in range(run_pipeline_n_times):
     for subject_id in subject_ids:
@@ -155,5 +155,5 @@ for run in range(run_pipeline_n_times):
             logger.custom_info("Visualization completed. \n \n")
             
 
-    logger.custom_info("Pipeline completed. \n \n")
+logger.custom_info("Pipeline completed.")
 

@@ -29,8 +29,8 @@ from scipy.stats import linregress
 # Logging related
 logger = logging.getLogger(__name__)
 
-logger.custom_info(f"Testing custom info.\n \n \n")
-logger.custom_debug(f"Testing custom debug.\n \n \n")
+#logger.custom_info(f"Testing custom info.\n \n \n")
+#logger.custom_debug(f"Testing custom debug.\n \n \n")
 
 mne.set_log_level(verbose="ERROR")
 
@@ -218,7 +218,6 @@ class BasicOperationsHelper:
             if type_of_norm.endswith("_intermediate"):
                 intermediate_norm_folder = "/intermediate_norm_True"  
                 type_of_norm = type_of_norm[:-len("_intermediate")]
-                print(f"type_of_norm: {type_of_norm}")
             else:
                 intermediate_norm_folder = ""
         else:
@@ -246,9 +245,9 @@ class BasicOperationsHelper:
             else:
                 torch.save(array_dict[split], save_path)
             if split == "train" and (type_of_content == "crop_data" or type_of_content.startswith("ann_features")):
-                print(f"[Session {session_id}]: Train: Storing array of shape {array_dict[split].shape} to {save_path}")
+                logger.custom_debug(f"[Session {session_id}]: Train: Storing array of shape {array_dict[split].shape} to {save_path}")
             if split == "train" and type_of_content == "torch_dataset":
-                print(f"[Session {session_id}][Content TorchDataset]: Train: Saving dataset to {save_path}")
+                logger.custom_debug(f"[Session {session_id}][Content TorchDataset]: Train: Saving dataset to {save_path}")
 
 
     
@@ -274,7 +273,6 @@ class BasicOperationsHelper:
             if type_of_norm.endswith("_intermediate"):
                 intermediate_norm_folder = "/intermediate_norm_True"  
                 type_of_norm = type_of_norm[:-len("_intermediate")]
-                print(f"type_of_norm: {type_of_norm}")
             else:
                 intermediate_norm_folder = ""
         else:
@@ -295,17 +293,17 @@ class BasicOperationsHelper:
             split_path = f"data_files/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}{session_folder}/{split}/{type_of_content}{file_type}"  
             if file_type == ".npy":
                 split_data = np.load(split_path)
-                #logger.info(f"Loaded array of shape {split_data.shape} from {split_path}")
+                #logger.custom_debug(f"Loaded array of shape {split_data.shape} from {split_path}")
             else:
                 split_data = torch.load(split_path)
             split_dict[split] = split_data
 
             if split == "train" and (type_of_content == "crop_data" or type_of_content.startswith("ann_features")):
                 #data_shape = split_data.shape if type_of_content != "type_of_content" else tf.  # or type_of_content == "torch_dataset" 
-                print(f"[Session {session_id_num}][Content {type_of_content}]: Train: Loaded array of shape {split_data.shape} from {split_path}")
+                logger.custom_debug(f"[Session {session_id_num}][Content {type_of_content}]: Train: Loaded array of shape {split_data.shape} from {split_path}")
             
             if split == "train" and type_of_content == "torch_dataset":
-                print(f"[Session {session_id_num}][Content TorchDataset]: Train: Loading dataset from {split_path}")
+                logger.custom_debug(f"[Session {session_id_num}][Content TorchDataset]: Train: Loading dataset from {split_path}")
                 
         return split_dict
 
@@ -329,7 +327,7 @@ class BasicOperationsHelper:
                                 ["min_max", "mean_centered_ch_t", "robust_scaling", "no_norm", "median_centered_ch_t"]
         """
         if session_id != None:
-            logger.info(f"[session {session_id}] data.shape: {data.shape}.")  
+            logger.custom_debug(f"[session {session_id}] data.shape: {data.shape}.")  
 
         match normalization: 
 
@@ -362,8 +360,6 @@ class BasicOperationsHelper:
             case "mean_centered_ch_t":
                 means = np.mean(data, axis=0)  # Compute means for each channel and timepoint, averaged over all epochs
                 normalized_data = data - means  # Subtract the mean to center the data
-                #if session_id == "1":
-                #    print(f"mean_centered_ch_t normalized_data: {normalized_data}")
 
             case "median_centered_ch_t":
                 median = np.median(data, axis=0)  # Compute median for each channel and timepoint, averaged over all epochs
@@ -397,7 +393,7 @@ class BasicOperationsHelper:
                 raise ValueError(f"normalize_array called with unrecognized type {normalization}")
 
         if (normalized_data == data).all() and normalization != "no_norm":
-            print(f"[WARNING][normalize_array]: data the same before and after norm {normalization}")
+            logger.warning(f"[WARNING][normalize_array]: data the same before and after norm {normalization}")
 
         return normalized_data
 
@@ -446,13 +442,13 @@ class MetadataHelper(BasicOperationsHelper):
                         combined_datapoints_session += 1
                     except Exception as e:
                         if trial_id not in meg_missing_trials and investigate_missing_data:
-                            print(f"[Session {session_id}][Trial {trial_id}]: Within this Trial, data for at least one timepoint exists only in the meg-, and not the crop metadata.")
+                            logger.custom_debug(f"[Session {session_id}][Trial {trial_id}]: Within this Trial, data for at least one timepoint exists only in the meg-, and not the crop metadata.")
                             meg_missing_trials.append(trial_id)
                         pass
                     meg_index += 1
-            print(f"[Session {session_id}]: combined_datapoints_session: {combined_datapoints_session}")
+            logger.custom_debug(f"[Session {session_id}]: combined_datapoints_session: {combined_datapoints_session}")
 
-        logger.info(f"total_combined_datapoints: {total_combined_datapoints}")
+        logger.custom_debug(f"total_combined_datapoints: {total_combined_datapoints}")
 
         if investigate_missing_data:
             crop_missing_trials = []
@@ -465,7 +461,7 @@ class MetadataHelper(BasicOperationsHelper):
                             crop_identifier = meg_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["crop_identifier"]
                         except Exception:
                             if trial_id not in crop_missing_trials:
-                                print(f"[Session {session_id}][Trial {trial_id}]: Within this Trial, data for at least one timepoint exists only in the crop-, and not the meg metadata.")
+                                logger.custom_debug(f"[Session {session_id}][Trial {trial_id}]: Within this Trial, data for at least one timepoint exists only in the crop-, and not the meg metadata.")
                                 crop_missing_trials.append(trial_id)
                             pass
             
@@ -624,7 +620,7 @@ class DatasetHelper(MetadataHelper):
             for split in crop_split:
                 crop_split[split] = np.stack(crop_split[split], axis=0)
 
-            print(f"[Session {session_id}]: Train: Crop Numpy dataset is array of shape {crop_split['train'].shape}")
+            logger.custom_debug(f"[Session {session_id}]: Train: Crop Numpy dataset is array of shape {crop_split['train'].shape}")
 
             # Export numpy array to .npz
             self.export_split_data_as_file(session_id=session_id, 
@@ -651,7 +647,7 @@ class DatasetHelper(MetadataHelper):
 
         for session_id_char in self.session_ids_char:
             session_id_num = self.map_session_letter_id_to_num(session_id_char)
-            print(f"Creating meg dataset for session {session_id_num}")
+            logger.custom_info(f"Creating meg dataset for session {session_id_num}")
             # Load session MEG data from .h5
             meg_data_file = f"as{self.subject_id}{session_id_char}_population_codes_{self.lock_event}_500hz_masked_False.h5"
             with h5py.File(os.path.join(meg_data_folder, meg_data_file), "r") as f:
@@ -661,8 +657,8 @@ class DatasetHelper(MetadataHelper):
 
                 num_meg_timepoints = meg_data['grad'].shape[0]
 
-                #print(f"[Session {session_id_num}]: Pre filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
-                #print(f"[Session {session_id_num}]: Pre filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
+                #logger.custom_debug(f"[Session {session_id_num}]: Pre filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
+                #logger.custom_debug(f"[Session {session_id_num}]: Pre filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
 
                 # Select relevant channels
                 channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
@@ -689,7 +685,7 @@ class DatasetHelper(MetadataHelper):
                     if session_id_num == "1" and normalization == "no_norm":
                         for sensor_type in channel_indices:
                             if channel_indices[sensor_type]:
-                                print(f"[Session {session_id_num}]: Post filtering: meg_data['{sensor_type}'].shape: {meg_data[sensor_type].shape}")
+                                logger.custom_debug(f"[Session {session_id_num}]: Post filtering: meg_data['{sensor_type}'].shape: {meg_data[sensor_type].shape}")
 
                     meg_data_norm = {}
                     # Normalize grad and mag independently
@@ -710,7 +706,7 @@ class DatasetHelper(MetadataHelper):
                     for trial_id in meg_metadata["sessions"][session_id_num]["trials"]:
                         for timepoint in meg_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
                             num_meg_metadata_timepoints += 1
-                    #print(f"[Session {session_id_num}]: Timepoints in meg metadata: {num_meg_metadata_timepoints}")
+                    #logger.custom_debug(f"[Session {session_id_num}]: Timepoints in meg metadata: {num_meg_metadata_timepoints}")
                     if num_meg_metadata_timepoints != combined_meg.shape[0]:
                         raise ValueError("Number of timepoints in meg metadata and in meg data loaded from h5 file are not identical.")
 
@@ -720,7 +716,7 @@ class DatasetHelper(MetadataHelper):
                     for trial_id in combined_metadata["sessions"][session_id_num]["trials"]:
                         for timepoint in combined_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
                             num_combined_metadata_timepoints += 1
-                    #print(f"[Session {session_id_num}]: Timepoints in combined metadata: {num_combined_metadata_timepoints}")
+                    #logger.custom_debug(f"[Session {session_id_num}]: Timepoints in combined metadata: {num_combined_metadata_timepoints}")
 
                     # Split meg data 
                     # Get train/test split based on trials (based on scenes)
@@ -746,7 +742,7 @@ class DatasetHelper(MetadataHelper):
                         if normalization == "mean_centered_ch_then_global_z":
                             n_epochs_two_step_norm[split] += meg_split[split].shape[0]
 
-                    print(f"[Session {session_id_num}]: Storing (intermediate) meg array with train shape {meg_split['train'].shape}")
+                    logger.custom_debug(f"[Session {session_id_num}]: Storing (intermediate) meg array with train shape {meg_split['train'].shape}")
 
                     meg_timepoints_in_dataset = meg_split['train'].shape[0] + meg_split['test'].shape[0]
 
@@ -759,8 +755,8 @@ class DatasetHelper(MetadataHelper):
                                                 array_dict=meg_split,
                                                 type_of_norm=normalization_stage)
 
-        print(f"meg_timepoints_in_dataset after per-session normalization: {n_epochs_two_step_norm}")
-        print(f"combined train+test: {n_epochs_two_step_norm['train'] + n_epochs_two_step_norm['test']}")
+        logger.custom_debug(f"meg_timepoints_in_dataset after per-session normalization: {n_epochs_two_step_norm}")
+        logger.custom_debug(f"combined train+test: {n_epochs_two_step_norm['train'] + n_epochs_two_step_norm['test']}")
 
         if "mean_centered_ch_then_global_z" in self.normalizations:
             #n_grad = len(selected_channel_indices["grad"])  # Needed when seperating sensor types
@@ -776,12 +772,12 @@ class DatasetHelper(MetadataHelper):
                 metadata_by_session["session_id_num"][session_id_num]["n_train_epochs"] = np.shape(meg_data_session["train"])[0] 
                 metadata_by_session["session_id_num"][session_id_num]["n_test_epochs"] = np.shape(meg_data_session["test"])[0] 
 
-                print(f"[Session {session_id_num}]: np.shape(meg_data_session['train']): {np.shape(meg_data_session['train'])}")
-                print(f"[Session {session_id_num}]: np.shape(meg_data_session['test']): {np.shape(meg_data_session['test'])}")
+                logger.custom_debug(f"[Session {session_id_num}]: np.shape(meg_data_session['train']): {np.shape(meg_data_session['train'])}")
+                logger.custom_debug(f"[Session {session_id_num}]: np.shape(meg_data_session['test']): {np.shape(meg_data_session['test'])}")
 
-                #print(f"np.shape(meg_data_session['test'])[0] : {np.shape(meg_data_session['test'])[0] }")
-                #print("n_train_epochs:", metadata_by_session["session_id_num"]["n_train_epochs"])   
-                #print("n_test_epochs:", metadata_by_session["session_id_num"]["n_test_epochs"]) 
+                #logger.custom_debug(f"np.shape(meg_data_session['test'])[0] : {np.shape(meg_data_session['test'])[0] }")
+                #logger.custom_debug("n_train_epochs:", metadata_by_session["session_id_num"]["n_train_epochs"])   
+                #logger.custom_debug("n_test_epochs:", metadata_by_session["session_id_num"]["n_test_epochs"]) 
 
                 meg_data_session = np.concatenate((meg_data_session["train"], meg_data_session["test"]))
                 
@@ -795,8 +791,8 @@ class DatasetHelper(MetadataHelper):
             # Apply z-norm across complete dataset (all sessions)
             meg_data_normalized = self.normalize_array(meg_mean_centered_all_sessions, normalization="z_score")
 
-            print(f"meg_data_normalized.shape: {meg_data_normalized.shape}")
-            print(f"meg_timepoints_in_dataset after final norm, before split into sessions: {meg_data_normalized.shape[0]}")
+            logger.custom_debug(f"meg_data_normalized.shape: {meg_data_normalized.shape}")
+            logger.custom_debug(f"meg_timepoints_in_dataset after final norm, before split into sessions: {meg_data_normalized.shape[0]}")
 
             # Seperate into sessions and train/split again
             meg_data_normalized_by_session = self.recursive_defaultdict()
@@ -805,14 +801,14 @@ class DatasetHelper(MetadataHelper):
                 n_train_epochs = metadata_by_session["session_id_num"][session_id]["n_train_epochs"]
                 n_test_epochs = metadata_by_session["session_id_num"][session_id]["n_test_epochs"]
 
-                #print(f"n_train_epochs: {n_train_epochs}")
-                #print(f"n_test_epochs: {n_test_epochs}")
+                #logger.custom_debug(f"n_train_epochs: {n_train_epochs}")
+                #logger.custom_debug(f"n_test_epochs: {n_test_epochs}")
 
                 end_train_index = epoch_start_index + n_train_epochs
                 end_test_index = end_train_index + n_test_epochs
 
-                #print(f"end_train_index: {end_train_index}")
-                #print(f"end_test_index: {end_test_index}")
+                #logger.custom_debug(f"end_train_index: {end_train_index}")
+                #logger.custom_debug(f"end_test_index: {end_test_index}")
 
                 meg_data_session_train = meg_data_normalized[epoch_start_index:end_train_index,:,:]
                 meg_data_session_test = meg_data_normalized[end_train_index:end_test_index,:,:]
@@ -820,8 +816,8 @@ class DatasetHelper(MetadataHelper):
                 meg_data_normalized_by_session[session_id]["train"] = meg_data_session_train
                 meg_data_normalized_by_session[session_id]["test"] = meg_data_session_test
 
-                print(f"[Session {session_id}]: meg_data_normalized['train'].shape: {meg_data_normalized_by_session[session_id]['train'].shape}")
-                print(f"[Session {session_id}]: meg_data_normalized['test'].shape: {meg_data_normalized_by_session[session_id]['test'].shape}")
+                logger.custom_debug(f"[Session {session_id}]: meg_data_normalized['train'].shape: {meg_data_normalized_by_session[session_id]['train'].shape}")
+                logger.custom_debug(f"[Session {session_id}]: meg_data_normalized['test'].shape: {meg_data_normalized_by_session[session_id]['test'].shape}")
 
                 # Export meg dataset arrays to .npz
                 self.export_split_data_as_file(session_id=session_id, 
@@ -833,7 +829,7 @@ class DatasetHelper(MetadataHelper):
           
                 # TODO: Combine grad and mag if both selected
             
-            print(f"end_test_index: {end_test_index}")
+            logger.custom_debug(f"end_test_index: {end_test_index}")
         
 
 
@@ -874,7 +870,7 @@ class DatasetHelper(MetadataHelper):
 
             # Choose split size (80/20)
             num_trials_train = int(num_trials*0.8)
-            print(f"[Session {session_id}]: Num_trials_train: {num_trials_train}")
+            logger.custom_debug(f"[Session {session_id}]: Num_trials_train: {num_trials_train}")
             num_trials_test = num_trials - num_trials_train
 
             # Split based on scene ids, but trial information is sufficient to identify datapoint
@@ -899,17 +895,17 @@ class DatasetHelper(MetadataHelper):
             """
             # Debugging
             if session_id == "1":
-                print(f"Session {session_id}: len train_split_trials: {len(train_split_trials)}")
-                print(f"Session {session_id}: len test_split_trials: {len(test_split_trials)}")
-                print(f"Session {session_id}: Total number of trials in train+test dataset: {len(train_split_trials) + len(test_split_trials)}")
-                print(f"Session {session_id}: Total number of trials in session: {num_trials}")
-                print(f"Session {session_id}: Total number of datapoints in session: {num_datapoints[session_id]}")
+                logger.custom_debug(f"Session {session_id}: len train_split_trials: {len(train_split_trials)}")
+                logger.custom_debug(f"Session {session_id}: len test_split_trials: {len(test_split_trials)}")
+                logger.custom_debug(f"Session {session_id}: Total number of trials in train+test dataset: {len(train_split_trials) + len(test_split_trials)}")
+                logger.custom_debug(f"Session {session_id}: Total number of trials in session: {num_trials}")
+                logger.custom_debug(f"Session {session_id}: Total number of datapoints in session: {num_datapoints[session_id]}")
             """
 
             # Export trial_split arrays to .npz
             split_dict = {"train": train_split_trials, "test": test_split_trials}
 
-            print(f"[Session {session_id}]: len train_split: {len(train_split_trials)}, len test_split: {len(test_split_trials)}")
+            logger.custom_debug(f"[Session {session_id}]: len train_split: {len(train_split_trials)}, len test_split: {len(test_split_trials)}")
 
             self.export_split_data_as_file(session_id=session_id, 
                                         type_of_content="trial_splits",
@@ -930,7 +926,7 @@ class DatasetHelper(MetadataHelper):
             torch_dataset["train"] = DatasetHelper.TorchDatasetHelper(crop_ds['train'])
             torch_dataset["test"] = DatasetHelper.TorchDatasetHelper(crop_ds['test'])
 
-            print(f"[Session {session_id_num}][Content TorchDataset]: Train: Contains array of shape {torch_dataset['train'].numpy_array.shape}")
+            logger.custom_debug(f"[Session {session_id_num}][Content TorchDataset]: Train: Contains array of shape {torch_dataset['train'].numpy_array.shape}")
 
             # Store datasets
             self.export_split_data_as_file(session_id=session_id_num, type_of_content="torch_dataset", array_dict=torch_dataset)
@@ -1012,7 +1008,7 @@ class ExtractionHelper(BasicOperationsHelper):
 
                 # Debugging
                 if session_id_num == "1":
-                    print(f"Session {session_id_num}: {split}_features.shape: {features_split[split].shape}")
+                    logger.custom_debug(f"Session {session_id_num}: {split}_features.shape: {features_split[split].shape}")
 
             # Export numpy array to .npz
             self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features", array_dict=features_split, ann_model=self.ann_model, module=self.module_name)
@@ -1102,10 +1098,10 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
         if not all_sessions_combined:
             for normalization in self.normalizations:
-                print(f"Training mapping for normalization {normalization}")
+                logger.custom_info(f"Training mapping for normalization {normalization}")
                 session_alphas = {}
                 for session_id_num in self.session_ids_num:
-                    logger.info(f"[Session {session_id_num}] Before relevant load_split_data_from_file")
+                    logger.custom_debug(f"[Session {session_id_num}] Before relevant load_split_data_from_file")
                     # Get ANN features for session
                     ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content=self.ann_features_type, ann_model=self.ann_model, module=self.module_name)
                     # Get MEG data for sesssion
@@ -1116,7 +1112,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     if shuffle_train_labels:
                         np.random.shuffle(Y_train)
 
-                    logger.info(f"[Session {session_id_num}] X_train.shape: {X_train.shape}, Y_train.shape: {Y_train.shape}")
+                    logger.custom_debug(f"[Session {session_id_num}] X_train.shape: {X_train.shape}, Y_train.shape: {Y_train.shape}")
                     selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined, session_id_num=session_id_num)
                     session_alphas[session_id_num] = selected_alphas
                 #self.save_dict_as_json(type_of_content="selected_alphas_by_session", dict_to_store=session_alphas, type_of_norm=normalization, predict_train_data=predict_train_data)
@@ -1142,18 +1138,18 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 if shuffle_train_labels:
                     np.random.shuffle(Y_train)
 
-                print(f"Train_mapping: X_train.shape: {X_train.shape}")
-                print(f"Train_mapping: Y_train.shape: {Y_train.shape}")
+                logger.custom_debug(f"Train_mapping: X_train.shape: {X_train.shape}")
+                logger.custom_debug(f"Train_mapping: Y_train.shape: {Y_train.shape}")
 
                  # Debugging
-                #print(f"X_train: {X_train}")
-                #print(f"Y_train: {Y_train}")
-                print(f"max X_train: {np.max(X_train)}, min X_train: {np.min(X_train)}")
-                print(f"max Y_train: {np.max(Y_train)}, min Y_train: {np.min(Y_train)}")
-                print(f"mean over epochs (each pca component) X_train: {np.mean(X_train, axis=(0))}")
-                print(f"mean over epochs and timepoints (each sensor) Y_train: {np.mean(Y_train, axis=(0,2))}")
-                print(f"std over epochs (each pca component) X_train: {np.std(X_train, axis=(0))}")
-                print(f"std over epochs and timepoints (each sensor) Y_train: {np.std(Y_train, axis=(0,2))}")
+                #logger.custom_debug(f"X_train: {X_train}")
+                #logger.custom_debug(f"Y_train: {Y_train}")
+                logger.custom_debug(f"max X_train: {np.max(X_train)}, min X_train: {np.min(X_train)}")
+                logger.custom_debug(f"max Y_train: {np.max(Y_train)}, min Y_train: {np.min(Y_train)}")
+                logger.custom_debug(f"mean over epochs (each pca component) X_train: {np.mean(X_train, axis=(0))}")
+                logger.custom_debug(f"mean over epochs and timepoints (each sensor) Y_train: {np.mean(Y_train, axis=(0,2))}")
+                logger.custom_debug(f"std over epochs (each pca component) X_train: {np.std(X_train, axis=(0))}")
+                logger.custom_debug(f"std over epochs and timepoints (each sensor) Y_train: {np.std(Y_train, axis=(0,2))}")
 
                 selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined)
                 # For continuity with session alphas store combined alphas as dict aswell
@@ -1169,7 +1165,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         """
         if not all_sessions_combined:
             for normalization in self.normalizations:
-                print(f"Predicting from mapping for normalization {normalization}")
+                logger.custom_info(f"Predicting from mapping for normalization {normalization}")
                 variance_explained_dict = self.recursive_defaultdict()
                 mse_session_losses = {"session_mapping": {}}
                 for session_id_model in self.session_ids_num:
@@ -1196,8 +1192,8 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         else:
                             X_test, Y_test = ann_features['test'], meg_data['test']
 
-                        #print(f"Predict_from_mapping: X_test.shape: {X_test.shape}")
-                        #print(f"Predict_from_mapping: Y_test.shape: {Y_test.shape}")
+                        #logger.custom_debug(f"Predict_from_mapping: X_test.shape: {X_test.shape}")
+                        #logger.custom_debug(f"Predict_from_mapping: Y_test.shape: {Y_test.shape}")
 
                         if shuffle_test_labels:
                             np.random.shuffle(Y_test)
@@ -1242,7 +1238,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 
         else:
             for normalization in self.normalizations:
-                print(f"Predicting from mapping for normalization {normalization}")
+                logger.custom_info(f"Predicting from mapping for normalization {normalization}")
                 mse_dict = {}
                 var_explained_dict = {}
                 # Get trained ridge regression models 
@@ -1271,8 +1267,8 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                 X_test, Y_test = ann_features_pred_combined, meg_data_pred_combined
 
-                print(f"Predict_from_mapping: X_test.shape: {X_test.shape}")
-                print(f"Predict_from_mapping: Y_test.shape: {Y_test.shape}")
+                logger.custom_debug(f"Predict_from_mapping: X_test.shape: {X_test.shape}")
+                logger.custom_debug(f"Predict_from_mapping: Y_test.shape: {Y_test.shape}")
 
                 if shuffle_test_labels:
                     np.random.shuffle(Y_test)
@@ -1316,7 +1312,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
             n_sensors = Y.shape[1]
             n_timepoints = Y.shape[2]
             self.models = [RidgeCV(alphas=self.GLM_helper_instance.alphas) for _ in range(n_timepoints)]
-            print(f"Fitted model with alphas {self.GLM_helper_instance.alphas}")
+            logger.custom_debug(f"Fit model with alphas {self.GLM_helper_instance.alphas}")
             if self.random_weights:
                 # Randomly initialize weights and intercepts
                 # Careful, in the current implementation the random model does not use an alpha
@@ -1378,7 +1374,7 @@ class VisualizationHelper(GLMHelper):
                             fit_measure = session_fit_measures['session_mapping'][session_id]['session_pred'][session_id]
                             self_pred_measures[pred_type]["sessions"][session_id] = fit_measure
 
-                print(f"self_pred_measures: {self_pred_measures}")
+                logger.custom_debug(f"self_pred_measures: {self_pred_measures}")
         else:
             for normalization in self.normalizations:
                 self_pred_measures = {"train": {}, "test": {}} if not only_self_pred else {"train": {}}
@@ -1391,9 +1387,9 @@ class VisualizationHelper(GLMHelper):
 
                     with open(json_storage_path, 'r') as file:
                         fit_measure = json.load(file)
-                    self_pred_measures[pred_type] = {type_of_content: format(fit_measure[type_of_content], '.15f')}   # format to keep decimal notation in prints
+                    self_pred_measures[pred_type] = {type_of_content: format(fit_measure[type_of_content], '.15f')}   # format to keep decimal notation in logs
 
-                print(f"self_pred_measures: {self_pred_measures}")
+                logger.custom_debug(f"self_pred_measures: {self_pred_measures}")
             
         # Plot fit measure as of each sessions model (trained on train split) predicting same-sessions test split
         plt.figure(figsize=(10, 6))
@@ -1417,7 +1413,7 @@ class VisualizationHelper(GLMHelper):
             plot_file = f"{type_of_fit_measure}_session_self_prediction_{normalization}_only_self_pred_{only_self_pred}.png"
             self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
         else:
-            print(f"all_sessions_combined: self_pred_measures: {self_pred_measures}")
+            logger.custom_debug(f"all_sessions_combined: self_pred_measures: {self_pred_measures}")
             
             # Plot values for test prediction
             self_pred_vals = [self_pred_measures[pred_type][type_of_content] for pred_type in self_pred_measures]
@@ -1645,7 +1641,7 @@ class VisualizationHelper(GLMHelper):
                     for key, value in fit_measures_new.items():
                         if value == fit_measure:
                             norm_new = key
-                    print(f"Same loss for norm {norm} and norm {norm_new}")  # raise ValueError()
+                    logger.warning(f"Same loss for norm {norm} and norm {norm_new}")  # raise ValueError()
 
                 fit_measures_new[norm] = fit_measure
 
@@ -1661,11 +1657,9 @@ class VisualizationHelper(GLMHelper):
             meg_dict = {"grad": {"meg": meg_data[:,:204,:], "n_sensors": 204}, "mag": {"meg": meg_data[:,204:,:], "n_sensors": 102}}
             
 
-            print(f"meg_data.shape: {meg_data.shape}")
-            print(f"meg_dict['grad']['meg'].shape: {meg_dict['grad']['meg'].shape}")
-            print(f"meg_dict['mag']['meg'].shape: {meg_dict['mag']['meg'].shape}")
-
-            print(f"len(range(204)): {len(range(204))}")
+            logger.custom_debug(f"meg_data.shape: {meg_data.shape}")
+            logger.custom_debug(f"meg_dict['grad']['meg'].shape: {meg_dict['grad']['meg'].shape}")
+            logger.custom_debug(f"meg_dict['mag']['meg'].shape: {meg_dict['mag']['meg'].shape}")
 
             for sensor_type in meg_dict:
                 # Read in with mne
@@ -1700,10 +1694,10 @@ class VisualizationHelper(GLMHelper):
 
                     # Calculate the mean over the epochs and sensors
                     averaged_data = np.mean(data, axis=(0, 1))
-                    #print(f"averaged_data.shape: {averaged_data.shape}")
+                    #logger.custom_debug(f"averaged_data.shape: {averaged_data.shape}")
                     # Store data in session dict
                     session_dict["norm"][normalization]["sensor_type"][sensor_type] = averaged_data
-                    #print(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][normalization]['sensor_type'][sensor_type].shape}")
+                    #logger.custom_debug(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][normalization]['sensor_type'][sensor_type].shape}")
 
             for sensor_type in ["grad", "mag"]:
                 timepoints = np.array(list(range(session_dict["norm"][norm]["sensor_type"][sensor_type].shape[0])))
@@ -1714,9 +1708,9 @@ class VisualizationHelper(GLMHelper):
                 for norm in plot_norms:
                     if sensor_type in session_dict["norm"][norm]["sensor_type"]:
                         plt.plot(timepoints, session_dict["norm"][norm]["sensor_type"][sensor_type], label=f'{norm}')
-                        #print(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][norm]['sensor_type'][sensor_type].shape}")
+                        #logger.custom_debug(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][norm]['sensor_type'][sensor_type].shape}")
                     else:
-                        print(f"Wrong key combination: {norm} and {sensor_type}")
+                        logger.warning(f"Wrong key combination: {norm} and {sensor_type}")
 
                 plt.xlabel('Timepoints)')
                 plt.ylabel('Average MEG Value')
@@ -1748,7 +1742,7 @@ class VisualizationHelper(GLMHelper):
                     averaged_data = np.mean(data, axis=1)  # (epochs, timepoints)
                     # Store data in session dict
                     session_dict["norm"][normalization]["sensor_type"][sensor_type] = averaged_data
-                    #print(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][normalization]['sensor_type'][sensor_type].shape}")
+                    #logger.custom_debug(f"session_dict['norm'][norm]['sensor_type'][sensor_type].shape: {session_dict['norm'][normalization]['sensor_type'][sensor_type].shape}")
 
             for sensor_type in ["grad", "mag"]:
                 timepoints = np.array(list(range(session_dict["norm"][plot_norms[0]]["sensor_type"][sensor_type].shape[0])))
