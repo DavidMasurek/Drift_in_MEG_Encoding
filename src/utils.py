@@ -29,6 +29,9 @@ from scipy.stats import linregress
 # Logging related
 logger = logging.getLogger(__name__)
 
+logger.custom_info(f"Testing custom info.\n \n \n")
+logger.custom_debug(f"Testing custom debug.\n \n \n")
+
 mne.set_log_level(verbose="ERROR")
 
 class BasicOperationsHelper:
@@ -292,7 +295,7 @@ class BasicOperationsHelper:
             split_path = f"data_files/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}{session_folder}/{split}/{type_of_content}{file_type}"  
             if file_type == ".npy":
                 split_data = np.load(split_path)
-                #logger.info(msg=f"Loaded array of shape {split_data.shape} from {split_path}")
+                #logger.info(f"Loaded array of shape {split_data.shape} from {split_path}")
             else:
                 split_data = torch.load(split_path)
             split_dict[split] = split_data
@@ -326,7 +329,7 @@ class BasicOperationsHelper:
                                 ["min_max", "mean_centered_ch_t", "robust_scaling", "no_norm", "median_centered_ch_t"]
         """
         if session_id != None:
-            logger.info(msg=f"[session {session_id}] data.shape: {data.shape}.")  
+            logger.info(f"[session {session_id}] data.shape: {data.shape}.")  
 
         match normalization: 
 
@@ -449,7 +452,7 @@ class MetadataHelper(BasicOperationsHelper):
                     meg_index += 1
             print(f"[Session {session_id}]: combined_datapoints_session: {combined_datapoints_session}")
 
-        logger.info(msg=f"total_combined_datapoints: {total_combined_datapoints}")
+        logger.info(f"total_combined_datapoints: {total_combined_datapoints}")
 
         if investigate_missing_data:
             crop_missing_trials = []
@@ -460,7 +463,7 @@ class MetadataHelper(BasicOperationsHelper):
                         # For each timepoint in the crop metadata: Check if this timepoint is in the meg metadata and if so store it
                         try:
                             crop_identifier = meg_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["crop_identifier"]
-                        except:
+                        except Exception:
                             if trial_id not in crop_missing_trials:
                                 print(f"[Session {session_id}][Trial {trial_id}]: Within this Trial, data for at least one timepoint exists only in the crop-, and not the meg metadata.")
                                 crop_missing_trials.append(trial_id)
@@ -1066,13 +1069,16 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         self.ann_features_type = "ann_features_pca" if pca_features else "ann_features"
 
 
-    def train_mapping(self, all_sessions_combined:bool=False, shuffle_train_labels:bool=False):
+    def train_mapping(self, all_sessions_combined:bool=False, shuffle_train_labels:bool=False, z_score_features:bool=False):
         """
         Trains a mapping from ANN features to MEG data over all sessions.
         """
         def train_model(X_train:np.ndarray, Y_train: np.ndarray, normalization:str, all_sessions_combined:bool, session_id_num:str=None):
             # Initialize Helper class
             ridge_model = GLMHelper.MultiDimensionalRidge(self) 
+
+            if z_score_features:
+                X_train = self.normalize_array(data=X_train, normalization="z_score")
 
             # Fit model on train data
             ridge_model.fit(X_train, Y_train)
@@ -1099,7 +1105,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 print(f"Training mapping for normalization {normalization}")
                 session_alphas = {}
                 for session_id_num in self.session_ids_num:
-                    logger.info(msg=f"[Session {session_id_num}] Before relevant load_split_data_from_file")
+                    logger.info(f"[Session {session_id_num}] Before relevant load_split_data_from_file")
                     # Get ANN features for session
                     ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content=self.ann_features_type, ann_model=self.ann_model, module=self.module_name)
                     # Get MEG data for sesssion
@@ -1110,7 +1116,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     if shuffle_train_labels:
                         np.random.shuffle(Y_train)
 
-                    logger.info(msg=f"[Session {session_id_num}] X_train.shape: {X_train.shape}, Y_train.shape: {Y_train.shape}")
+                    logger.info(f"[Session {session_id_num}] X_train.shape: {X_train.shape}, Y_train.shape: {Y_train.shape}")
                     selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined, session_id_num=session_id_num)
                     session_alphas[session_id_num] = selected_alphas
                 #self.save_dict_as_json(type_of_content="selected_alphas_by_session", dict_to_store=session_alphas, type_of_norm=normalization, predict_train_data=predict_train_data)
@@ -1131,13 +1137,23 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                 X_train, Y_train = ann_features_train_combined, meg_data_train_combined
 
-                print(f"Train_mapping: X_train.shape: {X_train.shape}")
-                print(f"Train_mapping: Y_train.shape: {Y_train.shape}")
-
                 assert X_train.shape[0] == Y_train.shape[0], "Different number of samples for features and meg data."
 
                 if shuffle_train_labels:
                     np.random.shuffle(Y_train)
+
+                print(f"Train_mapping: X_train.shape: {X_train.shape}")
+                print(f"Train_mapping: Y_train.shape: {Y_train.shape}")
+
+                 # Debugging
+                #print(f"X_train: {X_train}")
+                #print(f"Y_train: {Y_train}")
+                print(f"max X_train: {np.max(X_train)}, min X_train: {np.min(X_train)}")
+                print(f"max Y_train: {np.max(Y_train)}, min Y_train: {np.min(Y_train)}")
+                print(f"mean over epochs (each pca component) X_train: {np.mean(X_train, axis=(0))}")
+                print(f"mean over epochs and timepoints (each sensor) Y_train: {np.mean(Y_train, axis=(0,2))}")
+                print(f"std over epochs (each pca component) X_train: {np.std(X_train, axis=(0))}")
+                print(f"std over epochs and timepoints (each sensor) Y_train: {np.std(Y_train, axis=(0,2))}")
 
                 selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined)
                 # For continuity with session alphas store combined alphas as dict aswell
@@ -1146,7 +1162,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
 
         
-    def predict_from_mapping(self, store_timepoint_based_losses:bool=False, predict_train_data:bool=False, all_sessions_combined:bool=False, shuffle_test_labels:bool=False):
+    def predict_from_mapping(self, store_timepoint_based_losses:bool=False, predict_train_data:bool=False, all_sessions_combined:bool=False, shuffle_test_labels:bool=False, z_score_features:bool=False):
         """
         Based on the trained mapping for each session, predicts MEG data over all sessions from their respective test features.
         If predict_train_data is True, predicts the train data of each session as a sanity check of the complete pipeline. Expect strong overfit.
@@ -1180,14 +1196,14 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         else:
                             X_test, Y_test = ann_features['test'], meg_data['test']
 
-                        print(f"Predict_from_mapping: X_test.shape: {X_test.shape}")
-                        print(f"Predict_from_mapping: Y_test.shape: {Y_test.shape}")
+                        #print(f"Predict_from_mapping: X_test.shape: {X_test.shape}")
+                        #print(f"Predict_from_mapping: Y_test.shape: {Y_test.shape}")
 
                         if shuffle_test_labels:
                             np.random.shuffle(Y_test)
 
                         # Generate predictions
-                        predictions = ridge_model.predict(X_test)
+                        predictions = ridge_model.predict(X_test, z_score_features=z_score_features)
 
                         if store_timepoint_based_losses:
                             mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = {"timepoint":{}}
@@ -1261,11 +1277,10 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 if shuffle_test_labels:
                     np.random.shuffle(Y_test)
 
-
                 # Generate predictions
-                predictions = ridge_model.predict(X_test)
+                predictions = ridge_model.predict(X_test, z_score_features=z_score_features)
 
-                    # Calculate the mean squared error across all flattened features and timepoints
+                # Calculate the mean squared error across all flattened features and timepoints
                 mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
                 # Calculate variance explained 
                 var_explained = r2_score(Y_test.reshape(-1), predictions.reshape(-1))
@@ -1301,6 +1316,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
             n_sensors = Y.shape[1]
             n_timepoints = Y.shape[2]
             self.models = [RidgeCV(alphas=self.GLM_helper_instance.alphas) for _ in range(n_timepoints)]
+            print(f"Fitted model with alphas {self.GLM_helper_instance.alphas}")
             if self.random_weights:
                 # Randomly initialize weights and intercepts
                 # Careful, in the current implementation the random model does not use an alpha
@@ -1315,7 +1331,10 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
             # For each model (aka for each timepoint) store the alpha that was selected as best fit in RidgeCV
             self.selected_alphas = [timepoint_model.alpha_ for timepoint_model in self.models]
 
-        def predict(self, X):
+        def predict(self, X, z_score_features:bool=False):
+            if z_score_features:
+                X = self.GLM_helper_instance.normalize_array(data=X, normalization="z_score")
+
             n_samples = X.shape[0]
             n_sensors = self.models[0].coef_.shape[0]
             n_timepoints = len(self.models)
@@ -1358,6 +1377,8 @@ class VisualizationHelper(GLMHelper):
                         for session_id in session_fit_measures['session_mapping']:
                             fit_measure = session_fit_measures['session_mapping'][session_id]['session_pred'][session_id]
                             self_pred_measures[pred_type]["sessions"][session_id] = fit_measure
+
+                print(f"self_pred_measures: {self_pred_measures}")
         else:
             for normalization in self.normalizations:
                 self_pred_measures = {"train": {}, "test": {}} if not only_self_pred else {"train": {}}
