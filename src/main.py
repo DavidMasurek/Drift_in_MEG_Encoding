@@ -29,26 +29,28 @@ ann_model = "Resnet50"
 module_name = "fc"
 batch_size = 32
 
-logger_level = 25
+logger_level = 22
 
 # Choose Calculations to be performed
 create_metadata = False
-create_train_test_split = False  # Careful! Everytime this is set to true, all following steps will be misalligned
+create_train_test_split = True  # Careful! Everytime this is set to true, all following steps will be misalligned
 create_crop_datset_numpy = False
 create_crop_datset_pytorch = False
 create_meg_dataset = False
 extract_features = False
 perform_pca = False
-train_GLM = True
-generate_predictions_with_GLM = True
-visualization = True
+train_GLM = False
+generate_predictions_with_GLM = False
+visualization = False
 
 use_pca_features = True
+
 # Debugging
-z_score_features = True
+z_score_features = False
 run_pipeline_n_times = 1
 all_sessions_combined = True
-shuffle_train_labels = True
+investigate_missing_metadata = True
+shuffle_train_labels = False
 shuffle_test_labels = False  # shuffles the data that is to be predicted! (In control, this can be the train split aswell)
 
 logging_setup = setup_logger(logger_level)
@@ -67,7 +69,7 @@ for run in range(run_pipeline_n_times):
             # Read metadata of all available meg datapoints
             metadata_helper.create_meg_metadata_dict()
             # Create combined metadata that only contains timepoints for which crop and meg information exists
-            metadata_helper.create_combined_metadata_dict(investigate_missing_data=False)
+            metadata_helper.create_combined_metadata_dict(investigate_missing_metadata=investigate_missing_metadata)
 
             logger.custom_info("Metadata created.\n \n")
 

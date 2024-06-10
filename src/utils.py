@@ -29,9 +29,6 @@ from scipy.stats import linregress
 # Logging related
 logger = logging.getLogger(__name__)
 
-#logger.custom_info(f"Testing custom info.\n \n \n")
-#logger.custom_debug(f"Testing custom debug.\n \n \n")
-
 mne.set_log_level(verbose="ERROR")
 
 class BasicOperationsHelper:
@@ -150,6 +147,7 @@ class BasicOperationsHelper:
         
         try:
             with open(file_path, 'r') as data_file:
+                logger.custom_debug(f"Loading dict from {file_path}")
                 data_dict = json.load(data_file)
             return data_dict
         except FileNotFoundError:
@@ -190,6 +188,7 @@ class BasicOperationsHelper:
         json_storage_path = os.path.join(storage_folder, json_storage_file)
 
         with open(json_storage_path, 'w') as file:
+            logger.custom_debug(f"Storing dict to {json_storage_path}")
             # Serialize and save the dictionary to the file
             json.dump(dict_to_store, file, indent=4)
 
@@ -407,7 +406,7 @@ class MetadataHelper(BasicOperationsHelper):
         self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
 
 
-    def create_combined_metadata_dict(self, investigate_missing_data=False) -> None:
+    def create_combined_metadata_dict(self, investigate_missing_metadata=False) -> None:
         """
         Creates the combined metadata dict with timepoints that can be found in both meg and crop metadata for the respective session and trial.
         """
@@ -423,8 +422,8 @@ class MetadataHelper(BasicOperationsHelper):
         combined_metadata_dict = self.recursive_defaultdict()
 
         total_combined_datapoints = 0
-
-        meg_missing_trials = []
+        
+        crop_missing_trials = []
         for session_id in meg_metadata["sessions"]:
             combined_datapoints_session = 0
             meg_index = 0
@@ -432,8 +431,9 @@ class MetadataHelper(BasicOperationsHelper):
                 for timepoint_id in meg_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
                     # For each timepoint in the meg metadata: Check if this timepoint is in the crop metadata and if so store it
                     try:
-                        crop_identifier = crop_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id].get("crop_identifier", None)
-                        sceneID = crop_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id].get("sceneID", None)
+                        crop_identifier = crop_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["crop_identifier"]
+                        sceneID = crop_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["sceneID"]
+
                         combined_metadata_dict["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["crop_identifier"] = crop_identifier
                         combined_metadata_dict["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["sceneID"] = sceneID
                         combined_metadata_dict["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["meg_index"] = meg_index
@@ -441,29 +441,31 @@ class MetadataHelper(BasicOperationsHelper):
                         total_combined_datapoints += 1
                         combined_datapoints_session += 1
                     except Exception as e:
-                        if trial_id not in meg_missing_trials and investigate_missing_data:
-                            logger.custom_debug(f"[Session {session_id}][Trial {trial_id}]: Within this Trial, data for at least one timepoint exists only in the meg-, and not the crop metadata.")
-                            meg_missing_trials.append(trial_id)
-                        pass
+                        if trial_id not in crop_missing_trials and investigate_missing_metadata:
+                            #logger.custom_debug(f"[Session {session_id}][Trial {trial_id}]: Within this Trial, data for at least one timepoint exists only in the meg-, and not the crop metadata.")
+                            crop_missing_trials.append(trial_id)
                     meg_index += 1
             logger.custom_debug(f"[Session {session_id}]: combined_datapoints_session: {combined_datapoints_session}")
 
+        if investigate_missing_metadata:
+            logger.custom_debug(f"Number of trials for which least one timepoint exists only in the meg-, but not in the crop metadata: {len(crop_missing_trials)}")
+
         logger.custom_debug(f"total_combined_datapoints: {total_combined_datapoints}")
 
-        if investigate_missing_data:
-            crop_missing_trials = []
+        if investigate_missing_metadata:
+            meg_missing_trials = []
             # Do the same from the perspective of the crop_metadata to find datapoints that only exist in the crop-, but not the meg-metadata
             for session_id in crop_metadata["sessions"]:
                 for trial_id in crop_metadata["sessions"][session_id]["trials"]:
                     for timepoint_id in crop_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
-                        # For each timepoint in the crop metadata: Check if this timepoint is in the meg metadata and if so store it
+                        # For each timepoint in the crop metadata: Check if this timepoint is in the meg metadata and if not store the trial
                         try:
-                            crop_identifier = meg_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["crop_identifier"]
+                            meg_true = meg_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["meg"]
                         except Exception:
-                            if trial_id not in crop_missing_trials:
-                                logger.custom_debug(f"[Session {session_id}][Trial {trial_id}]: Within this Trial, data for at least one timepoint exists only in the crop-, and not the meg metadata.")
-                                crop_missing_trials.append(trial_id)
-                            pass
+                            if trial_id not in meg_missing_trials:
+                                #logger.custom_debug(f"[Session {session_id}][Trial {trial_id}]: Within this Trial, data for at least one timepoint exists only in the crop-, and not the meg metadata.")
+                                meg_missing_trials.append(trial_id)
+            logger.custom_debug(f"Number of trials for which least one timepoint exists only in the crop-, but not in the meg metadata: {len(meg_missing_trials)}")
             
         # Export dict to json 
         self.save_dict_as_json(type_of_content="combined_metadata", dict_to_store=combined_metadata_dict)
@@ -498,8 +500,15 @@ class MetadataHelper(BasicOperationsHelper):
                 timepoint = row[f"{time_column}"]
                 
                 # Create dict to store values for current trial if this is the first timepoint in the trial
-                if trial_id not in data_dict["sessions"][session_id_num]["trials"].keys():
+                if trial_id not in data_dict["sessions"][session_id_num]["trials"]:
                     data_dict["sessions"][session_id_num]["trials"][trial_id] = {"timepoints": {}}
+                else:
+                    # Make sure there are no duplicates: There should be no stored value for the current timepoint yet
+                    try:
+                        assert data_dict["sessions"][session_id_num]["trials"][trial_id]["timepoints"].get(timepoint, None) == None
+                    except AssertionError as err:
+                        logger.error(f"Found multiple datapoints with the same time_column in session {session_id_num}, trial {trial_id}")
+                        raise err
 
                 # Store availability of current timepoint in trial
                 data_dict["sessions"][session_id_num]["trials"][trial_id]["timepoints"][timepoint] = {"meg":True}
@@ -559,6 +568,12 @@ class MetadataHelper(BasicOperationsHelper):
                 for timepoint in timepoints:
                     # Filter trial dataframe by timepoint
                     timepoint_df = trial_df[trial_df[f"{time_column}"] == timepoint]
+
+                    try:
+                        assert len(timepoint_df) == 1
+                    except AssertionError as err:
+                        logger.error(f"Found multiple datapoints with the same time_column in session {nr_session}, trial {nr_trial}")
+                        raise err
 
                     # get sceneID for this timepoint
                     sceneID = timepoint_df['sceneID'].iloc[0]
