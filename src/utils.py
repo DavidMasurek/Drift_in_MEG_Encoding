@@ -243,6 +243,7 @@ class BasicOperationsHelper:
                 np.save(save_path, array_dict[split])
             else:
                 torch.save(array_dict[split], save_path)
+            logger.custom_debug(f"Exporting split data {type_of_content} to {save_path}")
             if split == "train" and (type_of_content == "crop_data" or type_of_content.startswith("ann_features")):
                 logger.custom_debug(f"[Session {session_id}]: Train: Storing array of shape {array_dict[split].shape} to {save_path}")
             if split == "train" and type_of_content == "torch_dataset":
@@ -297,6 +298,7 @@ class BasicOperationsHelper:
                 split_data = torch.load(split_path)
             split_dict[split] = split_data
 
+            logger.custom_debug(f"Loading split data {type_of_content} from {split_path}")
             if split == "train" and (type_of_content == "crop_data" or type_of_content.startswith("ann_features")):
                 #data_shape = split_data.shape if type_of_content != "type_of_content" else tf.  # or type_of_content == "torch_dataset" 
                 logger.custom_debug(f"[Session {session_id_num}][Content {type_of_content}]: Train: Loaded array of shape {split_data.shape} from {split_path}")
@@ -422,7 +424,7 @@ class MetadataHelper(BasicOperationsHelper):
         combined_metadata_dict = self.recursive_defaultdict()
 
         total_combined_datapoints = 0
-        
+
         crop_missing_trials = []
         for session_id in meg_metadata["sessions"]:
             combined_datapoints_session = 0
@@ -848,7 +850,7 @@ class DatasetHelper(MetadataHelper):
         
 
 
-    def create_train_test_split(self):
+    def create_train_test_split(self, debugging=False):
         """
         Creates train/test split of trials based on scene_ids.
         """
@@ -858,7 +860,7 @@ class DatasetHelper(MetadataHelper):
         # Prepare splits for all sessions: count scenes
         scene_ids = {session_id: {} for session_id in combined_metadata["sessions"]}
         trial_ids = {session_id: [] for session_id in combined_metadata["sessions"]}
-        num_datapoints = {session_id: 0 for session_id in combined_metadata["sessions"]}
+        num_datapoints_dict = {session_id: 0 for session_id in combined_metadata["sessions"]}
         for session_id in combined_metadata["sessions"]:
             for trial_id in combined_metadata["sessions"][session_id]["trials"]:
                 # Store trials in session for comparison with scenes
@@ -866,15 +868,23 @@ class DatasetHelper(MetadataHelper):
                 for timepoint in combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
                     # get sceneID of current timepoint
                     scene_id_current = combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint]["sceneID"]
-                    # First occurance of the scene? Store its occurange with the corresonding trial
+                    # First occurance of the scene? Store its occurange with the corresponding trial
                     if scene_id_current not in scene_ids[session_id]:
                         scene_ids[session_id][scene_id_current] = {"trials": [trial_id]}
                     # SceneID previously occured in another trial, but this trial is not stored yet: store it under the scene_id aswell
                     elif trial_id not in scene_ids[session_id][scene_id_current]["trials"]:
                         scene_ids[session_id][scene_id_current]["trials"].append(trial_id)
+                        logger.warning(f"Sceneid {scene_id_current} occurs in multiple trials: {scene_ids[session_id][scene_id_current]['trials']}")
 
                     # Count total datapoints/timepoints/fixations in combined metadata in session
-                    num_datapoints[session_id] += 1
+                    num_datapoints_dict[session_id] += 1
+
+        if debugging:
+            total_num_datapoints = 0
+            for session_id in num_datapoints_dict:
+                total_num_datapoints += num_datapoints_dict[session_id]
+            logger.custom_debug(f"Total number of datapoints: {total_num_datapoints}")
+
 
         # Create splits for each session
         for session_id in combined_metadata["sessions"]:
@@ -882,11 +892,12 @@ class DatasetHelper(MetadataHelper):
             num_scenes = len(scene_ids[session_id])  # subject 2, session a: 300 
             num_trials = len(trial_ids[session_id])
             assert num_scenes == num_trials, f"Session {session_id}: Number of trials and number of scenes is not identical. Doubled scenes need to be considered"
+            assert num_trials == len(combined_metadata["sessions"][session_id]["trials"].keys()), f"Registered number of trials not identical to number of trials in combined metadata for session {session_id}."
 
             # Choose split size (80/20)
             num_trials_train = int(num_trials*0.8)
-            logger.custom_debug(f"[Session {session_id}]: Num_trials_train: {num_trials_train}")
             num_trials_test = num_trials - num_trials_train
+            assert num_trials == (num_trials_train + num_trials_test), "Sanity check, lost trials to split"
 
             # Split based on scene ids, but trial information is sufficient to identify datapoint
             train_split_trials = []
@@ -905,22 +916,20 @@ class DatasetHelper(MetadataHelper):
                         test_split_trials.append(trial_id)
                     index += 1
 
-            # To-do: Make sure that scenes only double in the same split
-
-            """
-            # Debugging
-            if session_id == "1":
-                logger.custom_debug(f"Session {session_id}: len train_split_trials: {len(train_split_trials)}")
-                logger.custom_debug(f"Session {session_id}: len test_split_trials: {len(test_split_trials)}")
-                logger.custom_debug(f"Session {session_id}: Total number of trials in train+test dataset: {len(train_split_trials) + len(test_split_trials)}")
-                logger.custom_debug(f"Session {session_id}: Total number of trials in session: {num_trials}")
-                logger.custom_debug(f"Session {session_id}: Total number of datapoints in session: {num_datapoints[session_id]}")
-            """
+            # TODO, maybe (most likely not): Make sure that scenes only double in the same split
 
             # Export trial_split arrays to .npz
             split_dict = {"train": train_split_trials, "test": test_split_trials}
 
-            logger.custom_debug(f"[Session {session_id}]: len train_split: {len(train_split_trials)}, len test_split: {len(test_split_trials)}")
+            assert num_trials_train == len(train_split_trials), "Lost trials in train split"
+            assert num_trials_test == len(test_split_trials), "Lost trials in train split"
+            for split in split_dict:
+                assert len(split_dict[split]) == len(set(split_dict[split])), f"Session {session_id}: Split {split} contains doubled trials."
+                for trial_id in split_dict[split]:
+                    other_split = "train" if split == "test" else "test"
+                    assert trial_id not in split_dict[other_split], f"Session {session_id}: Trial {trial_id} occurs in both train and test split."
+
+            logger.custom_debug(f"[Session {session_id}]: len train_split: {len(train_split_trials)}, len test_split: {len(test_split_trials)}, combined size: {len(train_split_trials) + len(test_split_trials)} \n")
 
             self.export_split_data_as_file(session_id=session_id, 
                                         type_of_content="trial_splits",

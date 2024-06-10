@@ -30,11 +30,12 @@ module_name = "fc"
 batch_size = 32
 
 logger_level = 22
+debugging = True if logger_level <= 23 else False
 
 # Choose Calculations to be performed
 create_metadata = False
-create_train_test_split = True  # Careful! Everytime this is set to true, all following steps will be misalligned
-create_crop_datset_numpy = False
+create_train_test_split = False  # Careful! Everytime this is set to true, all following steps will be misalligned
+create_crop_datset_numpy = True
 create_crop_datset_pytorch = False
 create_meg_dataset = False
 extract_features = False
@@ -79,7 +80,7 @@ for run in range(run_pipeline_n_times):
 
             if create_train_test_split:
                 # Create train/test split based on sceneIDs (based on trial_ids)
-                dataset_helper.create_train_test_split()
+                dataset_helper.create_train_test_split(debugging=debugging)
 
                 logger.custom_info("Train/Test split created. \n \n")
 
