@@ -35,10 +35,10 @@ debugging = True if logger_level <= 23 else False  # TODO: Use this as class att
 # Choose Calculations to be performed
 create_metadata = False
 create_train_test_split = False  # Careful! Everytime this is set to true, all following steps will be misalligned
-create_crop_datset_numpy = True
+create_crop_datset_numpy = False
 create_crop_datset_pytorch = False
 create_meg_dataset = False
-extract_features = False
+extract_features = True
 perform_pca = False
 train_GLM = False
 generate_predictions_with_GLM = False
@@ -92,7 +92,7 @@ for run in range(run_pipeline_n_times):
 
             if create_crop_datset_pytorch:
                 # Covert numpy arrays to pytorch tensors
-                dataset_helper.create_pytorch_dataset()
+                dataset_helper.create_pytorch_dataset(debugging=debugging)
 
                 logger.custom_info("PyTorch crop datasets created. \n \n")
 

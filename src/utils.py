@@ -17,7 +17,7 @@ from datetime import date
 
 # ML specific imports
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, TensorDataset, DataLoader
 from torchvision import transforms
 from thingsvision import get_extractor
 
@@ -623,6 +623,7 @@ class DatasetHelper(MetadataHelper):
             crop_split = {"train": [], "test": []}
             datapoints_by_session_and_split["sessions"][session_id] = {"splits": {"train": 0, "test": 0}}
             for split in crop_split:
+                crop_split_index = 0
                 # Iterate over train/test split by trials (not over combined_metadata as before)
                 # In this fashion, the first element in the crop and meg dataset of each split type will surely be the first element in the array of trials for that split
                 for nr_trial, trial_id in enumerate(trials_split_dict[split]):
@@ -632,23 +633,24 @@ class DatasetHelper(MetadataHelper):
                             logger.custom_debug(f"[Session {session_id}][{split} split][Trial {trial_id}/Index {nr_trial}]: Timepoints found in metadata: {timepoints_in_trial}")
 
                     # Get timepoints from combined_metadata
-                    for nr_timepoint, timepoint_id in enumerate(combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]):
+                    for timepoint_id in combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
                         # Get crop path
                         crop_filename = ''.join([combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["crop_identifier"], ".png"])
                         crop_path = os.path.join(crop_folder_path, crop_filename)
 
                         # Read crop as array and concat
                         crop = imageio.imread(crop_path)
+                        crop_split[split].append(crop)
 
-                        if debugging and session_id in ["2", "5", "8"] and nr_trial in [0, 10, 100] and nr_timepoint in [0, 1, 2, 9]:
-                            save_folder = f"data_files/debugging/crop_data/numpy_dataset/session_{session_id}/{split}/trial_index_{nr_trial}/time_index_{nr_timepoint}"
+                        if debugging and session_id in ["2", "5", "8"] and crop_split_index in [0, 10, 100, 1000]:
+                            save_folder = f"data_files/debugging/crop_data/numpy_dataset/session_{session_id}/{split}/crop_split_index_{crop_split_index}"
                             os.makedirs(save_folder, exist_ok=True)
                             save_path = os.path.join(save_folder, "crop_image_numpy")
                             np.save(save_path, crop)
-
-                        crop_split[split].append(crop)
+                            assert np.all(crop_split[split][crop_split_index] == crop), "Storing the wrong crop_split index"
 
                         datapoints_by_session_and_split["sessions"][session_id]["splits"][split] += 1
+                        crop_split_index +=1
 
             # Convert to numpy array
             for split in crop_split:
@@ -962,30 +964,46 @@ class DatasetHelper(MetadataHelper):
                                         array_dict=split_dict)
 
 
-    def create_pytorch_dataset(self):
+    def create_pytorch_dataset(self, debugging=False):
         """
         Creates pytorch datasets from numpy image datasets.
         """
         
-        for session_id_num in self.session_ids_num:
+        for session_id in self.session_ids_num:
             # Load numpy datasets for session
-            crop_ds = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="crop_data")
+            crop_ds = self.load_split_data_from_file(session_id_num=session_id, type_of_content="crop_data")
 
-            # Create torch datasets with helper 
-            # TODO: Revaluate approach, why am I applying transform to each item in __getitem__ and not simply once to the complete array
+            # Convert arrays to PyTorch tensors and create Dataset
+            train_tensors = torch.tensor(crop_ds['train'], dtype=torch.float32)
+            test_tensors = torch.tensor(crop_ds['test'], dtype=torch.float32)
+            tensor_dict = {"train": train_tensors, "test": test_tensors}
+
+            if debugging:
+                for split, tensor in tensor_dict.items():
+                    logger.custom_debug(f"[Session {session_id}][Split {split}][Content TorchDataset]: Contains tensor of shape {tensor.shape}")
+            
             torch_dataset = {}
-            torch_dataset["train"] = DatasetHelper.TorchDatasetHelper(crop_ds['train'])
-            torch_dataset["test"] = DatasetHelper.TorchDatasetHelper(crop_ds['test'])
-
-            logger.custom_debug(f"[Session {session_id_num}][Content TorchDataset]: Train: Contains array of shape {torch_dataset['train'].numpy_array.shape}")
+            for split in tensor_dict:
+                torch_dataset[split] = TensorDataset(tensor_dict[split])
 
             # Store datasets
-            self.export_split_data_as_file(session_id=session_id_num, type_of_content="torch_dataset", array_dict=torch_dataset)
+            self.export_split_data_as_file(session_id=session_id, type_of_content="torch_dataset", array_dict=torch_dataset)
+
+            # Store some tensors for debugging of pipeline
+            if debugging and session_id in ["2", "5", "8"]:
+                for split in tensor_dict:
+                    for crop_split_index in [0, 10, 100, 1000]:
+                        if len(tensor_dict[split]) >= crop_split_index:
+                            save_folder = f"data_files/debugging/crop_data/pytorch_dataset/session_{session_id}/{split}/crop_split_index_{crop_split_index}"
+                            os.makedirs(save_folder, exist_ok=True)
+                            save_path = os.path.join(save_folder, "crop_image_pytorch.pt")
+                            torch.save(tensor_dict[split][crop_split_index], save_path)
 
 
     class TorchDatasetHelper(Dataset):
         """
-        Inner class to create Pytorch dataset from numpy arrays (images).
+        Inner class to create Pytorch dataset from numpy arrays (images)
+        DEPRECATED FOR THE MOMENT, APPROACH UNINTUITIVE.
         """
         def __init__(self, numpy_array, transform=None):
             """
@@ -1035,14 +1053,31 @@ class ExtractionHelper(BasicOperationsHelper):
             pretrained=True
         )
 
-        for session_id_num in self.session_ids_num:
+        for session_id in self.session_ids_num:
             # Load torch datasets for session
-            torch_crop_ds = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="torch_dataset")
+            #torch_crop_ds = self.load_split_data_from_file(session_id_num=session_id, type_of_content="torch_dataset")
+
+            # Load numpy datasets for session
+            crop_ds = self.load_split_data_from_file(session_id_num=session_id, type_of_content="crop_data")
+
+            # Convert arrays to PyTorch tensors and create Dataset
+            train_tensors = torch.tensor(crop_ds['train'], dtype=torch.float32)
+            test_tensors = torch.tensor(crop_ds['test'], dtype=torch.float32)
+
+            logger.custom_debug(f"train_tensors.shape: {train_tensors.shape}")
+            logger.custom_debug(f"test_tensors.shape: {test_tensors.shape}")
+
+            # Transpose dimensions to match (channels, height, width) (instead of height,width,channels as before)
+            train_tensors = train_tensors.permute(0, 3, 1, 2)
+            test_tensors = test_tensors.permute(0, 3, 1, 2)
+
+            logger.custom_debug(f"train_tensors new shape: {train_tensors.shape}")
+            logger.custom_debug(f"test_tensors new shape: {test_tensors.shape}")
 
             # Create a DataLoader to handle batching
             model_input = {}
-            model_input["train"] =  DataLoader(torch_crop_ds["train"], batch_size=self.batch_size, shuffle=False)
-            model_input["test"] = DataLoader(torch_crop_ds["test"], batch_size=self.batch_size, shuffle=False)
+            model_input["train"] =  DataLoader(train_tensors, batch_size=self.batch_size, shuffle=False)
+            model_input["test"] = DataLoader(test_tensors, batch_size=self.batch_size, shuffle=False)
     
             features_split = {}
             for split in ["train", "test"]:
@@ -1054,11 +1089,11 @@ class ExtractionHelper(BasicOperationsHelper):
                 )
 
                 # Debugging
-                if session_id_num == "1":
-                    logger.custom_debug(f"Session {session_id_num}: {split}_features.shape: {features_split[split].shape}")
+                if session_id == "1":
+                    logger.custom_debug(f"Session {session_id}: {split}_features.shape: {features_split[split].shape}")
 
             # Export numpy array to .npz
-            self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features", array_dict=features_split, ann_model=self.ann_model, module=self.module_name)
+            self.export_split_data_as_file(session_id=session_id, type_of_content="ann_features", array_dict=features_split, ann_model=self.ann_model, module=self.module_name)
 
     def reduce_feature_dimensionality(self, all_sessions_combined:bool = False):
         """

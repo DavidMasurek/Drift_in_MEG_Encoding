@@ -4,8 +4,12 @@ import os
 import numpy as np
 import pandas as pd
 import json
+import logging
+import torch
 from collections import defaultdict
+from setup_logger import setup_logger
 from utils import BasicOperationsHelper
+
 
 # Add parent folder of src to path and change cwd
 __location__ = Path(__file__).parent.parent
@@ -22,9 +26,14 @@ timepoint_max = 250
 alphas = [1,10,100,1000,10000,100000,1000000] 
 all_sessions_combined = True
 
+logger_level = 22
 
-ops_helper = BasicOperationsHelper()
+logging_setup = setup_logger(logger_level)
+logger = logging.getLogger(__name__)
 
+ops_helper = BasicOperationsHelper(subject_id="02", lock_event=lock_event)
+
+"""
 ann_features_train_combined = None
 meg_data_train_combined = None
 # Collect ANN features and MEG data over sessions
@@ -50,3 +59,30 @@ split_path = "data_files/ann_features_pca/all_sessions_combined/Resnet50/fc/subj
 train_features_pca = np.load(split_path)
 
 print(f"train_features_pca.shape: {train_features_pca.shape}")
+"""
+
+
+def combine_crop_and_torch_dataset():
+    for session_id in ["2", "5", "8"]:  # ["2", "5", "8"]
+        for split in ["train", "test"]:  # ["train", "test"]
+            #crop_split_index = 100
+            for crop_split_index in [0, 10, 100]:  # , 1000
+                image_data = {"numpy_dataset": None, "pytorch_dataset": None}
+                for data_type in image_data:
+                    save_folder = f"data_files/debugging/crop_data/{data_type}/session_{session_id}/{split}/crop_split_index_{crop_split_index}"
+                    if data_type == "numpy_dataset":
+                        file_name = "crop_image_numpy.npy"
+                        data_path = os.path.join(save_folder, file_name)
+                        image_data[data_type] = np.load(data_path)
+                    else:
+                        file_name = "crop_image_pytorch.pt"
+                        data_path = os.path.join(save_folder, file_name)
+                        image_data[data_type] = torch.load(data_path)
+                    #logger.custom_debug(f"[Session {session_id}][Split {split}][Index {crop_split_index}][{data_type}]: {image_data[data_type]}")
+                assert np.all(image_data["numpy_dataset"] == image_data["pytorch_dataset"].cpu().detach().numpy())
+                
+
+combine_crop_and_torch_dataset()
+
+logger.custom_info("Testing finished.")
+
