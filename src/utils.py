@@ -12,6 +12,7 @@ import random
 from matplotlib.lines import Line2D  
 from collections import defaultdict
 from typing import Tuple, Dict
+import time
 from datetime import date
 
 # ML specific imports
@@ -602,7 +603,7 @@ class DatasetHelper(MetadataHelper):
         self.timepoint_min = timepoint_min
         self.timepoint_max = timepoint_max
 
-    def create_crop_dataset(self) -> None:
+    def create_crop_dataset(self, debugging=False) -> None:
         """
         Creates the crop dataset with all crops in the combined_metadata (crops for which meg data exists)
         """
@@ -613,36 +614,61 @@ class DatasetHelper(MetadataHelper):
         # Define path to read crops from
         crop_folder_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/crops/as{self.subject_id}"
 
+        datapoints_by_session_and_split = {"sessions": {}}
         # For each session: create crop datasets based on respective splits
         for session_id in self.session_ids_num:
             # Get train/test split based on trials (based on scenes)
             trials_split_dict = self.load_split_data_from_file(session_id_num=session_id, type_of_content="trial_splits")
 
             crop_split = {"train": [], "test": []}
+            datapoints_by_session_and_split["sessions"][session_id] = {"splits": {"train": 0, "test": 0}}
             for split in crop_split:
                 # Iterate over train/test split by trials (not over combined_metadata as before)
                 # In this fashion, the first element in the crop and meg dataset of each split type will surely be the first element in the array of trials for that split
-                for trial_id in trials_split_dict[split]:
+                for nr_trial, trial_id in enumerate(trials_split_dict[split]):
+                    if debugging:
+                        timepoints_in_trial = list(combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"].keys())
+                        if len(timepoints_in_trial) > 10:
+                            logger.custom_debug(f"[Session {session_id}][{split} split][Trial {trial_id}/Index {nr_trial}]: Timepoints found in metadata: {timepoints_in_trial}")
+
                     # Get timepoints from combined_metadata
-                    for timepoint_id in combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
+                    for nr_timepoint, timepoint_id in enumerate(combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]):
                         # Get crop path
                         crop_filename = ''.join([combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["crop_identifier"], ".png"])
                         crop_path = os.path.join(crop_folder_path, crop_filename)
 
                         # Read crop as array and concat
                         crop = imageio.imread(crop_path)
+
+                        if debugging and session_id in ["2", "5", "8"] and nr_trial in [0, 10, 100] and nr_timepoint in [0, 1, 2, 9]:
+                            save_folder = f"data_files/debugging/crop_data/numpy_dataset/session_{session_id}/{split}/trial_index_{nr_trial}/time_index_{nr_timepoint}"
+                            os.makedirs(save_folder, exist_ok=True)
+                            save_path = os.path.join(save_folder, "crop_image_numpy")
+                            np.save(save_path, crop)
+
                         crop_split[split].append(crop)
+
+                        datapoints_by_session_and_split["sessions"][session_id]["splits"][split] += 1
 
             # Convert to numpy array
             for split in crop_split:
                 crop_split[split] = np.stack(crop_split[split], axis=0)
-
-            logger.custom_debug(f"[Session {session_id}]: Train: Crop Numpy dataset is array of shape {crop_split['train'].shape}")
+                logger.custom_debug(f"[Session {session_id}][{split} split]: Crop Numpy dataset is array of shape {crop_split[split].shape}")
+            
 
             # Export numpy array to .npz
             self.export_split_data_as_file(session_id=session_id, 
                                         type_of_content="crop_data",
                                         array_dict=crop_split)
+
+        if debugging:
+            for session_id in datapoints_by_session_and_split["sessions"]:
+                n_datapoints_session = 0
+                for split in datapoints_by_session_and_split["sessions"][session_id]["splits"]:
+                    n_datapoints_split = datapoints_by_session_and_split["sessions"][session_id]["splits"][split]
+                    n_datapoints_session += n_datapoints_split
+                    logger.custom_debug(f"Session {session_id} split {split} Num Datapoints: {n_datapoints_split}")
+                logger.custom_debug(f"Session {session_id} Total Datapoints: {n_datapoints_session}")           
 
 
     def create_meg_dataset(self) -> None:
@@ -946,6 +972,7 @@ class DatasetHelper(MetadataHelper):
             crop_ds = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="crop_data")
 
             # Create torch datasets with helper 
+            # TODO: Revaluate approach, why am I applying transform to each item in __getitem__ and not simply once to the complete array
             torch_dataset = {}
             torch_dataset["train"] = DatasetHelper.TorchDatasetHelper(crop_ds['train'])
             torch_dataset["test"] = DatasetHelper.TorchDatasetHelper(crop_ds['test'])
@@ -976,12 +1003,8 @@ class DatasetHelper(MetadataHelper):
             return len(self.numpy_array)
 
         def __getitem__(self, idx):
-            image = self.numpy_array[idx]
+            image = self.transform(self.numpy_array[idx])
 
-            if self.transform:
-                image = self.transform(image)
-
-            # Since no labels are associated, we only return the image
             return image
 
 

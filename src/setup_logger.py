@@ -32,7 +32,7 @@ def setup_logger(logger_level):
     filename = (
             "logs/pipeline_" + datetime.now().strftime("%d-%m-%Y_%H-%M-%S") + ".log"
         )
-    handlers = [logging.StreamHandler()]  # logging.FileHandler(filename=filename, encoding="utf-8", mode="w"),
+    handlers = [logging.StreamHandler(), logging.FileHandler(filename=filename, encoding="utf-8", mode="w"),]  # logging.FileHandler(filename=filename, encoding="utf-8", mode="w"),
     logging.basicConfig(
         format="[%(asctime)s] [%(name)s] [%(levelname)s] [%(funcName)s] %(message)s",
         datefmt="%d/%m/%Y %H:%M:%S",

@@ -30,7 +30,7 @@ module_name = "fc"
 batch_size = 32
 
 logger_level = 22
-debugging = True if logger_level <= 23 else False
+debugging = True if logger_level <= 23 else False  # TODO: Use this as class attribute rather than passing it to every function
 
 # Choose Calculations to be performed
 create_metadata = False
@@ -86,7 +86,7 @@ for run in range(run_pipeline_n_times):
 
             if create_crop_datset_numpy:
                 # Create crop dataset with images as numpy arrays
-                dataset_helper.create_crop_dataset()
+                dataset_helper.create_crop_dataset(debugging=debugging)
 
                 logger.custom_info("Numpy crop datasets created. \n \n")
 
