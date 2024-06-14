@@ -18,10 +18,10 @@ os.chdir(__location__)
 # Choose params
 subject_ids = ["02"]
 normalizations = ["mean_centered_ch_then_global_z"]  # "no_norm",  # ["min_max", "mean_centered_ch_t", "median_centered_ch_t", "robust_scaling", "no_norm"]
-lock_event = "fixation"  # "saccade"
+lock_event = "fixation"  # "saccade" "fixation"
 meg_channels = [1731, 1921, 2111, 2341, 2511]
-timepoint_min = 50
-timepoint_max = 250
+timepoint_min = 200
+timepoint_max = 300
 alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
 pca_components = 3
 
@@ -29,19 +29,19 @@ ann_model = "Alexnet"  # "Resnet50"
 module_name =  "features.10" # "fc"
 batch_size = 32
 
-logger_level = 22
+logger_level = 25
 debugging = True if logger_level <= 23 else False  # TODO: Use this as class attribute rather than passing it to every function
 
 # Choose Calculations to be performed
 create_metadata = True
-create_train_test_split = False  # Careful! Everytime this is set to true, all following steps will be misalligned
-create_crop_datset_numpy = False
-create_meg_dataset = False
-extract_features = False
-perform_pca = False
-train_GLM = False
-generate_predictions_with_GLM = False
-visualization = False
+create_train_test_split = True  # Careful! Everytime this is set to true, all following steps will be misalligned
+create_crop_datset_numpy = True
+create_meg_dataset = True
+extract_features = True
+perform_pca = True
+train_GLM = True
+generate_predictions_with_GLM = True
+visualization = True
 
 use_pca_features = True
 
@@ -56,6 +56,9 @@ shuffle_test_labels = False  # shuffles the data that is to be predicted! (In co
 logging_setup = setup_logger(logger_level)
 logger = logging.getLogger(__name__)
 
+#if lock_event != "saccade":
+#    raise NotImplementedError("Lock event is currently expected to be saccade! timepoint_min and timepoint_max need to be considered relative to the lock event!")
+
 for run in range(run_pipeline_n_times):
     for subject_id in subject_ids:
         logger.custom_info(f"Processing subject {subject_id}.\n \n \n")
@@ -65,11 +68,11 @@ for run in range(run_pipeline_n_times):
             metadata_helper = MetadataHelper(subject_id=subject_id, lock_event=lock_event)
 
             # Read metadata of all available crops/images
-            metadata_helper.create_crop_metadata_dict()
+            #metadata_helper.create_crop_metadata_dict()
             # Read metadata of all available meg datapoints
             metadata_helper.create_meg_metadata_dict()
             # Create combined metadata that only contains timepoints for which crop and meg information exists
-            metadata_helper.create_combined_metadata_dict(investigate_missing_metadata=investigate_missing_metadata)
+            #metadata_helper.create_combined_metadata_dict(investigate_missing_metadata=investigate_missing_metadata)
 
             logger.custom_info("Metadata created.\n \n")
 

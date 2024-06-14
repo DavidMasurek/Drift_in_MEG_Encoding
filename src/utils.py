@@ -53,18 +53,17 @@ class BasicOperationsHelper:
         processing_channels_indices = {"grad": {}, "mag": {}}
         evoked = mne.read_evokeds(fif_file_path)[0]
 
-        # Get indices of Grad and Mag sensors
-        grad_indices = mne.pick_types(evoked.info, meg='grad')
-        mag_indices = mne.pick_types(evoked.info, meg='mag')
+        logger.custom_debug(f"evoked.info: {evoked.info}")
 
         for sensor_type in processing_channels_indices: # grad, mag
             channel_indices = mne.pick_types(evoked.info, meg=sensor_type)
-            sensor_index = 0
-            for channel_idx in channel_indices:
+            #logger.custom_debug(f"channel_indices: {channel_indices}")
+            for sensor_index, channel_idx in enumerate(channel_indices):
                 ch_name = evoked.ch_names[channel_idx]
                 if int(ch_name[3:]) in chosen_channels:
+                    #logger.custom_debug(f"Sensor_index: {sensor_index}, Channel_idx: {channel_idx}")
                     processing_channels_indices[sensor_type][sensor_index] = ch_name
-                sensor_index += 1
+            #logger.custom_debug(f"{sensor_type}, last index: {sensor_index}")
 
         return processing_channels_indices
 
@@ -505,7 +504,7 @@ class MetadataHelper(BasicOperationsHelper):
             # Create ordered dict
             data_dict["sessions"][session_id_num]["trials"] = {}
 
-            for index, row in df.iterrows():
+            for counter, (index, row) in enumerate(df.iterrows(), start=1):
                 trial_id = int(row["trial"])
                 timepoint = row[f"{time_column}"]
                 
@@ -522,6 +521,7 @@ class MetadataHelper(BasicOperationsHelper):
 
                 # Store availability of current timepoint in trial
                 data_dict["sessions"][session_id_num]["trials"][trial_id]["timepoints"][timepoint] = {"meg":True}
+            logger.custom_debug(f"Num Rows in MEG metadata: {counter}")
 
         # Export dict to json 
         self.save_dict_as_json(type_of_content="meg_metadata", dict_to_store=data_dict)
@@ -709,50 +709,52 @@ class DatasetHelper(MetadataHelper):
                 meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a saccade: (2945, 204, 401), fixation: (2874, 204, 601) 
                 meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a saccade: (2945, 102, 401), fixation: (2874, 102, 601)
 
+                logger.custom_debug(f"H5 f.keys(): {f.keys()}")
+                logger.custom_debug(f"H5 f.attrs.keys(): {f.attrs.keys()}")
+                logger.custom_debug(f"H5 f.attrs['times']: {f.attrs['times']}")
+                logger.custom_debug(f"H5 len(f.attrs['times']): {len(f.attrs['times'])}")
+
                 num_meg_timepoints = meg_data['grad'].shape[0]
 
                 logger.custom_debug(f"[Session {session_id_num}]: Pre filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
                 logger.custom_debug(f"[Session {session_id_num}]: Pre filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
 
-                # Select relevant channels
-                channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
-
-                for sensor_type in channel_indices:
+                for sensor_type in selected_channel_indices:
                     # Check if this type of sensor is part of the selected channels
-                    if channel_indices[sensor_type]:
+                    if selected_channel_indices[sensor_type]:
+                        channel_indices = list(selected_channel_indices[sensor_type].keys())
                         # Filter meg data by selected channels
-                        meg_data[sensor_type] = meg_data[sensor_type][:, list(channel_indices[sensor_type].keys()),:]
+                        meg_data[sensor_type] = meg_data[sensor_type][:,channel_indices,:]
 
                 # Cut relevant timepoints. Range is -0.5 – 0.3 s. We want timepoints 50-250
                 if self.timepoint_min is not None and self.timepoint_max is not None:
-                    for sensor_type in channel_indices:
-                        if channel_indices[sensor_type]:
+                    for sensor_type in selected_channel_indices:
+                        if selected_channel_indices[sensor_type]:
                             meg_data[sensor_type] = meg_data[sensor_type][:,:,self.timepoint_min:self.timepoint_max+1]
-                    if not channel_indices["grad"] and not channel_indices["mag"]:
+                    if not selected_channel_indices["grad"] and not selected_channel_indices["mag"]:
                         raise ValueError("Neither mag or grad channels selected.")
-                
 
                 # Create datasets based on specified normalizations
                 for normalization in self.normalizations:
                     normalization_stage = normalization if normalization != "mean_centered_ch_then_global_z" else "mean_centered_ch"
                     # Debugging
                     if session_id_num == "1" and normalization == "no_norm":
-                        for sensor_type in channel_indices:
-                            if channel_indices[sensor_type]:
+                        for sensor_type in selected_channel_indices:
+                            if selected_channel_indices[sensor_type]:
                                 logger.custom_debug(f"[Session {session_id_num}]: Post filtering: meg_data['{sensor_type}'].shape: {meg_data[sensor_type].shape}")
 
                     meg_data_norm = {}
                     # Normalize grad and mag independently
-                    for sensor_type in channel_indices:
-                        if channel_indices[sensor_type]:
+                    for sensor_type in selected_channel_indices:
+                        if selected_channel_indices[sensor_type]:
                             meg_data_norm[sensor_type] = self.normalize_array(np.array(meg_data[sensor_type]), normalization=normalization_stage, session_id=session_id_num)
 
                     # Combine grad and mag data
-                    if channel_indices["grad"] and channel_indices["mag"]:
+                    if selected_channel_indices["grad"] and selected_channel_indices["mag"]:
                         combined_meg = np.concatenate([meg_data_norm["grad"], meg_data_norm["mag"]], axis=1) #(2874, 306, 601)
-                    elif channel_indices["grad"]:
+                    elif selected_channel_indices["grad"]:
                         combined_meg = meg_data_norm["grad"]
-                    elif channel_indices["mag"]:
+                    elif selected_channel_indices["mag"]:
                         combined_meg = meg_data_norm["mag"]
 
                     # Debugging: Count timepoints in meg metadata
@@ -762,7 +764,7 @@ class DatasetHelper(MetadataHelper):
                             num_meg_metadata_timepoints += 1
                     #logger.custom_debug(f"[Session {session_id_num}]: Timepoints in meg metadata: {num_meg_metadata_timepoints}")
                     if num_meg_metadata_timepoints != combined_meg.shape[0]:
-                        raise ValueError("Number of timepoints in meg metadata and in meg data loaded from h5 file are not identical.")
+                        raise ValueError(f"Number of timepoints in meg metadata and in meg data loaded from h5 file are not identical. Metadata: {num_meg_metadata_timepoints}. Found: {combined_meg.shape[0]}")
 
 
                     # Debugging: Count timepoints in combined metadata
