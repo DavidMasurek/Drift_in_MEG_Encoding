@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import logging
 import random
 from matplotlib.lines import Line2D  
-from collections import defaultdict
+from collections import defaultdict, Counter
 from typing import Tuple, Dict
 import time
 from datetime import date
@@ -25,7 +25,7 @@ from sklearn.decomposition import PCA
 from sklearn.linear_model import RidgeCV
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import r2_score
-from scipy.stats import linregress
+from scipy.stats import linregress, pearsonr
 
 # Logging related
 logger = logging.getLogger(__name__)
@@ -332,6 +332,13 @@ class BasicOperationsHelper:
             logger.custom_debug(f"[session {session_id}] data.shape: {data.shape}.")  
 
         match normalization: 
+
+            case "range_-1_to_1":
+                min_val = -1
+                max_val = 1
+                arr_min = np.min(data)
+                arr_max = np.max(data)
+                normalized_data = min_val + (arr - arr_min) * (max_val - min_val) / (arr_max - arr_min)
 
             case "mean_centered_ch":
                 # 0 centered by mean for each over all epochs and timepoints
@@ -687,6 +694,8 @@ class DatasetHelper(MetadataHelper):
         # Select relevant channels
         selected_channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
 
+        logger.custom_debug(f"selected_channel_indices: {selected_channel_indices}")
+
         # Debugging:
         n_epochs_two_step_norm = {"train": 0, "test": 0}
 
@@ -702,8 +711,8 @@ class DatasetHelper(MetadataHelper):
 
                 num_meg_timepoints = meg_data['grad'].shape[0]
 
-                #logger.custom_debug(f"[Session {session_id_num}]: Pre filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
-                #logger.custom_debug(f"[Session {session_id_num}]: Pre filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
+                logger.custom_debug(f"[Session {session_id_num}]: Pre filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
+                logger.custom_debug(f"[Session {session_id_num}]: Pre filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
 
                 # Select relevant channels
                 channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
@@ -1064,15 +1073,9 @@ class ExtractionHelper(BasicOperationsHelper):
             train_tensors = torch.tensor(crop_ds['train'], dtype=torch.float32)
             test_tensors = torch.tensor(crop_ds['test'], dtype=torch.float32)
 
-            logger.custom_debug(f"train_tensors.shape: {train_tensors.shape}")
-            logger.custom_debug(f"test_tensors.shape: {test_tensors.shape}")
-
             # Transpose dimensions to match (channels, height, width) (instead of height,width,channels as before)
             train_tensors = train_tensors.permute(0, 3, 1, 2)
             test_tensors = test_tensors.permute(0, 3, 1, 2)
-
-            logger.custom_debug(f"train_tensors new shape: {train_tensors.shape}")
-            logger.custom_debug(f"test_tensors new shape: {test_tensors.shape}")
 
             # Create a DataLoader to handle batching
             model_input = {}
@@ -1089,8 +1092,7 @@ class ExtractionHelper(BasicOperationsHelper):
                 )
 
                 # Debugging
-                if session_id == "1":
-                    logger.custom_debug(f"Session {session_id}: {split}_features.shape: {features_split[split].shape}")
+                logger.custom_debug(f"Session {session_id}: {split}_features.shape: {features_split[split].shape}")
 
             # Export numpy array to .npz
             self.export_split_data_as_file(session_id=session_id, type_of_content="ann_features", array_dict=features_split, ann_model=self.ann_model, module=self.module_name)
@@ -1113,25 +1115,31 @@ class ExtractionHelper(BasicOperationsHelper):
             return ann_features
 
         if not all_sessions_combined:
-            for session_id_num in self.session_ids_num:
+            for session_id in self.session_ids_num:
                 pca_features = {"train": None, "test": None}
                 # Get ANN features for session
-                ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
+                ann_features = self.load_split_data_from_file(session_id_num=session_id, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
                 ann_features_pca = apply_pca_to_features(ann_features)
+                
+                for split in ann_features_pca:
+                    logger.custom_debug(f"Session {session_id}: {split}_features.shape: {ann_features_pca[split].shape}")
 
-                self.export_split_data_as_file(session_id=session_id_num, type_of_content="ann_features_pca", array_dict=ann_features_pca, ann_model=self.ann_model, module=self.module_name)
+                self.export_split_data_as_file(session_id=session_id, type_of_content="ann_features_pca", array_dict=ann_features_pca, ann_model=self.ann_model, module=self.module_name)
         else:
             # Concat features over all sessions, only then apply pca
             pca_features = {"train": None, "test": None}
-            for session_id_num in self.session_ids_num:
+            for session_id in self.session_ids_num:
                 # Get ANN features for session
-                ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
+                ann_features = self.load_split_data_from_file(session_id_num=session_id, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
                 for split in pca_features:
                     if pca_features[split] is None:
                         pca_features[split] = ann_features[split]
                     else:
                         pca_features[split] = np.concatenate((pca_features[split], ann_features[split]))
             ann_features_pca = apply_pca_to_features(pca_features)
+
+            for split in ann_features_pca:
+                logger.custom_debug(f"Session {session_id}: {split}_features.shape: {ann_features_pca[split].shape}")
 
             self.export_split_data_as_file(session_id=None, type_of_content="ann_features_pca_all_sessions_combined", array_dict=ann_features_pca, ann_model=self.ann_model, module=self.module_name)
 
@@ -1147,7 +1155,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         self.ann_features_type = "ann_features_pca" if pca_features else "ann_features"
 
 
-    def train_mapping(self, all_sessions_combined:bool=False, shuffle_train_labels:bool=False, z_score_features:bool=False):
+    def train_mapping(self, all_sessions_combined:bool=False, shuffle_train_labels:bool=False, downscale_features:bool=False):
         """
         Trains a mapping from ANN features to MEG data over all sessions.
         """
@@ -1155,8 +1163,8 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
             # Initialize Helper class
             ridge_model = GLMHelper.MultiDimensionalRidge(self) 
 
-            if z_score_features:
-                X_train = self.normalize_array(data=X_train, normalization="z_score")
+            if downscale_features:
+                X_train = self.normalize_array(data=X_train, normalization="range_-1_to_1")
 
             # Fit model on train data
             ridge_model.fit(X_train, Y_train)
@@ -1240,7 +1248,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
 
         
-    def predict_from_mapping(self, store_timepoint_based_losses:bool=False, predict_train_data:bool=False, all_sessions_combined:bool=False, shuffle_test_labels:bool=False, z_score_features:bool=False):
+    def predict_from_mapping(self, store_timepoint_based_losses:bool=False, predict_train_data:bool=False, all_sessions_combined:bool=False, shuffle_test_labels:bool=False, downscale_features:bool=False):
         """
         Based on the trained mapping for each session, predicts MEG data over all sessions from their respective test features.
         If predict_train_data is True, predicts the train data of each session as a sanity check of the complete pipeline. Expect strong overfit.
@@ -1249,6 +1257,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
             for normalization in self.normalizations:
                 logger.custom_info(f"Predicting from mapping for normalization {normalization}")
                 variance_explained_dict = self.recursive_defaultdict()
+                correlation_dict = self.recursive_defaultdict()
                 mse_session_losses = {"session_mapping": {}}
                 for session_id_model in self.session_ids_num:
                     mse_session_losses["session_mapping"][session_id_model] = {"session_pred": {}}
@@ -1281,7 +1290,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                             np.random.shuffle(Y_test)
 
                         # Generate predictions
-                        predictions = ridge_model.predict(X_test, z_score_features=z_score_features)
+                        predictions = ridge_model.predict(X_test, downscale_features=downscale_features)
 
                         if store_timepoint_based_losses:
                             mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = {"timepoint":{}}
@@ -1298,6 +1307,9 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                             # Calculate variance explained 
                             var_explained = r2_score(Y_test.reshape(-1), predictions.reshape(-1))
 
+                            # Calculate the Pearson correlation coefficient
+                            r_pearson, _ = pearsonr(Y_test.reshape(-1), predictions.reshape(-1))
+
                             # Control values
                             #if var_explained < 0:
                             #    raise ValueError("Contains negative values for Variance Explained.")
@@ -1307,6 +1319,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                             # Save loss and variance explained
                             mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = mse
+                            correlation_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = r_pearson
                             variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = var_explained
 
                 # Store loss dict
@@ -1323,6 +1336,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 logger.custom_info(f"Predicting from mapping for normalization {normalization}")
                 mse_dict = {}
                 var_explained_dict = {}
+                correlation_dict = {}
                 # Get trained ridge regression models 
                 storage_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}"  
                 storage_file = "GLM_models.pkl"
@@ -1356,25 +1370,29 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     np.random.shuffle(Y_test)
 
                 # Generate predictions
-                predictions = ridge_model.predict(X_test, z_score_features=z_score_features)
+                predictions = ridge_model.predict(X_test, downscale_features=downscale_features)
 
                 # Calculate the mean squared error across all flattened features and timepoints
                 mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
                 # Calculate variance explained 
                 var_explained = r2_score(Y_test.reshape(-1), predictions.reshape(-1))
 
+                r_pearson, _ = pearsonr(Y_test.reshape(-1), predictions.reshape(-1))
+
                 # Save results in dict
                 mse_dict = {"mse_losses": mse}
                 var_explained_dict = {"var_explained": var_explained}
+                correlation_dict = {"correlation": r_pearson}
 
-                for fit_measure in ["var_explained", "mse_losses"]:
+                for fit_measure in ["var_explained", "mse_losses", "correlation"]:
                     storage_folder = f"data_files/{fit_measure}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}/predict_train_data_{predict_train_data}"
                     os.makedirs(storage_folder, exist_ok=True)
                     json_storage_file = f"{fit_measure}_all_sessions_combined_dict.json"
                     json_storage_path = os.path.join(storage_folder, json_storage_file)
 
-                    dict_to_store = var_explained_dict if fit_measure == "var_explained" else mse_dict
+                    dict_to_store = var_explained_dict if fit_measure == "var_explained" else mse_dict if fit_measure == "mse_losses" else correlation_dict
                     with open(json_storage_path, 'w') as file:
+                        logger.custom_debug(f"Storing dict {fit_measure} to {json_storage_path}")
                         # Serialize and save the dictionary to the file
                         json.dump(dict_to_store, file, indent=4)
 
@@ -1393,6 +1411,9 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
             n_features = X.shape[1]
             n_sensors = Y.shape[1]
             n_timepoints = Y.shape[2]
+        
+            logger.custom_info(f"self.GLM_helper_instance.alphas: {self.GLM_helper_instance.alphas}")
+
             self.models = [RidgeCV(alphas=self.GLM_helper_instance.alphas) for _ in range(n_timepoints)]
             logger.custom_debug(f"Fit model with alphas {self.GLM_helper_instance.alphas}")
             if self.random_weights:
@@ -1409,9 +1430,14 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
             # For each model (aka for each timepoint) store the alpha that was selected as best fit in RidgeCV
             self.selected_alphas = [timepoint_model.alpha_ for timepoint_model in self.models]
 
-        def predict(self, X, z_score_features:bool=False):
-            if z_score_features:
-                X = self.GLM_helper_instance.normalize_array(data=X, normalization="z_score")
+            counts = Counter(self.selected_alphas)
+            sorted_counts = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+            logger.custom_info(f"selected alphas: {sorted_counts}")
+
+
+        def predict(self, X, downscale_features:bool=False):
+            if downscale_features:
+                X = self.GLM_helper_instance.normalize_array(data=X, normalization="range_-1_to_1")
 
             n_samples = X.shape[0]
             n_sensors = self.models[0].coef_.shape[0]

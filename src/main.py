@@ -18,27 +18,26 @@ os.chdir(__location__)
 # Choose params
 subject_ids = ["02"]
 normalizations = ["mean_centered_ch_then_global_z"]  # "no_norm",  # ["min_max", "mean_centered_ch_t", "median_centered_ch_t", "robust_scaling", "no_norm"]
-lock_event = "saccade"
+lock_event = "fixation"  # "saccade"
 meg_channels = [1731, 1921, 2111, 2341, 2511]
 timepoint_min = 50
 timepoint_max = 250
-alphas = [1]  # ,10,100,1000 ,10000 ,100000,1000000
-pca_components = 4
+alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
+pca_components = 3
 
-ann_model = "Resnet50"
-module_name = "fc"
+ann_model = "Alexnet"  # "Resnet50"
+module_name =  "features.10" # "fc"
 batch_size = 32
 
 logger_level = 22
 debugging = True if logger_level <= 23 else False  # TODO: Use this as class attribute rather than passing it to every function
 
 # Choose Calculations to be performed
-create_metadata = False
+create_metadata = True
 create_train_test_split = False  # Careful! Everytime this is set to true, all following steps will be misalligned
 create_crop_datset_numpy = False
-create_crop_datset_pytorch = False
 create_meg_dataset = False
-extract_features = True
+extract_features = False
 perform_pca = False
 train_GLM = False
 generate_predictions_with_GLM = False
@@ -47,10 +46,10 @@ visualization = False
 use_pca_features = True
 
 # Debugging
-z_score_features = False
+downscale_features = False
 run_pipeline_n_times = 1
 all_sessions_combined = True
-investigate_missing_metadata = True
+investigate_missing_metadata = False
 shuffle_train_labels = False
 shuffle_test_labels = False  # shuffles the data that is to be predicted! (In control, this can be the train split aswell)
 
@@ -75,7 +74,7 @@ for run in range(run_pipeline_n_times):
             logger.custom_info("Metadata created.\n \n")
 
         ##### Create crop and meg dataset based on metadata #####
-        if create_train_test_split or create_crop_datset_numpy or create_crop_datset_pytorch  or create_meg_dataset:
+        if create_train_test_split or create_crop_datset_numpy or create_meg_dataset:
             dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations, chosen_channels=meg_channels, lock_event=lock_event, timepoint_min=timepoint_min, timepoint_max=timepoint_max)
 
             if create_train_test_split:
@@ -89,12 +88,6 @@ for run in range(run_pipeline_n_times):
                 dataset_helper.create_crop_dataset(debugging=debugging)
 
                 logger.custom_info("Numpy crop datasets created. \n \n")
-
-            if create_crop_datset_pytorch:
-                # Covert numpy arrays to pytorch tensors
-                dataset_helper.create_pytorch_dataset(debugging=debugging)
-
-                logger.custom_info("PyTorch crop datasets created. \n \n")
 
             if create_meg_dataset:
                 # Create meg dataset based on split
@@ -122,14 +115,14 @@ for run in range(run_pipeline_n_times):
 
             # Train GLM
             if train_GLM:
-                glm_helper.train_mapping(all_sessions_combined=all_sessions_combined, shuffle_train_labels=shuffle_train_labels, z_score_features=z_score_features)
+                glm_helper.train_mapping(all_sessions_combined=all_sessions_combined, shuffle_train_labels=shuffle_train_labels, downscale_features=downscale_features)
 
                 logger.custom_info("GLMs trained. \n \n")
 
             # Generate meg predictions from GLMs
             if generate_predictions_with_GLM:
-                glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, z_score_features=z_score_features)
-                glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=True, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, z_score_features=z_score_features)
+                glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
+                glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=True, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
 
                 logger.custom_info("Predictions generated. \n \n")
 
