@@ -22,8 +22,8 @@ lock_event = "fixation"  # "saccade" "fixation"
 meg_channels = [1731, 1921, 2111, 2341, 2511]
 timepoint_min = 200
 timepoint_max = 300
-alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
-pca_components = 3
+alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
+pca_components = 30
 
 ann_model = "Alexnet"  # "Resnet50"
 module_name =  "features.10" # "fc"
@@ -33,12 +33,12 @@ logger_level = 25
 debugging = True if logger_level <= 23 else False  # TODO: Use this as class attribute rather than passing it to every function
 
 # Choose Calculations to be performed
-create_metadata = True
-create_train_test_split = True  # Careful! Everytime this is set to true, all following steps will be misalligned
-create_crop_datset_numpy = True
-create_meg_dataset = True
-extract_features = True
-perform_pca = True
+create_metadata = False
+create_train_test_split = False  # Careful! Everytime this is set to true, all following steps will be misalligned
+create_crop_datset_numpy = False
+create_meg_dataset = False
+extract_features = False
+perform_pca = False
 train_GLM = True
 generate_predictions_with_GLM = True
 visualization = True
@@ -46,9 +46,10 @@ visualization = True
 use_pca_features = True
 
 # Debugging
+store_timepoint_based_losses = False
 downscale_features = False
 run_pipeline_n_times = 1
-all_sessions_combined = True
+all_sessions_combined = False
 investigate_missing_metadata = False
 shuffle_train_labels = False
 shuffle_test_labels = False  # shuffles the data that is to be predicted! (In control, this can be the train split aswell)
@@ -58,6 +59,7 @@ logger = logging.getLogger(__name__)
 
 #if lock_event != "saccade":
 #    raise NotImplementedError("Lock event is currently expected to be saccade! timepoint_min and timepoint_max need to be considered relative to the lock event!")
+
 
 for run in range(run_pipeline_n_times):
     for subject_id in subject_ids:
@@ -124,8 +126,7 @@ for run in range(run_pipeline_n_times):
 
             # Generate meg predictions from GLMs
             if generate_predictions_with_GLM:
-                glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
-                glm_helper.predict_from_mapping(store_timepoint_based_losses=False, predict_train_data=True, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
+                glm_helper.predict_from_mapping(store_timepoint_based_losses=store_timepoint_based_losses, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
 
                 logger.custom_info("Predictions generated. \n \n")
 
@@ -145,7 +146,9 @@ for run in range(run_pipeline_n_times):
 
             # Visualize prediction results
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
-            #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=True)
+            #visualization_helper.visualize_GLM_results(only_distance=True, var_explained=True)
+            #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["1","7","10"], var_explained=True)
+            #visualization_helper.visualize_GLM_results(by_timepoints=True, var_explained=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
             
             # Visualize model perspective (values by timepoint)
@@ -155,4 +158,7 @@ for run in range(run_pipeline_n_times):
             
 
 logger.custom_info("Pipeline completed.")
+
+
+logger.warning("Using saccade for .fif file regardless of used lock_event for session date differences because files does not exist for fixations.")
 

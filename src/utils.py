@@ -22,7 +22,7 @@ from torchvision import transforms
 from thingsvision import get_extractor
 
 from sklearn.decomposition import PCA
-from sklearn.linear_model import RidgeCV
+from sklearn.linear_model import RidgeCV, ElasticNetCV
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import r2_score
 from scipy.stats import linregress, pearsonr
@@ -77,7 +77,7 @@ class BasicOperationsHelper:
         
         # Get datetime of each session
         for session_id_char in self.session_ids_char:
-            fif_file = f"as{self.subject_id}{session_id_char}_et_epochs_info_{self.lock_event}.fif"
+            fif_file = f"as{self.subject_id}{session_id_char}_et_epochs_info_saccade.fif"
             fif_complete_path = os.path.join(fif_folder, fif_file)
 
             session_info = mne.io.read_info(fif_complete_path)
@@ -450,7 +450,7 @@ class MetadataHelper(BasicOperationsHelper):
                         total_combined_datapoints += 1
                         combined_datapoints_session += 1
                     except Exception as e:
-                        if trial_id not in crop_missing_trials and investigate_missing_metadata:
+                        if investigate_missing_metadata and trial_id not in crop_missing_trials:
                             #logger.custom_debug(f"[Session {session_id}][Trial {trial_id}]: Within this Trial, data for at least one timepoint exists only in the meg-, and not the crop metadata.")
                             crop_missing_trials.append(trial_id)
                     meg_index += 1
@@ -603,7 +603,7 @@ class MetadataHelper(BasicOperationsHelper):
         
 class DatasetHelper(MetadataHelper):
     def __init__(self, normalizations:list,  chosen_channels:list , timepoint_min: int, timepoint_max:int, **kwargs):
-        super().__init__(**kwargs)  # subject_id=subject_id, lock_event=lock_event
+        super().__init__(**kwargs) 
 
         self.normalizations = normalizations
         self.chosen_channels = chosen_channels
@@ -637,7 +637,8 @@ class DatasetHelper(MetadataHelper):
                     if debugging:
                         timepoints_in_trial = list(combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"].keys())
                         if len(timepoints_in_trial) > 10:
-                            logger.custom_debug(f"[Session {session_id}][{split} split][Trial {trial_id}/Index {nr_trial}]: Timepoints found in metadata: {timepoints_in_trial}")
+                            #logger.custom_debug(f"[Session {session_id}][{split} split][Trial {trial_id}/Index {nr_trial}]: Timepoints found in metadata: {timepoints_in_trial}")
+                            pass
 
                     # Get timepoints from combined_metadata
                     for timepoint_id in combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
@@ -709,10 +710,8 @@ class DatasetHelper(MetadataHelper):
                 meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a saccade: (2945, 204, 401), fixation: (2874, 204, 601) 
                 meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a saccade: (2945, 102, 401), fixation: (2874, 102, 601)
 
-                logger.custom_debug(f"H5 f.keys(): {f.keys()}")
-                logger.custom_debug(f"H5 f.attrs.keys(): {f.attrs.keys()}")
-                logger.custom_debug(f"H5 f.attrs['times']: {f.attrs['times']}")
-                logger.custom_debug(f"H5 len(f.attrs['times']): {len(f.attrs['times'])}")
+                #logger.custom_debug(f"H5 f.attrs['times']: {f.attrs['times']}")
+                #logger.custom_debug(f"H5 len(f.attrs['times']): {len(f.attrs['times'])}")
 
                 num_meg_timepoints = meg_data['grad'].shape[0]
 
@@ -828,8 +827,8 @@ class DatasetHelper(MetadataHelper):
                 metadata_by_session["session_id_num"][session_id_num]["n_train_epochs"] = np.shape(meg_data_session["train"])[0] 
                 metadata_by_session["session_id_num"][session_id_num]["n_test_epochs"] = np.shape(meg_data_session["test"])[0] 
 
-                logger.custom_debug(f"[Session {session_id_num}]: np.shape(meg_data_session['train']): {np.shape(meg_data_session['train'])}")
-                logger.custom_debug(f"[Session {session_id_num}]: np.shape(meg_data_session['test']): {np.shape(meg_data_session['test'])}")
+                #logger.custom_debug(f"[Session {session_id_num}]: np.shape(meg_data_session['train']): {np.shape(meg_data_session['train'])}")
+                #logger.custom_debug(f"[Session {session_id_num}]: np.shape(meg_data_session['test']): {np.shape(meg_data_session['test'])}")
 
                 #logger.custom_debug(f"np.shape(meg_data_session['test'])[0] : {np.shape(meg_data_session['test'])[0] }")
                 #logger.custom_debug("n_train_epochs:", metadata_by_session["session_id_num"]["n_train_epochs"])   
@@ -1109,19 +1108,24 @@ class ExtractionHelper(BasicOperationsHelper):
             """
             pca = PCA(n_components=self.pca_components)
             pca.fit(np.concatenate((ann_features["train"], ann_features["test"])))
+            explained_var_per_component = pca.explained_variance_ratio_
+            explained_var = 0
+            for explained_var_component in explained_var_per_component:
+                explained_var += explained_var_component
 
             # Transform splits
             for split in ann_features:
                 ann_features[split] = pca.transform(ann_features[split])
 
-            return ann_features
+            return ann_features, explained_var
 
         if not all_sessions_combined:
             for session_id in self.session_ids_num:
                 pca_features = {"train": None, "test": None}
                 # Get ANN features for session
                 ann_features = self.load_split_data_from_file(session_id_num=session_id, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
-                ann_features_pca = apply_pca_to_features(ann_features)
+                ann_features_pca, explained_var = apply_pca_to_features(ann_features)
+                logger.custom_debug(f"[Session {session_id}]: Explained Variance: {explained_var}")
                 
                 for split in ann_features_pca:
                     logger.custom_debug(f"Session {session_id}: {split}_features.shape: {ann_features_pca[split].shape}")
@@ -1138,7 +1142,8 @@ class ExtractionHelper(BasicOperationsHelper):
                         pca_features[split] = ann_features[split]
                     else:
                         pca_features[split] = np.concatenate((pca_features[split], ann_features[split]))
-            ann_features_pca = apply_pca_to_features(pca_features)
+            ann_features_pca, explained_var = apply_pca_to_features(pca_features)
+            logger.custom_debug(f"Explained Variance: {explained_var}")
 
             for split in ann_features_pca:
                 logger.custom_debug(f"Session {session_id}: {split}_features.shape: {ann_features_pca[split].shape}")
@@ -1150,8 +1155,6 @@ class ExtractionHelper(BasicOperationsHelper):
 class GLMHelper(DatasetHelper, ExtractionHelper):
     def __init__(self, alphas: list, pca_features:bool, **kwargs):
         super().__init__(**kwargs)
-        #DatasetHelper.__init__(self, **kwargs)
-        #ExtractionHelper.__init__(self, **kwargs)
 
         self.alphas = alphas
         self.ann_features_type = "ann_features_pca" if pca_features else "ann_features"
@@ -1299,9 +1302,9 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                             # Calculate loss seperately for each timepoint/model
                             n_timepoints = predictions.shape[2]
                             for t in range(n_timepoints):
-                                fit_measure_timepoint = mean_squared_error(Y_test[:,:,t].reshape(-1), predictions[:,:,t].reshape(-1))
+                                var_explained = r2_score(Y_test[:,:,t].reshape(-1), predictions[:,:,t].reshape(-1))
                                 # Save loss
-                                mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = fit_measure_timepoint
+                                mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = var_explained
                         else:
                             # Calculate the mean squared error across all flattened features and timepoints
                             mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
@@ -1318,7 +1321,6 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                             #elif var_explained > 1:
                             #    raise ValueError("Contains values larger 1 for Variance Explained.")
 
-
                             # Save loss and variance explained
                             mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = mse
                             correlation_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = r_pearson
@@ -1331,8 +1333,14 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     mse_type_of_content = "mse_losses"
 
                 self.save_dict_as_json(type_of_content=mse_type_of_content, dict_to_store=mse_session_losses, type_of_norm=normalization)
-                self.save_dict_as_json(type_of_content="var_explained", dict_to_store=variance_explained_dict, type_of_norm=normalization, predict_train_data=predict_train_data)
                 
+                if not store_timepoint_based_losses:
+                    self.save_dict_as_json(type_of_content="var_explained", dict_to_store=variance_explained_dict, type_of_norm=normalization, predict_train_data=predict_train_data)
+                
+                logger.custom_info(f"keys in var dict: {variance_explained_dict['session_mapping'].keys()}")
+                for session_id in variance_explained_dict["session_mapping"]:
+                    session_explained_var = variance_explained_dict['session_mapping'][session_id]['session_pred'][session_id]
+                    logger.custom_info(f"[Session {session_id}]: Variance_explained_dict: {session_explained_var}")
         else:
             for normalization in self.normalizations:
                 logger.custom_info(f"Predicting from mapping for normalization {normalization}")
@@ -1413,8 +1421,6 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
             n_features = X.shape[1]
             n_sensors = Y.shape[1]
             n_timepoints = Y.shape[2]
-        
-            logger.custom_info(f"self.GLM_helper_instance.alphas: {self.GLM_helper_instance.alphas}")
 
             self.models = [RidgeCV(alphas=self.GLM_helper_instance.alphas) for _ in range(n_timepoints)]
             logger.custom_debug(f"Fit model with alphas {self.GLM_helper_instance.alphas}")
@@ -1484,7 +1490,7 @@ class VisualizationHelper(GLMHelper):
                             fit_measure = session_fit_measures['session_mapping'][session_id]['session_pred'][session_id]
                             self_pred_measures[pred_type]["sessions"][session_id] = fit_measure
 
-                logger.custom_debug(f"self_pred_measures: {self_pred_measures}")
+                logger.custom_info(f"self_pred_measures: {self_pred_measures}")
         else:
             for normalization in self.normalizations:
                 self_pred_measures = {"train": {}, "test": {}} if not only_self_pred else {"train": {}}
@@ -1641,7 +1647,7 @@ class VisualizationHelper(GLMHelper):
                 lines2, labels2 = ax2.get_legend_handles_labels()
                 ax1.legend(lines + lines2, labels + labels2, loc='upper right')
                 
-                ax1.set_title(f'{type_of_fit_measure} vs Distance for Predictions Averaged Across all Sessions with Norm {normalization}, sessions omitted: {omit_sessions}, {date.today()}')
+                ax1.set_title(f'{type_of_fit_measure} vs Distance for Predictions Averaged Across all Sessions. \n Norm {normalization}, sessions omitted: {omit_sessions}, {date.today()}')
                 plt.grid(True)
                 plt.show()
 
@@ -1708,38 +1714,55 @@ class VisualizationHelper(GLMHelper):
                     plot_file = f"MSE_plot_all_sessions.png"
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
             elif by_timepoints:
+
+                def plot_timepoint_fit_measure(timepoint_loss_list, num_timepoints, session_id=None):
+                    plt.figure(figsize=(10, 6))
+                    plt.bar(list(range(num_timepoints)), timepoint_loss_list, color='blue')
+                    session_subtitle = "Averaged across all Sessions, predicting themselves" if session_id is None else f"Session {session_id}, predicting iteself"
+                    plt.title(f'{type_of_fit_measure} Fit measure per Timepoint Model. {session_subtitle} \n omitted sessions: {omit_sessions}.')
+                    plt.xlabel('Timepoints')
+                    plt.ylabel(f'{type_of_fit_measure}')
+                    plt.grid(True)
+
+                    # Save the plot to a file
+                    plot_folder = f"data_files/visualizations/timepoint_model_comparison/subject_{self.subject_id}/norm_{normalization}"
+                    if session_id is None:
+                        plot_folder += "/all_sessions_combined"  
+                    else:
+                        plot_folder += f"/session{session_id}"
+                    plot_file = f"fit_measure_timepoint_comparison_{normalization}.png"
+                    logger.custom_debug(f"plot_folder: {plot_folder}")
+                    self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+
                 # Collect fit_measures for timepoint models on predictions on the own session
                 fit_measures_by_session_by_timepoint = {"session": {}}
                 for session_id in session_fit_measures['session_mapping']:
+                    if session_id in omit_sessions:
+                        continue
                     fit_measures_by_session_by_timepoint["session"][session_id] = {"timepoint":{}}
                     for timepoint in session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]["timepoint"]:
                         fit_measure_timepoint = session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]["timepoint"][timepoint]
                         fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"][timepoint] = fit_measure_timepoint
 
                 # Plot results averaged over all sessions
-                num_timepoints = len([timepoint for timepoint in fit_measures_by_session_by_timepoint["session"]["1"]["timepoint"]])
+                num_timepoints = len([timepoint for timepoint in fit_measures_by_session_by_timepoint["session"]["3"]["timepoint"]])
                 timepoint_average_fit_measure = {}
-                for timepoint in range(num_timepoints):
-                    # Calculate average over all within session predictions for this timepoint
-                    fit_measures = []
-                    for session in fit_measures_by_session_by_timepoint["session"]:
-                        timepoint_session_loss = fit_measures_by_session_by_timepoint["session"][session]["timepoint"][str(timepoint)]
-                        fit_measures.append(timepoint_session_loss)
-                    avg_loss = np.sum(fit_measures) / len(fit_measures)
-                    timepoint_average_fit_measure[timepoint] = avg_loss
-                timepoint_avg_loss_list = [timepoint_average_fit_measure[timepoint] for timepoint in timepoint_average_fit_measure]
+                if not separate_plots:
+                    for timepoint in range(num_timepoints):
+                        # Calculate average over all within session predictions for this timepoint
+                        fit_measures = []
+                        for session in fit_measures_by_session_by_timepoint["session"]:
+                            timepoint_session_loss = fit_measures_by_session_by_timepoint["session"][session]["timepoint"][str(timepoint)]
+                            fit_measures.append(timepoint_session_loss)
+                        avg_loss = np.sum(fit_measures) / len(fit_measures)
+                        timepoint_average_fit_measure[timepoint] = avg_loss
+                    timepoint_avg_loss_list = [timepoint_average_fit_measure[timepoint] for timepoint in timepoint_average_fit_measure]
 
-                plt.figure(figsize=(10, 6))
-                plt.bar(list(range(num_timepoints)), timepoint_avg_loss_list, color='blue')
-                plt.title(f'{type_of_fit_measure} Loss per Timepoint Model. Averaged across all Sessions, predicting the{type_of_fit_measure}lves.')
-                plt.xlabel('Timepoints')
-                plt.ylabel(f'{type_of_fit_measure} Loss')
-                plt.grid(True)
-
-                # Save the plot to a file
-                plot_folder = f"data_files/visualizations/timepoint_model_comparison/subject_{self.subject_id}/norm_{normalization}"
-                plot_file = f"fit_measure_timepoint_comparison_{normalization}.png"
-                self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+                    plot_timepoint_fit_measure(timepoint_loss_list=timepoint_avg_loss_list, num_timepoints=num_timepoints)
+                else:
+                    for session_id in fit_measures_by_session_by_timepoint["session"]:
+                        timepoint_loss_list = [fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"][timepoint] for timepoint in fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"]]
+                        plot_timepoint_fit_measure(timepoint_loss_list=timepoint_loss_list, num_timepoints=num_timepoints, session_id=session_id)
             else:
                 raise ValueError("[ERROR][visualize_GLM_results] Function called with invalid parameter configuration.")
 
