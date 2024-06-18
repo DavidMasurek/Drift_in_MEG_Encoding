@@ -53,7 +53,7 @@ class BasicOperationsHelper:
         processing_channels_indices = {"grad": {}, "mag": {}}
         evoked = mne.read_evokeds(fif_file_path)[0]
 
-        logger.custom_debug(f"evoked.info: {evoked.info}")
+        #logger.custom_debug(f"evoked.info: {evoked.info}")
 
         for sensor_type in processing_channels_indices: # grad, mag
             channel_indices = mne.pick_types(evoked.info, meg=sensor_type)
@@ -725,7 +725,7 @@ class DatasetHelper(MetadataHelper):
                         # Filter meg data by selected channels
                         meg_data[sensor_type] = meg_data[sensor_type][:,channel_indices,:]
 
-                # Cut relevant timepoints. Range is -0.5 – 0.3 s. We want timepoints 50-250
+                # Cut relevant timepoints. Range is -0.5 – 0.3 s. We want 50-250ms (timepoints 200-300)
                 if self.timepoint_min is not None and self.timepoint_max is not None:
                     for sensor_type in selected_channel_indices:
                         if selected_channel_indices[sensor_type]:
@@ -1462,8 +1462,11 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
 
 class VisualizationHelper(GLMHelper):
-    def __init__(self, **kwargs):
+    def __init__(self, n_grad: int, n_mag: int, **kwargs):
         super().__init__(**kwargs)
+
+        self.n_grad = n_grad
+        self.n_mag = n_mag
 
     def visualize_self_prediction(self, var_explained:bool=True, only_self_pred:bool=False, all_sessions_combined:bool=False):
         if var_explained:
@@ -1806,7 +1809,7 @@ class VisualizationHelper(GLMHelper):
                 self.save_plot_as_file(plt=epochs_plot, plot_folder=plot_folder, plot_file=plot_file, plot_type="mne")
 
 
-    def visualize_meg_ERP_style(self, plot_norms: list = ["mean_centered_ch_t"]):
+    def visualize_meg_ERP_style(self, plot_norms: list):
         """
         Visualizes meg data in ERP fashion, averaged over sessions and channels.
         """
@@ -1855,8 +1858,9 @@ class VisualizationHelper(GLMHelper):
                 plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_plot.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
-    def visualize_model_perspective(self, plot_norms: list = ["mean_centered_ch_t"], seperate_plots=False):
+    def visualize_model_perspective(self, plot_norms: list, seperate_plots=False):
         """
+        DEPRECATED. Replaced by new_visualize_model_perspective
         Visualizes meg data from the regression models perspective. This means, we plot the values over the epochs for each timepoint, averaged over the sensors.
         """
         for session_id_num in self.session_ids_num:
@@ -1951,7 +1955,89 @@ class VisualizationHelper(GLMHelper):
                     plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_timepoint-overview.png"
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
+    def new_visualize_model_perspective(self, plot_norms: list, seperate_plots=False):
+        """
+        Visualizes meg data from the regression models perspective. This means, we plot the values over the epochs for each timepoint, one line for each selected sensor.
+        """
+        for session_id_num in self.session_ids_num:
+            # Use defaultdict to automatically create missing keys
+            session_dict = self.recursive_defaultdict()
+            for normalization in plot_norms:
+                # Load meg data and split into grad and mag
+                meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
+                meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
 
+                n_train = len(meg_data["train"])
+                n_total = n_train + len(meg_data["test"])
+                n_channels = self.n_grad + self.n_mag
+
+                # Extract channel names for indices
+                selected_channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
+                logger.custom_debug(f"selected_channel_indices: {selected_channel_indices}")
+                channel_names_by_indices = {}
+                ch_ix = 0
+                for sensor_type in selected_channel_indices:
+                    for sensor in selected_channel_indices[sensor_type]:
+                        channel_names_by_indices[ch_ix] = selected_channel_indices[sensor_type][sensor]
+                        ch_ix += 1
+                
+                timepoints = np.array(list(range(1 + self.timepoint_max - self.timepoint_min)))
+
+                # Select timepoints to plot (f.e. 10 total, every 60th)
+                plot_timepoints = []
+                timepoint_plot_interval = 20
+
+                for timepoint_index in range(min(timepoints), max(timepoints)+1, timepoint_plot_interval):
+                    plot_timepoints.append(timepoint_index)
+                n_plot_timepoints = len(plot_timepoints)
+                
+                num_epochs_for_x_axis = 0
+
+                # Plotting
+                for timepoint_idx in plot_timepoints:
+                    timepoint_name = self.timepoint_min+timepoint_idx
+                    legend_elements = []  # List to hold the custom legend elements (colors for norms)
+                    plt.figure(figsize=(10, 6))
+                    # Filter meg for timepoint
+                    meg_timepoint = meg_data_complete[:,:,timepoint_idx]  # [epochs, channels, timepoints]
+
+                    for channel_idx in range(n_channels):
+                        # Filter meg for channel
+                        meg_timepoint_channel = meg_timepoint[:,channel_idx] # [epochs, channels]
+                        plt.plot(list(range(n_total)), meg_timepoint_channel, linewidth=0.2, color=f'C{channel_idx}')
+
+                        legend_elements.append(Line2D([0], [0], color=f'C{channel_idx}', lw=4, label=channel_names_by_indices[channel_idx]))
+
+                    # TODO: Color train and test seperately
+
+                    # Set x-axis to show full range of epochs
+                    #plt.xlim(1, n_total)
+
+                    plt.xlabel('Epochs in Session)')
+                    plt.ylabel('MEG Value')
+                    plt.axvline(x=n_train, color='r', linestyle='--', linewidth=1, label='Train/Test Split')
+                    plt.title(f'MEG Signal over Channels. Timepoint: {timepoint_name} \n Session {session_id_num} {normalization}')
+                    plt.legend(handles=legend_elements, title="Channel")
+                    
+                    # Save plot
+                    plot_folder = f"data_files/visualizations/meg_data/new_regression_model_perspective/{normalization}/timepoint_{timepoint_name}"
+                    plot_file = f"Session-{session_id_num}_timepoint-overview.png"
+                    self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+
+                    """
+                    # Select epochs to plot (f.e. 200 total, every 10th or smth)
+                    plot_epochs = []
+                    epoch_plot_interval = 10
+                    for epoch in range(1, num_epochs_for_x_axis, epoch_plot_interval):
+                        plot_epochs.append(epoch)
+
+                    plot_epochs = np.array(plot_epochs)
+                    epochs = np.array(list(range(num_epochs)))
+
+                    filtered_epoch_meg = meg_norm_sensor[plot_epochs, :]
+                    """ 
+
+                 
 
 class DebuggingHelper(VisualizationHelper):
     def __init__(self, norms:list, subject_id: str = "02"):

@@ -20,6 +20,9 @@ subject_ids = ["02"]
 normalizations = ["mean_centered_ch_then_global_z"]  # "no_norm",  # ["min_max", "mean_centered_ch_t", "median_centered_ch_t", "robust_scaling", "no_norm"]
 lock_event = "fixation"  # "saccade" "fixation"
 meg_channels = [1731, 1921, 2111, 2341, 2511]
+n_grad = 0
+n_mag = 5
+assert len(meg_channels) == n_grad+n_mag, "Inconsistency in chosen channels and n_grad/n_mag."
 timepoint_min = 200
 timepoint_max = 300
 alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
@@ -29,7 +32,7 @@ ann_model = "Alexnet"  # "Resnet50"
 module_name =  "features.10" # "fc"
 batch_size = 32
 
-logger_level = 25
+logger_level = 22
 debugging = True if logger_level <= 23 else False  # TODO: Use this as class attribute rather than passing it to every function
 
 # Choose Calculations to be performed
@@ -39,8 +42,8 @@ create_crop_datset_numpy = False
 create_meg_dataset = False
 extract_features = False
 perform_pca = False
-train_GLM = True
-generate_predictions_with_GLM = True
+train_GLM = False
+generate_predictions_with_GLM = False
 visualization = True
 
 use_pca_features = True
@@ -132,7 +135,7 @@ for run in range(run_pipeline_n_times):
 
         ##### Visualization #####
         if visualization:
-            visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size)
+            visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag)
 
             # Visualize meg data with mne
             #visualization_helper.visualize_meg_epochs_mne()
@@ -141,8 +144,8 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_meg_ERP_style(plot_norms=["no_norm", "mean_centered_ch_t"])  # ,"robust_scaling_ch_t", "z_score_ch_t", "robust_scaling", "z_score"
 
             # Visualize encoding model performance
-            visualization_helper.visualize_self_prediction(var_explained=True, only_self_pred=True, all_sessions_combined=all_sessions_combined)
-            visualization_helper.visualize_self_prediction(var_explained=True, only_self_pred=False, all_sessions_combined=all_sessions_combined)
+            #visualization_helper.visualize_self_prediction(var_explained=True, only_self_pred=True, all_sessions_combined=all_sessions_combined)
+            #visualization_helper.visualize_self_prediction(var_explained=True, only_self_pred=False, all_sessions_combined=all_sessions_combined)
 
             # Visualize prediction results
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
@@ -152,7 +155,7 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
             
             # Visualize model perspective (values by timepoint)
-            #visualization_helper.visualize_model_perspective(plot_norms=["no_norm"], seperate_plots=False)  # , "no_norm"
+            visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_z"], seperate_plots=False)  # , "no_norm"
 
             logger.custom_info("Visualization completed. \n \n")
             
