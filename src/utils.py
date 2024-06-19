@@ -681,7 +681,7 @@ class DatasetHelper(MetadataHelper):
                 logger.custom_debug(f"Session {session_id} Total Datapoints: {n_datapoints_session}")           
 
 
-    def create_meg_dataset(self) -> None:
+    def create_meg_dataset(self, interpolate_outliers=False) -> None:
         """
         Creates the crop dataset with all crops in the combined_metadata (crops for which meg data exists)
         """
@@ -873,6 +873,44 @@ class DatasetHelper(MetadataHelper):
 
                 logger.custom_debug(f"[Session {session_id}]: meg_data_normalized['train'].shape: {meg_data_normalized_by_session[session_id]['train'].shape}")
                 logger.custom_debug(f"[Session {session_id}]: meg_data_normalized['test'].shape: {meg_data_normalized_by_session[session_id]['test'].shape}")
+
+                # If selected, interpolate all outliers (defined as +- 3 std)
+                if interpolate_outliers:
+                    logger.custom_debug(f"\n \n Performing Interpolation for session {session_id}")
+                    logger.custom_debug(f"shapes before interpolation: Train: {meg_data_normalized_by_session[session_id]['train'].shape}, Test: {meg_data_normalized_by_session[session_id]['test'].shape}")
+                    meg_data_combined = np.concatenate((meg_data_normalized_by_session[session_id]["train"], meg_data_normalized_by_session[session_id]["test"]))
+                    n_outliers_in_session = 0
+                    # Iterate over sensors
+                    for sensor in range(meg_data_combined.shape[1]):
+                        # Iterate over timepoint
+                        for timepoint in range(meg_data_combined.shape[2]):
+                            # Interpolate over all epochs for a given sensor, timepoint combination
+                            meg_data_ch_t = meg_data_combined[:,sensor,timepoint] # n values where n = num epochs
+                            indices = [index for index in range(len(meg_data_ch_t))]
+                            meg_data_ch_t_non_outliers = {index: meg_data_ch_t[index] for index in indices if abs(meg_data_ch_t[index]) <= 3}
+                            idx_to_be_interpolated = [idx for idx in indices if idx not in meg_data_ch_t_non_outliers.keys()]
+
+                            # If outliers exist for this session, channel and timepoint
+                            if idx_to_be_interpolated:
+                                interpolated_values = np.interp(idx_to_be_interpolated, list(meg_data_ch_t_non_outliers.keys()), list(meg_data_ch_t_non_outliers.values()))
+                                meg_data_ch_t_interpolated = meg_data_ch_t[idx_to_be_interpolated] = interpolated_values
+
+                                #logger.custom_info(f"meg_data_ch_t.shape: {meg_data_ch_t.shape}")
+                                #logger.custom_info(f"len(indices): {len(indices)}")
+                                #logger.custom_info(f"len(list(meg_data_ch_t_non_outliers.keys())): {len(list(meg_data_ch_t_non_outliers.keys()))}")
+                                #logger.custom_info(f"len(idx_to_be_interpolated): {len(idx_to_be_interpolated)}")
+
+                                #logger.custom_info(f"meg_data_ch_t_interpolated.shape: {meg_data_ch_t_interpolated.shape}")
+
+                                meg_data_combined[idx_to_be_interpolated,sensor,timepoint] = meg_data_ch_t_interpolated
+                                n_outliers_in_session += len(idx_to_be_interpolated)
+                    # Build back into split # n_train_epochs
+                    meg_data_normalized_by_session[session_id]["train"] = meg_data_combined[:n_train_epochs,:,:]
+                    meg_data_normalized_by_session[session_id]["test"] = meg_data_combined[n_train_epochs:,:,:]
+
+                    logger.custom_debug(f"shapes after interpolation: Train: {meg_data_normalized_by_session[session_id]['train'].shape}, Test: {meg_data_normalized_by_session[session_id]['test'].shape}")
+                    logger.custom_info(f"[session_id: {session_id}]n_outliers_in_session: {n_outliers_in_session}")
+
 
                 # Export meg dataset arrays to .npz
                 self.export_split_data_as_file(session_id=session_id, 
@@ -1124,9 +1162,13 @@ class ExtractionHelper(BasicOperationsHelper):
                 pca_features = {"train": None, "test": None}
                 # Get ANN features for session
                 ann_features = self.load_split_data_from_file(session_id_num=session_id, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
+                logger.custom_debug(f"[Session {session_id}]: ann_features['train'].shape: {ann_features['train'].shape}")
+
                 ann_features_pca, explained_var = apply_pca_to_features(ann_features)
-                logger.custom_debug(f"[Session {session_id}]: Explained Variance: {explained_var}")
-                
+
+                logger.custom_info(f"[Session {session_id}]: Explained Variance: {explained_var}")
+                logger.custom_debug(f"[Session {session_id}]: ann_features_pca['train'].shape: {ann_features_pca['train'].shape}")
+
                 for split in ann_features_pca:
                     logger.custom_debug(f"Session {session_id}: {split}_features.shape: {ann_features_pca[split].shape}")
 
@@ -1298,13 +1340,13 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         predictions = ridge_model.predict(X_test, downscale_features=downscale_features)
 
                         if store_timepoint_based_losses:
-                            mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = {"timepoint":{}}
+                            variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = {"timepoint":{}}
                             # Calculate loss seperately for each timepoint/model
                             n_timepoints = predictions.shape[2]
                             for t in range(n_timepoints):
                                 var_explained = r2_score(Y_test[:,:,t].reshape(-1), predictions[:,:,t].reshape(-1))
                                 # Save loss
-                                mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = var_explained
+                                variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = var_explained
                         else:
                             # Calculate the mean squared error across all flattened features and timepoints
                             mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
@@ -1327,17 +1369,19 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                             variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = var_explained
 
                 # Store loss dict
-                if store_timepoint_based_losses:
-                    mse_type_of_content = "mse_losses_timepoint"
-                else:
-                    mse_type_of_content = "mse_losses"
-
-                self.save_dict_as_json(type_of_content=mse_type_of_content, dict_to_store=mse_session_losses, type_of_norm=normalization)
-                
                 if not store_timepoint_based_losses:
+                    self.save_dict_as_json(type_of_content="mse_losses", dict_to_store=mse_session_losses, type_of_norm=normalization)
                     self.save_dict_as_json(type_of_content="var_explained", dict_to_store=variance_explained_dict, type_of_norm=normalization, predict_train_data=predict_train_data)
-                
-                logger.custom_info(f"keys in var dict: {variance_explained_dict['session_mapping'].keys()}")
+                else:
+                    storage_folder = f"data_files/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                    os.makedirs(storage_folder, exist_ok=True)
+                    json_storage_file = f"var_explained_timepoints_dict.json"
+                    json_storage_path = os.path.join(storage_folder, json_storage_file)
+
+                    with open(json_storage_path, 'w') as file:
+                        # Serialize and save the dictionary to the file
+                        json.dump(variance_explained_dict, file, indent=4)
+
                 for session_id in variance_explained_dict["session_mapping"]:
                     session_explained_var = variance_explained_dict['session_mapping'][session_id]['session_pred'][session_id]
                     logger.custom_info(f"[Session {session_id}]: Variance_explained_dict: {session_explained_var}")
@@ -1468,7 +1512,7 @@ class VisualizationHelper(GLMHelper):
         self.n_grad = n_grad
         self.n_mag = n_mag
 
-    def visualize_self_prediction(self, var_explained:bool=True, only_self_pred:bool=False, all_sessions_combined:bool=False):
+    def visualize_self_prediction(self, var_explained:bool=True, pred_splits:list=["train","test"], all_sessions_combined:bool=False, plot_outliers:bool=False):
         if var_explained:
             type_of_fit_measure = "Variance Explained"
             type_of_content = "var_explained"
@@ -1478,10 +1522,9 @@ class VisualizationHelper(GLMHelper):
         
         if not all_sessions_combined:
             for normalization in self.normalizations:
-                if not only_self_pred:
-                    self_pred_measures = {"test": {}, "train": {}}
-                else:
-                    self_pred_measures = {"train": {}}
+                self_pred_measures = {}
+                for pred_split in pred_splits:
+                    self_pred_measures[pred_split] = {}
                 for pred_type in self_pred_measures:
                     predict_train_data = True if pred_type == "train" else False
                     # Load loss/var explained dict
@@ -1493,10 +1536,12 @@ class VisualizationHelper(GLMHelper):
                             fit_measure = session_fit_measures['session_mapping'][session_id]['session_pred'][session_id]
                             self_pred_measures[pred_type]["sessions"][session_id] = fit_measure
 
-                logger.custom_info(f"self_pred_measures: {self_pred_measures}")
+                logger.custom_debug(f"self_pred_measures: {self_pred_measures}")
         else:
             for normalization in self.normalizations:
-                self_pred_measures = {"train": {}, "test": {}} if not only_self_pred else {"train": {}}
+                self_pred_measures = {}
+                for pred_split in pred_splits:
+                    self_pred_measures[pred_split] = {}
                 for pred_type in self_pred_measures:
                     predict_train_data = True if pred_type == "train" else False
                     # Read fit measure combined over all sessions
@@ -1513,31 +1558,47 @@ class VisualizationHelper(GLMHelper):
         # Plot fit measure as of each sessions model (trained on train split) predicting same-sessions test split
         plt.figure(figsize=(10, 6))
 
+        color_and_marker_by_split = {"train": {"markertype": '*', "color": '#1f77b4'}, "test": {"markertype": 'o', "color": '#FF8C00'}}
+
         if not all_sessions_combined:
             # Plot values for test prediction
             for pred_type in self_pred_measures:
-                markertype = 'o' if pred_type == "test" else '*'
-                plt.plot(self_pred_measures[pred_type]["sessions"].keys(), self_pred_measures[pred_type]["sessions"].values(), marker=markertype, label=f'{pred_type} pred')
+                markertype = color_and_marker_by_split[pred_type]["markertype"]
+                color = color_and_marker_by_split[pred_type]["color"]
+                plt.plot(self_pred_measures[pred_type]["sessions"].keys(), self_pred_measures[pred_type]["sessions"].values(), marker=markertype, color=color, label=f'{pred_type} pred')
         
             plt.xlabel(f'Number of Sesssion')
             plt.ylabel(f'{type_of_fit_measure}')
             plt.grid(True)
             plt.legend(loc='upper right')
+
+            # Add outliers (values larger +-3 z)
+            if plot_outliers:
+                outliers = {
+                    1: 2649, 2: 5443, 3: 1018, 4: 9134, 5: 1618, 6: 4535, 7: 9993, 8: 2696, 9: 6025, 10: 6911
+                }
+                ax2 = plt.gca().twinx()
+                ax2.plot(self_pred_measures[pred_type]["sessions"].keys(), outliers.values(), color='green', marker='d', linestyle='-', label='Number of Values greater +- 3z')
+                ax2.set_ylabel('Number of Outliers')
+                ax2.legend(loc='upper right')
+
             plt.title(f'{type_of_fit_measure} Session Self-prediction with Norm {normalization}, {date.today()}')
             plt.grid(True)
             plt.show()
 
             # Save the plot to a file
             plot_folder = f"data_files/visualizations/encoding_performance/subject_{self.subject_id}/norm_{normalization}"
-            plot_file = f"{type_of_fit_measure}_session_self_prediction_{normalization}_only_self_pred_{only_self_pred}.png"
+            pred_split_addition = pred_split[0] if len(pred_splits) == 1 else "both"
+            plot_file = f"{type_of_fit_measure}_session_self_prediction_{normalization}_pred_splits_{pred_split_addition}.png"
             self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
         else:
             logger.custom_debug(f"all_sessions_combined: self_pred_measures: {self_pred_measures}")
             
             # Plot values for test prediction
             self_pred_vals = [self_pred_measures[pred_type][type_of_content] for pred_type in self_pred_measures]
-            markertype = 'o' if pred_type == "test" else '*'
-            plt.plot(self_pred_measures.keys(), self_pred_vals, marker=markertype, label=f'{pred_type} pred')
+            markertype = color_and_marker_by_split[pred_type]["markertype"]
+            color = color_and_marker_by_split[pred_type]["color"]
+            plt.plot(self_pred_measures.keys(), self_pred_vals, marker=markertype, color=color, label=f'{pred_type} pred')
 
             plt.xlabel(f'Predicted Datasplit')
             plt.ylabel(f'{type_of_fit_measure}')
@@ -1549,7 +1610,8 @@ class VisualizationHelper(GLMHelper):
 
             # Save the plot to a file
             plot_folder = f"data_files/visualizations/encoding_performance/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}"
-            plot_file = f"{type_of_fit_measure}_all_sessions_combined_self_prediction_{normalization}_only_self_pred_{only_self_pred}.png"
+            pred_split_addition = pred_split[0] if len(pred_splits) == 1 else "both"
+            plot_file = f"{type_of_fit_measure}_all_sessions_combined_self_prediction_{normalization}_pred_splits_{pred_split_addition}.png"
             self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
     def visualize_GLM_results(self, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True, var_explained:bool = True):
@@ -1559,7 +1621,7 @@ class VisualizationHelper(GLMHelper):
         session_day_differences = self.get_session_date_differences()
 
         if by_timepoints:
-            type_of_content = "mse_losses_timepoint"
+            type_of_content = "var_explained_timepoint"
         elif var_explained:
             type_of_content = "var_explained"
         else:
@@ -1573,7 +1635,16 @@ class VisualizationHelper(GLMHelper):
         fit_measure_norms = {}
         for normalization in self.normalizations:
             # Load loss/var explained dict
-            session_fit_measures = self.read_dict_from_json(type_of_content=type_of_content, type_of_norm=normalization)
+            if type_of_content != "var_explained_timepoint":
+                session_fit_measures = self.read_dict_from_json(type_of_content=type_of_content, type_of_norm=normalization)
+            else:
+                storage_folder = f"data_files/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                json_storage_file = f"var_explained_timepoints_dict.json"
+                json_storage_path = os.path.join(storage_folder, json_storage_file)
+
+                with open(json_storage_path, 'r') as file:
+                    session_fit_measures = json.load(file)
+
             fit_measure_norms[normalization] = session_fit_measures
 
             # Control values
@@ -1731,9 +1802,11 @@ class VisualizationHelper(GLMHelper):
                     plot_folder = f"data_files/visualizations/timepoint_model_comparison/subject_{self.subject_id}/norm_{normalization}"
                     if session_id is None:
                         plot_folder += "/all_sessions_combined"  
+                        session_name_addition = ""
                     else:
-                        plot_folder += f"/session{session_id}"
-                    plot_file = f"fit_measure_timepoint_comparison_{normalization}.png"
+                        plot_folder += f""
+                        session_name_addition = f"_session{session_id}"
+                    plot_file = f"fit_measure_timepoint_comparison_{normalization}{session_name_addition}.png"
                     logger.custom_debug(f"plot_folder: {plot_folder}")
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
@@ -1973,7 +2046,6 @@ class VisualizationHelper(GLMHelper):
 
                 # Extract channel names for indices
                 selected_channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
-                logger.custom_debug(f"selected_channel_indices: {selected_channel_indices}")
                 channel_names_by_indices = {}
                 ch_ix = 0
                 for sensor_type in selected_channel_indices:
@@ -2001,6 +2073,9 @@ class VisualizationHelper(GLMHelper):
                     # Filter meg for timepoint
                     meg_timepoint = meg_data_complete[:,:,timepoint_idx]  # [epochs, channels, timepoints]
 
+                    # Count outliers
+                    n_outliers = sum(1 for meg_value in np.nditer(meg_timepoint) if abs(meg_value) > 2.5)
+
                     for channel_idx in range(n_channels):
                         # Filter meg for channel
                         meg_timepoint_channel = meg_timepoint[:,channel_idx] # [epochs, channels]
@@ -2016,7 +2091,7 @@ class VisualizationHelper(GLMHelper):
                     plt.xlabel('Epochs in Session)')
                     plt.ylabel('MEG Value')
                     plt.axvline(x=n_train, color='r', linestyle='--', linewidth=1, label='Train/Test Split')
-                    plt.title(f'MEG Signal over Channels. Timepoint: {timepoint_name} \n Session {session_id_num} {normalization}')
+                    plt.title(f'MEG Signal over Channels. \n Session: {session_id_num}. Timepoint: {timepoint_name} Norm: {normalization} \n N Outliers: {n_outliers}')
                     plt.legend(handles=legend_elements, title="Channel")
                     
                     # Save plot
