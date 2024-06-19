@@ -1519,6 +1519,8 @@ class VisualizationHelper(GLMHelper):
         else:
             type_of_fit_measure = "MSE"
             type_of_content = "mse_losses"
+
+        color_and_marker_by_split = {"train": {"markertype": '*', "color": '#1f77b4'}, "test": {"markertype": 'o', "color": '#FF8C00'}}
         
         if not all_sessions_combined:
             for normalization in self.normalizations:
@@ -1535,6 +1537,38 @@ class VisualizationHelper(GLMHelper):
                         for session_id in session_fit_measures['session_mapping']:
                             fit_measure = session_fit_measures['session_mapping'][session_id]['session_pred'][session_id]
                             self_pred_measures[pred_type]["sessions"][session_id] = fit_measure
+
+                # Plot values for test prediction
+                plt.figure(figsize=(10, 6))
+                for pred_type in self_pred_measures:
+                    markertype = color_and_marker_by_split[pred_type]["markertype"]
+                    color = color_and_marker_by_split[pred_type]["color"]
+                    plt.plot(self_pred_measures[pred_type]["sessions"].keys(), self_pred_measures[pred_type]["sessions"].values(), marker=markertype, color=color, label=f'{pred_type} pred')
+            
+                plt.xlabel(f'Number of Sesssion')
+                plt.ylabel(f'{type_of_fit_measure}')
+                plt.grid(True)
+                plt.legend(loc='upper right')
+
+                # Add outliers (values larger +-3 z)
+                if plot_outliers:
+                    outliers = {
+                        1: 2649, 2: 5443, 3: 1018, 4: 9134, 5: 1618, 6: 4535, 7: 9993, 8: 2696, 9: 6025, 10: 6911
+                    }
+                    ax2 = plt.gca().twinx()
+                    ax2.plot(self_pred_measures[pred_type]["sessions"].keys(), outliers.values(), color='green', marker='d', linestyle='-', label='Number of Values greater +- 3z')
+                    ax2.set_ylabel('Number of Outliers')
+                    ax2.legend(loc='upper right')
+
+                plt.title(f'{type_of_fit_measure} Session Self-prediction with Norm {normalization}, {date.today()}')
+                plt.grid(True)
+                plt.show()
+
+                # Save the plot to a file
+                plot_folder = f"data_files/visualizations/encoding_performance/subject_{self.subject_id}/norm_{normalization}"
+                pred_split_addition = pred_split[0] if len(pred_splits) == 1 else "both"
+                plot_file = f"{type_of_fit_measure}_session_self_prediction_{normalization}_pred_splits_{pred_split_addition}.png"
+                self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
                 logger.custom_debug(f"self_pred_measures: {self_pred_measures}")
         else:
@@ -1554,65 +1588,30 @@ class VisualizationHelper(GLMHelper):
                     self_pred_measures[pred_type] = {type_of_content: format(fit_measure[type_of_content], '.15f')}   # format to keep decimal notation in logs
 
                 logger.custom_debug(f"self_pred_measures: {self_pred_measures}")
-            
-        # Plot fit measure as of each sessions model (trained on train split) predicting same-sessions test split
-        plt.figure(figsize=(10, 6))
 
-        color_and_marker_by_split = {"train": {"markertype": '*', "color": '#1f77b4'}, "test": {"markertype": 'o', "color": '#FF8C00'}}
-
-        if not all_sessions_combined:
-            # Plot values for test prediction
-            for pred_type in self_pred_measures:
+                logger.custom_debug(f"all_sessions_combined: self_pred_measures: {self_pred_measures}")
+                
+                # Plot values for test prediction
+                plt.figure(figsize=(10, 6))
+                self_pred_vals = [self_pred_measures[pred_type][type_of_content] for pred_type in self_pred_measures]
                 markertype = color_and_marker_by_split[pred_type]["markertype"]
                 color = color_and_marker_by_split[pred_type]["color"]
-                plt.plot(self_pred_measures[pred_type]["sessions"].keys(), self_pred_measures[pred_type]["sessions"].values(), marker=markertype, color=color, label=f'{pred_type} pred')
-        
-            plt.xlabel(f'Number of Sesssion')
-            plt.ylabel(f'{type_of_fit_measure}')
-            plt.grid(True)
-            plt.legend(loc='upper right')
+                plt.plot(self_pred_measures.keys(), self_pred_vals, marker=markertype, color=color, label=f'{pred_type} pred')
 
-            # Add outliers (values larger +-3 z)
-            if plot_outliers:
-                outliers = {
-                    1: 2649, 2: 5443, 3: 1018, 4: 9134, 5: 1618, 6: 4535, 7: 9993, 8: 2696, 9: 6025, 10: 6911
-                }
-                ax2 = plt.gca().twinx()
-                ax2.plot(self_pred_measures[pred_type]["sessions"].keys(), outliers.values(), color='green', marker='d', linestyle='-', label='Number of Values greater +- 3z')
-                ax2.set_ylabel('Number of Outliers')
-                ax2.legend(loc='upper right')
+                plt.xlabel(f'Predicted Datasplit')
+                plt.ylabel(f'{type_of_fit_measure}')
+                plt.grid(True)
+                plt.legend(loc='upper right')
+                plt.title(f'{type_of_fit_measure} Self-prediction combined over all Sessions with Norm {normalization}, {date.today()}')
+                plt.grid(True)
+                plt.show()
 
-            plt.title(f'{type_of_fit_measure} Session Self-prediction with Norm {normalization}, {date.today()}')
-            plt.grid(True)
-            plt.show()
-
-            # Save the plot to a file
-            plot_folder = f"data_files/visualizations/encoding_performance/subject_{self.subject_id}/norm_{normalization}"
-            pred_split_addition = pred_split[0] if len(pred_splits) == 1 else "both"
-            plot_file = f"{type_of_fit_measure}_session_self_prediction_{normalization}_pred_splits_{pred_split_addition}.png"
-            self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
-        else:
-            logger.custom_debug(f"all_sessions_combined: self_pred_measures: {self_pred_measures}")
-            
-            # Plot values for test prediction
-            self_pred_vals = [self_pred_measures[pred_type][type_of_content] for pred_type in self_pred_measures]
-            markertype = color_and_marker_by_split[pred_type]["markertype"]
-            color = color_and_marker_by_split[pred_type]["color"]
-            plt.plot(self_pred_measures.keys(), self_pred_vals, marker=markertype, color=color, label=f'{pred_type} pred')
-
-            plt.xlabel(f'Predicted Datasplit')
-            plt.ylabel(f'{type_of_fit_measure}')
-            plt.grid(True)
-            plt.legend(loc='upper right')
-            plt.title(f'{type_of_fit_measure} Self-prediction combined over all Sessions with Norm {normalization}, {date.today()}')
-            plt.grid(True)
-            plt.show()
-
-            # Save the plot to a file
-            plot_folder = f"data_files/visualizations/encoding_performance/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}"
-            pred_split_addition = pred_split[0] if len(pred_splits) == 1 else "both"
-            plot_file = f"{type_of_fit_measure}_all_sessions_combined_self_prediction_{normalization}_pred_splits_{pred_split_addition}.png"
-            self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+                # Save the plot to a file
+                plot_folder = f"data_files/visualizations/encoding_performance/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}"
+                pred_split_addition = pred_split[0] if len(pred_splits) == 1 else "both"
+                plot_file = f"{type_of_fit_measure}_all_sessions_combined_self_prediction_{normalization}_pred_splits_{pred_split_addition}.png"
+                self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+                
 
     def visualize_GLM_results(self, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True, var_explained:bool = True):
         """
