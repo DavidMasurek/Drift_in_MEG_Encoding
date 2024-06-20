@@ -9,6 +9,7 @@ from setup_logger import setup_logger
 from datetime import datetime
 from collections import defaultdict
 from utils import BasicOperationsHelper, MetadataHelper, DatasetHelper, ExtractionHelper, GLMHelper, VisualizationHelper
+from sklearn.preprocessing  import RobustScaler
 
 # Add parent folder of src to path and change cwd
 __location__ = Path(__file__).parent.parent
@@ -16,15 +17,15 @@ sys.path.append(str(__location__))
 os.chdir(__location__)
 
 # Choose params
-subject_ids = ["02"]
-normalizations = ["mean_centered_ch_then_global_z"]  #, "no_norm", "mean_centered_ch_t", "robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
-lock_event = "fixation"  # "saccade" "fixation"
+subject_ids = ["02"]  # , # , "01", "03", "04", "05"
+normalizations = ["mean_centered_ch_then_global_robust_scaling", "no_norm", "mean_centered_ch_t"]  #, "no_norm", "mean_centered_ch_t", "robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
+lock_event = "saccade"  # "saccade" "fixation"
 meg_channels = [1731, 1921, 2111, 2341, 2511]
 n_grad = 0
 n_mag = 5
 assert len(meg_channels) == n_grad+n_mag, "Inconsistency in chosen channels and n_grad/n_mag."
-timepoint_min = 200
-timepoint_max = 300
+timepoint_min = 275  # fixation: 200
+timepoint_max = 375  # fixation: 300
 alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
 pca_components = 4
 ann_model = "Alexnet"  # "Resnet50"
@@ -38,20 +39,21 @@ debugging = True if logger_level <= 23 else False  # TODO: Use this as class att
 create_metadata = False
 create_train_test_split = False  # Careful! Everytime this is set to true, all following steps will be misalligned
 create_crop_datset_numpy = False
-create_meg_dataset = False
+create_meg_dataset = True
 extract_features = False
 perform_pca = False
-train_GLM = False
-generate_predictions_with_GLM = False
+train_GLM = True
+generate_predictions_with_GLM = True
 visualization = True
 
-interpolate_outliers = True  # Currently only implemented for mean_centered_ch_then_global_z! Cuts off everything over +-3 std
 use_pca_features = True
 
+interpolate_outliers = False  # Currently only implemented for mean_centered_ch_then_global_z! Cuts off everything over +-3 std
+
 # Debugging
+run_pipeline_n_times = 1
 store_timepoint_based_losses = False
 downscale_features = False
-run_pipeline_n_times = 1
 all_sessions_combined = False
 investigate_missing_metadata = False
 shuffle_train_labels = False
@@ -73,11 +75,11 @@ for run in range(run_pipeline_n_times):
             metadata_helper = MetadataHelper(subject_id=subject_id, lock_event=lock_event)
 
             # Read metadata of all available crops/images
-            #metadata_helper.create_crop_metadata_dict()
+            metadata_helper.create_crop_metadata_dict()
             # Read metadata of all available meg datapoints
             metadata_helper.create_meg_metadata_dict()
             # Create combined metadata that only contains timepoints for which crop and meg information exists
-            #metadata_helper.create_combined_metadata_dict(investigate_missing_metadata=investigate_missing_metadata)
+            metadata_helper.create_combined_metadata_dict(investigate_missing_metadata=investigate_missing_metadata)
 
             logger.custom_info("Metadata created.\n \n")
 
@@ -131,6 +133,8 @@ for run in range(run_pipeline_n_times):
             if generate_predictions_with_GLM:
                 glm_helper.predict_from_mapping(store_timepoint_based_losses=store_timepoint_based_losses, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
                 glm_helper.predict_from_mapping(store_timepoint_based_losses=store_timepoint_based_losses, predict_train_data=True, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
+                glm_helper.predict_from_mapping(store_timepoint_based_losses=True, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
+
 
                 logger.custom_info("Predictions generated. \n \n")
 
@@ -146,17 +150,17 @@ for run in range(run_pipeline_n_times):
 
             # Visualize encoding model performance
             visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["train","test"], all_sessions_combined=all_sessions_combined)
-            visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["test"], all_sessions_combined=all_sessions_combined)
+            #visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["test"], all_sessions_combined=all_sessions_combined)
 
             # Visualize prediction results
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
             visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["1","7","10"], var_explained=True)
-            #visualization_helper.visualize_GLM_results(by_timepoints=True, var_explained=True, separate_plots=True)
+            visualization_helper.visualize_GLM_results(by_timepoints=True, var_explained=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
             
             # Visualize model perspective (values by timepoint)
-            #visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_z"], seperate_plots=False)  # , "no_norm"
+            visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"
 
             logger.custom_info("Visualization completed. \n \n")
             

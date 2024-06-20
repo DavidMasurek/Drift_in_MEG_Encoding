@@ -53,7 +53,7 @@ class BasicOperationsHelper:
         processing_channels_indices = {"grad": {}, "mag": {}}
         evoked = mne.read_evokeds(fif_file_path)[0]
 
-        #logger.custom_debug(f"evoked.info: {evoked.info}")
+        logger.custom_debug(f"evoked.info: {evoked.info}")
 
         for sensor_type in processing_channels_indices: # grad, mag
             channel_indices = mne.pick_types(evoked.info, meg=sensor_type)
@@ -335,9 +335,11 @@ class BasicOperationsHelper:
             case "range_-1_to_1":
                 min_val = -1
                 max_val = 1
-                arr_min = np.min(data)
-                arr_max = np.max(data)
-                normalized_data = min_val + (arr - arr_min) * (max_val - min_val) / (arr_max - arr_min)
+                data_min = np.min(data)
+                data_max = np.max(data)
+                normalized_data = min_val + (data - data_min) * (max_val - min_val) / (data_max - data_min)
+                for normalized_value in np.nditer(normalized_data):
+                    assert normalized_value >= -1 and normalized_value <= 1, f"normalization {normalization} did not work correctly"
 
             case "mean_centered_ch":
                 # 0 centered by mean for each over all epochs and timepoints
@@ -702,7 +704,7 @@ class DatasetHelper(MetadataHelper):
 
         for session_id_char in self.session_ids_char:
             session_id_num = self.map_session_letter_id_to_num(session_id_char)
-            logger.custom_info(f"Creating meg dataset for session {session_id_num}")
+            logger.custom_debug(f"Creating meg dataset for session {session_id_num}")
             # Load session MEG data from .h5
             meg_data_file = f"as{self.subject_id}{session_id_char}_population_codes_{self.lock_event}_500hz_masked_False.h5"
             with h5py.File(os.path.join(meg_data_folder, meg_data_file), "r") as f:
@@ -710,8 +712,8 @@ class DatasetHelper(MetadataHelper):
                 meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a saccade: (2945, 204, 401), fixation: (2874, 204, 601) 
                 meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a saccade: (2945, 102, 401), fixation: (2874, 102, 601)
 
-                #logger.custom_debug(f"H5 f.attrs['times']: {f.attrs['times']}")
-                #logger.custom_debug(f"H5 len(f.attrs['times']): {len(f.attrs['times'])}")
+                logger.custom_debug(f"H5 f.attrs['times']: {f.attrs['times']}")
+                logger.custom_debug(f"H5 len(f.attrs['times']): {len(f.attrs['times'])}")
 
                 num_meg_timepoints = meg_data['grad'].shape[0]
 
@@ -735,7 +737,7 @@ class DatasetHelper(MetadataHelper):
 
                 # Create datasets based on specified normalizations
                 for normalization in self.normalizations:
-                    normalization_stage = normalization if normalization != "mean_centered_ch_then_global_z" else "mean_centered_ch"
+                    normalization_stage = normalization if normalization != "mean_centered_ch_then_global_robust_scaling" else "mean_centered_ch"
                     # Debugging
                     if session_id_num == "1" and normalization == "no_norm":
                         for sensor_type in selected_channel_indices:
@@ -794,7 +796,7 @@ class DatasetHelper(MetadataHelper):
                     for split in meg_split:
                         meg_split[split] = np.array(meg_split[split])
                         # Debugging
-                        if normalization == "mean_centered_ch_then_global_z":
+                        if normalization == "mean_centered_ch_then_global_robust_scaling":
                             n_epochs_two_step_norm[split] += meg_split[split].shape[0]
 
                     logger.custom_debug(f"[Session {session_id_num}]: Storing (intermediate) meg array with train shape {meg_split['train'].shape}")
@@ -803,6 +805,13 @@ class DatasetHelper(MetadataHelper):
 
                     if meg_timepoints_in_dataset != num_combined_metadata_timepoints:
                         raise ValueError("Number of timepoints in meg dataset and in combined metadata are not identical.")
+
+
+                    # Clip out outliers based on 0.3 and 99.7 percentile (except for two step norms, here it will be done later)
+                    if normalization not in ["mean_centered_ch_then_global_robust_scaling", "mean_centered_ch_then_global_z"]:
+                        q0_3, q99_7 = np.percentile(np.concatenate((meg_split["train"], meg_split["test"])), [0.3, 99.7], axis=None)
+                        for split in meg_split:
+                            meg_split[split] = np.clip(meg_split[split], a_min=q0_3, a_max=q99_7)
 
                     # Export meg dataset arrays to .npz
                     self.export_split_data_as_file(session_id=session_id_num, 
@@ -813,7 +822,7 @@ class DatasetHelper(MetadataHelper):
         logger.custom_debug(f"meg_timepoints_in_dataset after per-session normalization: {n_epochs_two_step_norm}")
         logger.custom_debug(f"combined train+test: {n_epochs_two_step_norm['train'] + n_epochs_two_step_norm['test']}")
 
-        if "mean_centered_ch_then_global_z" in self.normalizations:
+        if "mean_centered_ch_then_global_robust_scaling" in self.normalizations:
             #n_grad = len(selected_channel_indices["grad"])  # Needed when seperating sensor types
             #n_mag = len(selected_channel_indices["mag"])  # Needed when seperating sensor types
             # Load data for all sessions with mean_centering_ch already applied
@@ -843,8 +852,12 @@ class DatasetHelper(MetadataHelper):
                     meg_mean_centered_all_sessions = meg_data_session
                 else:
                     meg_mean_centered_all_sessions = np.concatenate((meg_mean_centered_all_sessions, meg_data_session))
-            # Apply z-norm across complete dataset (all sessions)
-            meg_data_normalized = self.normalize_array(meg_mean_centered_all_sessions, normalization="z_score")
+            # Apply robust scaling across complete dataset (all sessions)
+            meg_data_normalized = self.normalize_array(meg_mean_centered_all_sessions, normalization="robust_scaling")
+
+            # Clip out outliers based on 0.3 and 99.7 percentile
+            q0_3, q99_7 = np.percentile(meg_data_normalized, [0.3, 99.7], axis=None)
+            meg_data_normalized = np.clip(meg_data_normalized, a_min=q0_3, a_max=q99_7)
 
             logger.custom_debug(f"meg_data_normalized.shape: {meg_data_normalized.shape}")
             logger.custom_debug(f"meg_timepoints_in_dataset after final norm, before split into sessions: {meg_data_normalized.shape[0]}")
@@ -909,14 +922,14 @@ class DatasetHelper(MetadataHelper):
                     meg_data_normalized_by_session[session_id]["test"] = meg_data_combined[n_train_epochs:,:,:]
 
                     logger.custom_debug(f"shapes after interpolation: Train: {meg_data_normalized_by_session[session_id]['train'].shape}, Test: {meg_data_normalized_by_session[session_id]['test'].shape}")
-                    logger.custom_info(f"[session_id: {session_id}]n_outliers_in_session: {n_outliers_in_session}")
+                    logger.custom_debug(f"[session_id: {session_id}]n_outliers_in_session: {n_outliers_in_session}")
 
 
                 # Export meg dataset arrays to .npz
                 self.export_split_data_as_file(session_id=session_id, 
                                                 type_of_content="meg_data",
                                                 array_dict=meg_data_normalized_by_session[session_id],
-                                                type_of_norm="mean_centered_ch_then_global_z")
+                                                type_of_norm="mean_centered_ch_then_global_robust_scaling")
 
                 epoch_start_index = end_test_index
           
@@ -1384,7 +1397,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                 for session_id in variance_explained_dict["session_mapping"]:
                     session_explained_var = variance_explained_dict['session_mapping'][session_id]['session_pred'][session_id]
-                    logger.custom_info(f"[Session {session_id}]: Variance_explained_dict: {session_explained_var}")
+                    logger.custom_debug(f"[Session {session_id}]: Variance_explained_dict: {session_explained_var}")
         else:
             for normalization in self.normalizations:
                 logger.custom_info(f"Predicting from mapping for normalization {normalization}")
@@ -1484,7 +1497,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
             counts = Counter(self.selected_alphas)
             sorted_counts = sorted(counts.items(), key=lambda x: x[1], reverse=True)
-            logger.custom_info(f"selected alphas: {sorted_counts}")
+            logger.custom_debug(f"selected alphas: {sorted_counts}")
 
 
         def predict(self, X, downscale_features:bool=False):
