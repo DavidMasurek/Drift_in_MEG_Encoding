@@ -18,19 +18,29 @@ os.chdir(__location__)
 
 # Choose params
 subject_ids = ["02"]  # , # , "01", "03", "04", "05"
-normalizations = ["mean_centered_ch_then_global_robust_scaling", "no_norm", "mean_centered_ch_t"]  #, "no_norm", "mean_centered_ch_t", "robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
-lock_event = "saccade"  # "saccade" "fixation"
-meg_channels = [1731, 1921, 2111, 2341, 2511]
-n_grad = 0
-n_mag = 5
-assert len(meg_channels) == n_grad+n_mag, "Inconsistency in chosen channels and n_grad/n_mag."
-timepoint_min = 275  # fixation: 200
-timepoint_max = 375  # fixation: 300
-alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
-pca_components = 4
+lock_event = "saccade" # "saccade" "fixation"
+
+crop_size = 112  # 224
+
 ann_model = "Alexnet"  # "Resnet50"
 module_name =  "features.12" # "fc" # features.12 has 9216 dimensions
 batch_size = 32
+
+pca_components = 40
+
+meg_channels = [1731, 1921, 2111, 2341, 2511]
+n_grad = 0
+n_mag = 5
+timepoint_min = 275  # fixation: 200
+timepoint_max = 375  # fixation: 300
+
+normalizations = ["mean_centered_ch_then_global_robust_scaling", "no_norm", "mean_centered_ch_t"]  #, "no_norm", "mean_centered_ch_t", "robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
+
+fractional_ridge = True
+fractional_grid = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.])
+alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
+
+assert len(meg_channels) == n_grad+n_mag, "Inconsistency in chosen channels and n_grad/n_mag."
 
 logger_level = 25
 debugging = True if logger_level <= 23 else False  # TODO: Use this as class attribute rather than passing it to every function
@@ -39,14 +49,16 @@ debugging = True if logger_level <= 23 else False  # TODO: Use this as class att
 create_metadata = False
 create_train_test_split = False  # Careful! Everytime this is set to true, all following steps will be misalligned
 create_crop_datset_numpy = False
-create_meg_dataset = True
+create_meg_dataset = False
 extract_features = False
 perform_pca = False
-train_GLM = True
+train_GLM = False
 generate_predictions_with_GLM = True
 visualization = True
 
 use_pca_features = True
+z_score_features_before_pca = True
+use_ica_cleaned_data = True
 
 interpolate_outliers = False  # Currently only implemented for mean_centered_ch_then_global_z! Cuts off everything over +-3 std
 
@@ -72,7 +84,7 @@ for run in range(run_pipeline_n_times):
 
         ##### Process metadata for subject #####
         if create_metadata:
-            metadata_helper = MetadataHelper(subject_id=subject_id, lock_event=lock_event)
+            metadata_helper = MetadataHelper(crop_size=crop_size, subject_id=subject_id, lock_event=lock_event)
 
             # Read metadata of all available crops/images
             metadata_helper.create_crop_metadata_dict()
@@ -85,7 +97,7 @@ for run in range(run_pipeline_n_times):
 
         ##### Create crop and meg dataset based on metadata #####
         if create_train_test_split or create_crop_datset_numpy or create_meg_dataset:
-            dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations, chosen_channels=meg_channels, lock_event=lock_event, timepoint_min=timepoint_min, timepoint_max=timepoint_max)
+            dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations, chosen_channels=meg_channels, lock_event=lock_event, timepoint_min=timepoint_min, timepoint_max=timepoint_max, crop_size=crop_size)
 
             if create_train_test_split:
                 # Create train/test split based on sceneIDs (based on trial_ids)
@@ -101,7 +113,7 @@ for run in range(run_pipeline_n_times):
 
             if create_meg_dataset:
                 # Create meg dataset based on split
-                dataset_helper.create_meg_dataset(interpolate_outliers=interpolate_outliers)
+                dataset_helper.create_meg_dataset(use_ica_cleaned_data=use_ica_cleaned_data, interpolate_outliers=interpolate_outliers)
 
                 logger.custom_info("MEG datasets created. \n \n")
 
@@ -115,13 +127,13 @@ for run in range(run_pipeline_n_times):
                 logger.custom_info("Features extracted. \n \n")
 
             if perform_pca:
-                extraction_helper.reduce_feature_dimensionality(all_sessions_combined=all_sessions_combined)
+                extraction_helper.reduce_feature_dimensionality(z_score_features_before_pca=z_score_features_before_pca, all_sessions_combined=all_sessions_combined)
                 logger.custom_info("PCA applied to features. \n \n")
             
 
         ##### Train GLM from features to meg #####
         if train_GLM or generate_predictions_with_GLM:
-            glm_helper = GLMHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, lock_event=lock_event, ann_model=ann_model, module_name=module_name, batch_size=batch_size)
+            glm_helper = GLMHelper(fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, lock_event=lock_event, ann_model=ann_model, module_name=module_name, batch_size=batch_size, crop_size=crop_size)
 
             # Train GLM
             if train_GLM:
@@ -140,7 +152,7 @@ for run in range(run_pipeline_n_times):
 
         ##### Visualization #####
         if visualization:
-            visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag)
+            visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid)
 
             # Visualize meg data with mne
             #visualization_helper.visualize_meg_epochs_mne()

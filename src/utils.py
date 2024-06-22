@@ -23,6 +23,8 @@ from thingsvision import get_extractor
 
 from sklearn.decomposition import PCA
 from sklearn.linear_model import RidgeCV, ElasticNetCV
+import fracridge
+from fracridge import FracRidgeRegressorCV
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import r2_score
 from scipy.stats import linregress, pearsonr
@@ -410,10 +412,11 @@ class BasicOperationsHelper:
 
 
 class MetadataHelper(BasicOperationsHelper):
-    def __init__(self, **kwargs):
+    def __init__(self, crop_size, **kwargs):
         super().__init__(**kwargs)
 
-        self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{self.subject_id}_crops_metadata.csv"
+        self.crop_size = crop_size
+        self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{crop_size}/metadata/as{self.subject_id}_crops_metadata.csv"
         self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
 
 
@@ -621,7 +624,7 @@ class DatasetHelper(MetadataHelper):
         combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
 
         # Define path to read crops from
-        crop_folder_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/crops/as{self.subject_id}"
+        crop_folder_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{self.crop_size}/crops/as{self.subject_id}"
 
         datapoints_by_session_and_split = {"sessions": {}}
         # For each session: create crop datasets based on respective splits
@@ -683,7 +686,7 @@ class DatasetHelper(MetadataHelper):
                 logger.custom_debug(f"Session {session_id} Total Datapoints: {n_datapoints_session}")           
 
 
-    def create_meg_dataset(self, interpolate_outliers=False) -> None:
+    def create_meg_dataset(self, use_ica_cleaned_data=True, interpolate_outliers=False) -> None:
         """
         Creates the crop dataset with all crops in the combined_metadata (crops for which meg data exists)
         """
@@ -692,8 +695,10 @@ class DatasetHelper(MetadataHelper):
         combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
         meg_metadata = self.read_dict_from_json(type_of_content="meg_metadata")
 
-        meg_data_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
-
+        if use_ica_cleaned_data:
+            meg_data_folder = f"/share/klab/camme/aklimenok/avs-encoding/data/meg_input/as{self.subject_id}/fixation_ica_cleaned"
+        else:
+            meg_data_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
         # Select relevant channels
         selected_channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
 
@@ -1149,7 +1154,7 @@ class ExtractionHelper(BasicOperationsHelper):
             # Export numpy array to .npz
             self.export_split_data_as_file(session_id=session_id, type_of_content="ann_features", array_dict=features_split, ann_model=self.ann_model, module=self.module_name)
 
-    def reduce_feature_dimensionality(self, all_sessions_combined:bool = False):
+    def reduce_feature_dimensionality(self, z_score_features_before_pca:bool = True, all_sessions_combined:bool = False):
         """
         Reduces dimensionality of extracted features using PCA. This seems to be necessary to avoid overfit in the ridge Regression.
         """
@@ -1157,8 +1162,15 @@ class ExtractionHelper(BasicOperationsHelper):
             """
             Fits pca on train and test features  combined. Use fix amount of components to allow cross-session predictions
             """
+            ann_features_combined = np.concatenate((ann_features["train"], ann_features["test"]))
+            if z_score_features_before_pca:
+                ann_features_combined = self.normalize_array(data=ann_features_combined, normalization="z_score")
+                n_train = len(ann_features["train"])
+                ann_features["train"] = ann_features_combined[:n_train,:]
+                ann_features["test"] = ann_features_combined[n_train:,:]
+
             pca = PCA(n_components=self.pca_components)
-            pca.fit(np.concatenate((ann_features["train"], ann_features["test"])))
+            pca.fit(ann_features_combined)
             explained_var_per_component = pca.explained_variance_ratio_
             explained_var = 0
             for explained_var_component in explained_var_per_component:
@@ -1208,9 +1220,11 @@ class ExtractionHelper(BasicOperationsHelper):
 
 
 class GLMHelper(DatasetHelper, ExtractionHelper):
-    def __init__(self, alphas: list, pca_features:bool, **kwargs):
+    def __init__(self, fractional_grid:list, alphas:list, pca_features:bool, fractional_ridge:bool = True, **kwargs):
         super().__init__(**kwargs)
 
+        self.fractional_ridge = fractional_ridge
+        self.fractional_grid = fractional_grid
         self.alphas = alphas
         self.ann_features_type = "ann_features_pca" if pca_features else "ann_features"
 
@@ -1221,7 +1235,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         """
         def train_model(X_train:np.ndarray, Y_train: np.ndarray, normalization:str, all_sessions_combined:bool, session_id_num:str=None):
             # Initialize Helper class
-            ridge_model = GLMHelper.MultiDimensionalRidge(self) 
+            ridge_model = GLMHelper.MultiDimensionalRegression(self) 
 
             if downscale_features:
                 X_train = self.normalize_array(data=X_train, normalization="range_-1_to_1")
@@ -1330,7 +1344,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         ridge_models = pickle.load(file)
 
                     # Initialize MultiDim GLM class with stored models
-                    ridge_model = GLMHelper.MultiDimensionalRidge(self, models=ridge_models)
+                    ridge_model = GLMHelper.MultiDimensionalRegression(self, models=ridge_models)
 
                     # Generate predictions for test features over all sessions and evaluate them 
                     for session_id_pred in self.session_ids_num:
@@ -1412,7 +1426,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     ridge_models = pickle.load(file)
 
                 # Initialize MultiDim GLM class with stored models
-                ridge_model = GLMHelper.MultiDimensionalRidge(self, models=ridge_models)
+                ridge_model = GLMHelper.MultiDimensionalRegression(self, models=ridge_models)
 
                 # Generate predictions for test features evaluate them (or for train features to evaluate overfit)
                 # Collect ANN features and MEG data over sessions
@@ -1464,22 +1478,28 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         json.dump(dict_to_store, file, indent=4)
 
 
-    class MultiDimensionalRidge:
+    class MultiDimensionalRegression:
         """
-        Inner class to apply Ridge Regression over all timepoints. Enables training and prediction, as well as initialization of random weights for baseline comparison.
+        Inner class to apply (fractional) Ridge Regression over all timepoints. Enables training and prediction, as well as initialization of random weights for baseline comparison.
         """
         def __init__(self, GLM_helper_instance, models:list=[], random_weights:bool=False):
             self.GLM_helper_instance = GLM_helper_instance
             self.random_weights = random_weights
             self.models = models  # Standardly initialized as empty list, otherwise with passed, previously trained models
             self.selected_alphas = None
+            self.alphas = self.GLM_helper_instance.alphas
+
+            if GLM_helper_instance.fractional_ridge:
+                self.regression_model = FracRidgeRegressorCV()
+            else:
+                self.regression_model = RidgeCV(alphas=self.GLM_helper_instance.alphas)
 
         def fit(self, X=None, Y=None):
             n_features = X.shape[1]
             n_sensors = Y.shape[1]
             n_timepoints = Y.shape[2]
 
-            self.models = [RidgeCV(alphas=self.GLM_helper_instance.alphas) for _ in range(n_timepoints)]
+            self.models = [self.regression_model for _ in range(n_timepoints)]
             logger.custom_debug(f"Fit model with alphas {self.GLM_helper_instance.alphas}")
             if self.random_weights:
                 # Randomly initialize weights and intercepts
@@ -1490,14 +1510,18 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
             else:
                 for t in range(n_timepoints):
                     Y_t = Y[:, :, t]
-                    self.models[t].fit(X, Y_t)
+                    if self.GLM_helper_instance.fractional_ridge:
+                        self.models[t].fit(X, Y_t, frac_grid=self.GLM_helper_instance.fractional_grid)
+                    else:
+                        self.models[t].fit(X, Y_t)
 
-            # For each model (aka for each timepoint) store the alpha that was selected as best fit in RidgeCV
-            self.selected_alphas = [timepoint_model.alpha_ for timepoint_model in self.models]
+            if not self.GLM_helper_instance.fractional_ridge:
+                # For each model (aka for each timepoint) store the alpha that was selected as best fit in RidgeCV
+                self.selected_alphas = [timepoint_model.alpha_ for timepoint_model in self.models]
 
-            counts = Counter(self.selected_alphas)
-            sorted_counts = sorted(counts.items(), key=lambda x: x[1], reverse=True)
-            logger.custom_debug(f"selected alphas: {sorted_counts}")
+                counts = Counter(self.selected_alphas)
+                sorted_counts = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+                logger.custom_debug(f"selected alphas: {sorted_counts}")
 
 
         def predict(self, X, downscale_features:bool=False):
@@ -1505,9 +1529,16 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 X = self.GLM_helper_instance.normalize_array(data=X, normalization="range_-1_to_1")
 
             n_samples = X.shape[0]
-            n_sensors = self.models[0].coef_.shape[0]
+            n_sensors = self.models[0].coef_.shape[0] if not self.GLM_helper_instance.fractional_ridge else self.models[0].coef_.shape[1]
             n_timepoints = len(self.models)
             predictions = np.zeros((n_samples, n_sensors, n_timepoints))
+
+            #logger.custom_info(f"X.shape: {X.shape}")
+            #logger.custom_info(f"n_sensors: {n_sensors}")
+            #logger.custom_info(f"n_timepoints: {n_timepoints}")
+            #logger.custom_info(f"predictions: {predictions.shape}")
+            #logger.custom_info(f"self.models[0].coef_.shape: {self.models[0].coef_.shape}")
+
             for t, model in enumerate(self.models):
                 if self.random_weights:
                     # Use the random weights and intercept to predict; we are missing configurations implicitly achieved when calling .fit()
