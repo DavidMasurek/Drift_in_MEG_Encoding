@@ -360,8 +360,10 @@ class BasicOperationsHelper:
                 std_devs = np.std(data, axis=None)
 
                 # Use an epsilon to prevent division by zero
-                epsilon = 1e-100
-                std_devs += epsilon
+                #epsilon = 1e-100
+                #std_devs += epsilon
+                if std_devs == 0:
+                    raise ValueError("Normalization z_score: Division by zero immanent")
     
                 normalized_data = (data - means) / std_devs
 
@@ -681,7 +683,7 @@ class DatasetHelper(MetadataHelper):
                 logger.custom_debug(f"Session {session_id} Total Datapoints: {n_datapoints_session}")           
 
 
-    def create_meg_dataset(self, interpolate_outliers=False) -> None:
+    def create_meg_dataset(self, interpolate_outliers=False, clip_outliers=True) -> None:
         """
         Creates the crop dataset with all crops in the combined_metadata (crops for which meg data exists)
         """
@@ -735,7 +737,11 @@ class DatasetHelper(MetadataHelper):
 
                 # Create datasets based on specified normalizations
                 for normalization in self.normalizations:
-                    normalization_stage = normalization if normalization != "mean_centered_ch_then_global_z" else "mean_centered_ch"
+                    if normalization not in ["mean_centered_ch_then_global_z", "mean_centered_ch_then_global_robust_scaling"]:
+                        normalization_stage = normalization
+                    else:
+                        normalization_stage = "mean_centered_ch"
+
                     # Debugging
                     if session_id_num == "1" and normalization == "no_norm":
                         for sensor_type in selected_channel_indices:
@@ -813,116 +819,127 @@ class DatasetHelper(MetadataHelper):
         logger.custom_debug(f"meg_timepoints_in_dataset after per-session normalization: {n_epochs_two_step_norm}")
         logger.custom_debug(f"combined train+test: {n_epochs_two_step_norm['train'] + n_epochs_two_step_norm['test']}")
 
-        if "mean_centered_ch_then_global_z" in self.normalizations:
-            #n_grad = len(selected_channel_indices["grad"])  # Needed when seperating sensor types
-            #n_mag = len(selected_channel_indices["mag"])  # Needed when seperating sensor types
-            # Load data for all sessions with mean_centering_ch already applied
-            meg_mean_centered_all_sessions = None
-            metadata_by_session = self.recursive_defaultdict()
-            for session_id_num in self.session_ids_num:
-                # Get mean centered data for session
-                meg_data_session = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm="mean_centered_ch")
-                # Combine train and test
-                # Store num of epochs for later concatenation
-                metadata_by_session["session_id_num"][session_id_num]["n_train_epochs"] = np.shape(meg_data_session["train"])[0] 
-                metadata_by_session["session_id_num"][session_id_num]["n_test_epochs"] = np.shape(meg_data_session["test"])[0] 
+        two_step_norms = ["mean_centered_ch_then_global_z", "mean_centered_ch_then_global_robust_scaling"]
+        active_two_step_norms = [two_step_norm for two_step_norm in two_step_norms if two_step_norm in self.normalizations]
 
-                #logger.custom_debug(f"[Session {session_id_num}]: np.shape(meg_data_session['train']): {np.shape(meg_data_session['train'])}")
-                #logger.custom_debug(f"[Session {session_id_num}]: np.shape(meg_data_session['test']): {np.shape(meg_data_session['test'])}")
+        if active_two_step_norms:
+            for two_step_norm in active_two_step_norms:
+                #n_grad = len(selected_channel_indices["grad"])  # Needed when seperating sensor types
+                #n_mag = len(selected_channel_indices["mag"])  # Needed when seperating sensor types
+                # Load data for all sessions with mean_centering_ch already applied
+                meg_mean_centered_all_sessions = None
+                metadata_by_session = self.recursive_defaultdict()
+                for session_id_num in self.session_ids_num:
+                    # Get mean centered data for session
+                    meg_data_session = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm="mean_centered_ch")
+                    # Combine train and test
+                    # Store num of epochs for later concatenation
+                    metadata_by_session["session_id_num"][session_id_num]["n_train_epochs"] = np.shape(meg_data_session["train"])[0] 
+                    metadata_by_session["session_id_num"][session_id_num]["n_test_epochs"] = np.shape(meg_data_session["test"])[0] 
 
-                #logger.custom_debug(f"np.shape(meg_data_session['test'])[0] : {np.shape(meg_data_session['test'])[0] }")
-                #logger.custom_debug("n_train_epochs:", metadata_by_session["session_id_num"]["n_train_epochs"])   
-                #logger.custom_debug("n_test_epochs:", metadata_by_session["session_id_num"]["n_test_epochs"]) 
+                    #logger.custom_debug(f"[Session {session_id_num}]: np.shape(meg_data_session['train']): {np.shape(meg_data_session['train'])}")
+                    #logger.custom_debug(f"[Session {session_id_num}]: np.shape(meg_data_session['test']): {np.shape(meg_data_session['test'])}")
 
-                meg_data_session = np.concatenate((meg_data_session["train"], meg_data_session["test"]))
-                
-                # TODO: Seperate sensor types if required
+                    #logger.custom_debug(f"np.shape(meg_data_session['test'])[0] : {np.shape(meg_data_session['test'])[0] }")
+                    #logger.custom_debug("n_train_epochs:", metadata_by_session["session_id_num"]["n_train_epochs"])   
+                    #logger.custom_debug("n_test_epochs:", metadata_by_session["session_id_num"]["n_test_epochs"]) 
 
-                # Concatenate over sessions
-                if meg_mean_centered_all_sessions is None:
-                    meg_mean_centered_all_sessions = meg_data_session
-                else:
-                    meg_mean_centered_all_sessions = np.concatenate((meg_mean_centered_all_sessions, meg_data_session))
-            # Apply z-norm across complete dataset (all sessions)
-            meg_data_normalized = self.normalize_array(meg_mean_centered_all_sessions, normalization="z_score")
+                    meg_data_session = np.concatenate((meg_data_session["train"], meg_data_session["test"]))
+                    
+                    # TODO: Seperate sensor types if required
 
-            logger.custom_debug(f"meg_data_normalized.shape: {meg_data_normalized.shape}")
-            logger.custom_debug(f"meg_timepoints_in_dataset after final norm, before split into sessions: {meg_data_normalized.shape[0]}")
+                    # Concatenate over sessions
+                    if meg_mean_centered_all_sessions is None:
+                        meg_mean_centered_all_sessions = meg_data_session
+                    else:
+                        meg_mean_centered_all_sessions = np.concatenate((meg_mean_centered_all_sessions, meg_data_session))
+                # Apply z-norm across complete dataset (all sessions)
+                global_norm = "robust_scaling" if two_step_norm == "mean_centered_ch_then_global_robust_scaling" else "z_score"
+                meg_data_normalized = self.normalize_array(meg_mean_centered_all_sessions, normalization=global_norm)
 
-            # Seperate into sessions and train/split again
-            meg_data_normalized_by_session = self.recursive_defaultdict()
-            epoch_start_index = 0
-            for session_id in self.session_ids_num:
-                n_train_epochs = metadata_by_session["session_id_num"][session_id]["n_train_epochs"]
-                n_test_epochs = metadata_by_session["session_id_num"][session_id]["n_test_epochs"]
+                if clip_outliers:
+                    # Clip out outliers based on 0.1 and 99.9 percentile (+-3z)
+                    q0_3, q99_7 = np.percentile(meg_data_normalized, [0.3, 99.7], axis=None)
+                    logger.custom_info(f"q0_3, q99_7: {q0_3, q99_7}")
+                    meg_data_normalized = np.clip(meg_data_normalized, a_min=q0_3, a_max=q99_7)
 
-                #logger.custom_debug(f"n_train_epochs: {n_train_epochs}")
-                #logger.custom_debug(f"n_test_epochs: {n_test_epochs}")
+                logger.custom_debug(f"meg_data_normalized.shape: {meg_data_normalized.shape}")
+                logger.custom_debug(f"meg_timepoints_in_dataset after final norm, before split into sessions: {meg_data_normalized.shape[0]}")
 
-                end_train_index = epoch_start_index + n_train_epochs
-                end_test_index = end_train_index + n_test_epochs
+                # Seperate into sessions and train/split again
+                meg_data_normalized_by_session = self.recursive_defaultdict()
+                epoch_start_index = 0
+                for session_id in self.session_ids_num:
+                    n_train_epochs = metadata_by_session["session_id_num"][session_id]["n_train_epochs"]
+                    n_test_epochs = metadata_by_session["session_id_num"][session_id]["n_test_epochs"]
 
-                #logger.custom_debug(f"end_train_index: {end_train_index}")
-                #logger.custom_debug(f"end_test_index: {end_test_index}")
+                    #logger.custom_debug(f"n_train_epochs: {n_train_epochs}")
+                    #logger.custom_debug(f"n_test_epochs: {n_test_epochs}")
 
-                meg_data_session_train = meg_data_normalized[epoch_start_index:end_train_index,:,:]
-                meg_data_session_test = meg_data_normalized[end_train_index:end_test_index,:,:]
+                    end_train_index = epoch_start_index + n_train_epochs
+                    end_test_index = end_train_index + n_test_epochs
 
-                meg_data_normalized_by_session[session_id]["train"] = meg_data_session_train
-                meg_data_normalized_by_session[session_id]["test"] = meg_data_session_test
+                    #logger.custom_debug(f"end_train_index: {end_train_index}")
+                    #logger.custom_debug(f"end_test_index: {end_test_index}")
 
-                logger.custom_debug(f"[Session {session_id}]: meg_data_normalized['train'].shape: {meg_data_normalized_by_session[session_id]['train'].shape}")
-                logger.custom_debug(f"[Session {session_id}]: meg_data_normalized['test'].shape: {meg_data_normalized_by_session[session_id]['test'].shape}")
+                    meg_data_session_train = meg_data_normalized[epoch_start_index:end_train_index,:,:]
+                    meg_data_session_test = meg_data_normalized[end_train_index:end_test_index,:,:]
 
-                # If selected, interpolate all outliers (defined as +- 3 std)
-                if interpolate_outliers:
-                    logger.custom_debug(f"\n \n Performing Interpolation for session {session_id}")
-                    logger.custom_debug(f"shapes before interpolation: Train: {meg_data_normalized_by_session[session_id]['train'].shape}, Test: {meg_data_normalized_by_session[session_id]['test'].shape}")
-                    meg_data_combined = np.concatenate((meg_data_normalized_by_session[session_id]["train"], meg_data_normalized_by_session[session_id]["test"]))
-                    n_outliers_in_session = 0
-                    # Iterate over sensors
-                    for sensor in range(meg_data_combined.shape[1]):
-                        # Iterate over timepoint
-                        for timepoint in range(meg_data_combined.shape[2]):
-                            # Interpolate over all epochs for a given sensor, timepoint combination
-                            meg_data_ch_t = meg_data_combined[:,sensor,timepoint] # n values where n = num epochs
-                            indices = [index for index in range(len(meg_data_ch_t))]
-                            meg_data_ch_t_non_outliers = {index: meg_data_ch_t[index] for index in indices if abs(meg_data_ch_t[index]) <= 3}
-                            idx_to_be_interpolated = [idx for idx in indices if idx not in meg_data_ch_t_non_outliers.keys()]
+                    meg_data_normalized_by_session[session_id]["train"] = meg_data_session_train
+                    meg_data_normalized_by_session[session_id]["test"] = meg_data_session_test
 
-                            # If outliers exist for this session, channel and timepoint
-                            if idx_to_be_interpolated:
-                                interpolated_values = np.interp(idx_to_be_interpolated, list(meg_data_ch_t_non_outliers.keys()), list(meg_data_ch_t_non_outliers.values()))
-                                meg_data_ch_t_interpolated = meg_data_ch_t[idx_to_be_interpolated] = interpolated_values
+                    logger.custom_debug(f"[Session {session_id}]: meg_data_normalized['train'].shape: {meg_data_normalized_by_session[session_id]['train'].shape}")
+                    logger.custom_debug(f"[Session {session_id}]: meg_data_normalized['test'].shape: {meg_data_normalized_by_session[session_id]['test'].shape}")
 
-                                #logger.custom_info(f"meg_data_ch_t.shape: {meg_data_ch_t.shape}")
-                                #logger.custom_info(f"len(indices): {len(indices)}")
-                                #logger.custom_info(f"len(list(meg_data_ch_t_non_outliers.keys())): {len(list(meg_data_ch_t_non_outliers.keys()))}")
-                                #logger.custom_info(f"len(idx_to_be_interpolated): {len(idx_to_be_interpolated)}")
+                    # If selected, interpolate all outliers (defined as +- 3 std)
+                    if interpolate_outliers:
+                        logger.custom_debug(f"\n \n Performing Interpolation for session {session_id}")
+                        logger.custom_debug(f"shapes before interpolation: Train: {meg_data_normalized_by_session[session_id]['train'].shape}, Test: {meg_data_normalized_by_session[session_id]['test'].shape}")
+                        meg_data_combined = np.concatenate((meg_data_normalized_by_session[session_id]["train"], meg_data_normalized_by_session[session_id]["test"]))
+                        n_outliers_in_session = 0
+                        # Iterate over sensors
+                        for sensor in range(meg_data_combined.shape[1]):
+                            # Iterate over timepoint
+                            for timepoint in range(meg_data_combined.shape[2]):
+                                # Interpolate over all epochs for a given sensor, timepoint combination
+                                meg_data_ch_t = meg_data_combined[:,sensor,timepoint] # n values where n = num epochs
+                                indices = [index for index in range(len(meg_data_ch_t))]
+                                meg_data_ch_t_non_outliers = {index: meg_data_ch_t[index] for index in indices if abs(meg_data_ch_t[index]) <= 3}
+                                idx_to_be_interpolated = [idx for idx in indices if idx not in meg_data_ch_t_non_outliers.keys()]
 
-                                #logger.custom_info(f"meg_data_ch_t_interpolated.shape: {meg_data_ch_t_interpolated.shape}")
+                                # If outliers exist for this session, channel and timepoint
+                                if idx_to_be_interpolated:
+                                    interpolated_values = np.interp(idx_to_be_interpolated, list(meg_data_ch_t_non_outliers.keys()), list(meg_data_ch_t_non_outliers.values()))
+                                    meg_data_ch_t_interpolated = meg_data_ch_t[idx_to_be_interpolated] = interpolated_values
 
-                                meg_data_combined[idx_to_be_interpolated,sensor,timepoint] = meg_data_ch_t_interpolated
-                                n_outliers_in_session += len(idx_to_be_interpolated)
-                    # Build back into split # n_train_epochs
-                    meg_data_normalized_by_session[session_id]["train"] = meg_data_combined[:n_train_epochs,:,:]
-                    meg_data_normalized_by_session[session_id]["test"] = meg_data_combined[n_train_epochs:,:,:]
+                                    #logger.custom_info(f"meg_data_ch_t.shape: {meg_data_ch_t.shape}")
+                                    #logger.custom_info(f"len(indices): {len(indices)}")
+                                    #logger.custom_info(f"len(list(meg_data_ch_t_non_outliers.keys())): {len(list(meg_data_ch_t_non_outliers.keys()))}")
+                                    #logger.custom_info(f"len(idx_to_be_interpolated): {len(idx_to_be_interpolated)}")
 
-                    logger.custom_debug(f"shapes after interpolation: Train: {meg_data_normalized_by_session[session_id]['train'].shape}, Test: {meg_data_normalized_by_session[session_id]['test'].shape}")
-                    logger.custom_info(f"[session_id: {session_id}]n_outliers_in_session: {n_outliers_in_session}")
+                                    #logger.custom_info(f"meg_data_ch_t_interpolated.shape: {meg_data_ch_t_interpolated.shape}")
+
+                                    meg_data_combined[idx_to_be_interpolated,sensor,timepoint] = meg_data_ch_t_interpolated
+                                    n_outliers_in_session += len(idx_to_be_interpolated)
+                        # Build back into split # n_train_epochs
+                        meg_data_normalized_by_session[session_id]["train"] = meg_data_combined[:n_train_epochs,:,:]
+                        meg_data_normalized_by_session[session_id]["test"] = meg_data_combined[n_train_epochs:,:,:]
+
+                        logger.custom_debug(f"shapes after interpolation: Train: {meg_data_normalized_by_session[session_id]['train'].shape}, Test: {meg_data_normalized_by_session[session_id]['test'].shape}")
+                        logger.custom_info(f"[session_id: {session_id}]n_outliers_in_session: {n_outliers_in_session}")
 
 
-                # Export meg dataset arrays to .npz
-                self.export_split_data_as_file(session_id=session_id, 
-                                                type_of_content="meg_data",
-                                                array_dict=meg_data_normalized_by_session[session_id],
-                                                type_of_norm="mean_centered_ch_then_global_z")
+                    # Export meg dataset arrays to .npz
+                    self.export_split_data_as_file(session_id=session_id, 
+                                                    type_of_content="meg_data",
+                                                    array_dict=meg_data_normalized_by_session[session_id],
+                                                    type_of_norm=two_step_norm)
 
-                epoch_start_index = end_test_index
-          
-                # TODO: Combine grad and mag if both selected
+                    epoch_start_index = end_test_index
             
-            logger.custom_debug(f"end_test_index: {end_test_index}")
+                    # TODO: Combine grad and mag if both selected
+                
+                logger.custom_debug(f"end_test_index: {end_test_index}")
         
 
 

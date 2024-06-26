@@ -17,7 +17,7 @@ os.chdir(__location__)
 
 # Choose params
 subject_ids = ["02"]
-normalizations = ["mean_centered_ch_then_global_z", "no_norm", "mean_centered_ch_t", "robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
+normalizations = ["mean_centered_ch_then_global_robust_scaling"] # , "mean_centered_ch_then_global_z", "no_norm", "mean_centered_ch_t", "robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
 lock_event = "fixation"  # "saccade" "fixation"
 meg_channels = [1731, 1921, 2111, 2341, 2511]
 n_grad = 0
@@ -32,7 +32,7 @@ module_name =  "features.12" # "fc" # features.12 has 9216 dimensions
 batch_size = 32
 
 logger_level = 25
-debugging = True if logger_level <= 23 else False  # TODO: Use this as class attribute rather than passing it to every function
+debugging = True if logger_level <= 25 else False  # TODO: Use this as class attribute rather than passing it to every function
 
 # Choose Calculations to be performed
 create_metadata = False
@@ -45,7 +45,8 @@ train_GLM = True
 generate_predictions_with_GLM = True
 visualization = True
 
-interpolate_outliers = True  # Currently only implemented for mean_centered_ch_then_global_z! Cuts off everything over +-3 std
+interpolate_outliers = False  # Currently only implemented for mean_centered_ch_then_global_z! Cuts off everything over +-3 std
+clip_outliers = True
 use_pca_features = True
 
 # Debugging
@@ -99,7 +100,7 @@ for run in range(run_pipeline_n_times):
 
             if create_meg_dataset:
                 # Create meg dataset based on split
-                dataset_helper.create_meg_dataset(interpolate_outliers=interpolate_outliers)
+                dataset_helper.create_meg_dataset(interpolate_outliers=interpolate_outliers, clip_outliers=clip_outliers)
 
                 logger.custom_info("MEG datasets created. \n \n")
 
@@ -156,7 +157,7 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
             
             # Visualize model perspective (values by timepoint)
-            #visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_z"], seperate_plots=False)  # , "no_norm"
+            visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_z"], seperate_plots=False)  # , "no_norm"
 
             logger.custom_info("Visualization completed. \n \n")
             
