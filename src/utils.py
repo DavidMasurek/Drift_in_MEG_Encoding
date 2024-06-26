@@ -686,10 +686,12 @@ class DatasetHelper(MetadataHelper):
                 logger.custom_debug(f"Session {session_id} Total Datapoints: {n_datapoints_session}")           
 
 
-    def create_meg_dataset(self, use_ica_cleaned_data=True, interpolate_outliers=False) -> None:
+    def create_meg_dataset(self, use_ica_cleaned_data=True, interpolate_outliers=False, clip_outliers=True) -> None:
         """
         Creates the crop dataset with all crops in the combined_metadata (crops for which meg data exists)
         """
+        if interpolate_outliers and clip_outliers:
+            raise ValueError("create_meg_dataset called with invalid parameter configuration. Can either clip or interpolate eithers, not both.")
 
         # Read combined and meg metadata from json
         combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
@@ -812,8 +814,8 @@ class DatasetHelper(MetadataHelper):
                         raise ValueError("Number of timepoints in meg dataset and in combined metadata are not identical.")
 
 
-                    # Clip out outliers based on 0.3 and 99.7 percentile (except for two step norms, here it will be done later)
-                    if normalization not in ["mean_centered_ch_then_global_robust_scaling", "mean_centered_ch_then_global_z"]:
+                    # Clip out outliers based percentile (except for two step norms, here it will be done later)
+                    if clip_outliers and normalization not in ["mean_centered_ch_then_global_robust_scaling", "mean_centered_ch_then_global_z"]:
                         q0_3, q99_7 = np.percentile(np.concatenate((meg_split["train"], meg_split["test"])), [0.3, 99.7], axis=None)
                         for split in meg_split:
                             meg_split[split] = np.clip(meg_split[split], a_min=q0_3, a_max=q99_7)
@@ -858,11 +860,14 @@ class DatasetHelper(MetadataHelper):
                 else:
                     meg_mean_centered_all_sessions = np.concatenate((meg_mean_centered_all_sessions, meg_data_session))
             # Apply robust scaling across complete dataset (all sessions)
-            meg_data_normalized = self.normalize_array(meg_mean_centered_all_sessions, normalization="robust_scaling")
+            meg_data_normalized = self.normalize_array(meg_mean_centered_all_sessions, normalization="z_score") # "robust_scaling"
 
-            # Clip out outliers based on 0.3 and 99.7 percentile
-            q0_3, q99_7 = np.percentile(meg_data_normalized, [0.3, 99.7], axis=None)
-            meg_data_normalized = np.clip(meg_data_normalized, a_min=q0_3, a_max=q99_7)
+            if clip_outliers: # 0.3 and 99.7 percentile is equal to 3 standard deviations
+                # Get indices from z-scored robust scaled data
+                #meg_data_z_scored = self.normalize_array(meg_data_normalized, normalization="z_score")
+                logger.custom_info(f"Clipping outliers.")
+                q0_3, q99_7 = np.percentile(meg_data_normalized, [0.3, 99.7], axis=None)
+                meg_data_normalized = np.clip(meg_data_normalized, a_min=-2.5, a_max=2.5) # q0_3, q99_7
 
             logger.custom_debug(f"meg_data_normalized.shape: {meg_data_normalized.shape}")
             logger.custom_debug(f"meg_timepoints_in_dataset after final norm, before split into sessions: {meg_data_normalized.shape[0]}")
@@ -893,6 +898,20 @@ class DatasetHelper(MetadataHelper):
                 logger.custom_debug(f"[Session {session_id}]: meg_data_normalized['test'].shape: {meg_data_normalized_by_session[session_id]['test'].shape}")
 
                 # If selected, interpolate all outliers (defined as +- 3 std)
+                #if clip_outliers:
+                #    logger.custom_debug(f"\n \n Clipping outliers for session {session_id}")
+                #    meg_data_combined = np.concatenate((meg_data_normalized_by_session[session_id]["train"], meg_data_normalized_by_session[session_id]["test"]))
+                #    for sensor in range(meg_data_combined.shape[1]):
+                #        for timepoint in range(meg_data_combined.shape[2]):
+                #            # Clip over all epochs for a given sensor, timepoint combination
+                #            meg_data_ch_t = meg_data_combined[:,sensor,timepoint] # n values where n = num epochs
+                #            q0_5, q99_5 = np.percentile(meg_data_ch_t, [0.5, 99.5], axis=None)
+                #            meg_data_ch_t_normalized = np.clip(meg_data_ch_t, a_min=q0_5, a_max=q99_5)
+                #            meg_data_combined[:,sensor,timepoint] = meg_data_ch_t_normalized
+                #    # Build back into split # n_train_epochs
+                #    meg_data_normalized_by_session[session_id]["train"] = meg_data_combined[:n_train_epochs,:,:]
+                #    meg_data_normalized_by_session[session_id]["test"] = meg_data_combined[n_train_epochs:,:,:]
+
                 if interpolate_outliers:
                     logger.custom_debug(f"\n \n Performing Interpolation for session {session_id}")
                     logger.custom_debug(f"shapes before interpolation: Train: {meg_data_normalized_by_session[session_id]['train'].shape}, Test: {meg_data_normalized_by_session[session_id]['test'].shape}")
@@ -922,6 +941,7 @@ class DatasetHelper(MetadataHelper):
 
                                 meg_data_combined[idx_to_be_interpolated,sensor,timepoint] = meg_data_ch_t_interpolated
                                 n_outliers_in_session += len(idx_to_be_interpolated)
+                                
                     # Build back into split # n_train_epochs
                     meg_data_normalized_by_session[session_id]["train"] = meg_data_combined[:n_train_epochs,:,:]
                     meg_data_normalized_by_session[session_id]["test"] = meg_data_combined[n_train_epochs:,:,:]
@@ -1512,6 +1532,8 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     Y_t = Y[:, :, t]
                     if self.GLM_helper_instance.fractional_ridge:
                         self.models[t].fit(X, Y_t, frac_grid=self.GLM_helper_instance.fractional_grid)
+                        if self.models[t].best_frac_ <= 0.000_000_000_001:
+                            logger.custom_debug(f"\n Timepoint {self.GLM_helper_instance.timepoint_min+t}: frac = {self.models[t].best_frac_}, alpha = {self.models[t].alpha_}") 
                     else:
                         self.models[t].fit(X, Y_t)
 
