@@ -19,6 +19,9 @@ os.chdir(__location__)
 subject_ids = ["02"]
 normalizations = ["mean_centered_ch_then_global_robust_scaling"] # , "mean_centered_ch_then_global_z", "no_norm", "mean_centered_ch_t", "robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
 lock_event = "fixation"  # "saccade" "fixation"
+
+crop_size = 224
+
 meg_channels = [1731, 1921, 2111, 2341, 2511]
 n_grad = 0
 n_mag = 5
@@ -71,7 +74,7 @@ for run in range(run_pipeline_n_times):
 
         ##### Process metadata for subject #####
         if create_metadata:
-            metadata_helper = MetadataHelper(subject_id=subject_id, lock_event=lock_event)
+            metadata_helper = MetadataHelper(crop_size=crop_size, subject_id=subject_id, lock_event=lock_event)
 
             # Read metadata of all available crops/images
             #metadata_helper.create_crop_metadata_dict()
@@ -84,7 +87,7 @@ for run in range(run_pipeline_n_times):
 
         ##### Create crop and meg dataset based on metadata #####
         if create_train_test_split or create_crop_datset_numpy or create_meg_dataset:
-            dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations, chosen_channels=meg_channels, lock_event=lock_event, timepoint_min=timepoint_min, timepoint_max=timepoint_max)
+            dataset_helper = DatasetHelper(crop_size=crop_size, subject_id=subject_id, normalizations=normalizations, chosen_channels=meg_channels, lock_event=lock_event, timepoint_min=timepoint_min, timepoint_max=timepoint_max)
 
             if create_train_test_split:
                 # Create train/test split based on sceneIDs (based on trial_ids)
@@ -120,7 +123,7 @@ for run in range(run_pipeline_n_times):
 
         ##### Train GLM from features to meg #####
         if train_GLM or generate_predictions_with_GLM:
-            glm_helper = GLMHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, lock_event=lock_event, ann_model=ann_model, module_name=module_name, batch_size=batch_size)
+            glm_helper = GLMHelper(crop_size=crop_size, normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, lock_event=lock_event, ann_model=ann_model, module_name=module_name, batch_size=batch_size)
 
             # Train GLM
             if train_GLM:
@@ -137,7 +140,7 @@ for run in range(run_pipeline_n_times):
 
         ##### Visualization #####
         if visualization:
-            visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag)
+            visualization_helper = VisualizationHelper(crop_size=crop_size, normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag)
 
             # Visualize meg data with mne
             #visualization_helper.visualize_meg_epochs_mne()

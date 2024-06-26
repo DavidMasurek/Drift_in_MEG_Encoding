@@ -410,10 +410,11 @@ class BasicOperationsHelper:
 
 
 class MetadataHelper(BasicOperationsHelper):
-    def __init__(self, **kwargs):
+    def __init__(self, crop_size:int, **kwargs):
         super().__init__(**kwargs)
 
-        self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/metadata/as{self.subject_id}_crops_metadata.csv"
+        self.crop_size = crop_size
+        self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{crop_size}/metadata/as{self.subject_id}_crops_metadata.csv"
         self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
 
 
@@ -621,7 +622,7 @@ class DatasetHelper(MetadataHelper):
         combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
 
         # Define path to read crops from
-        crop_folder_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_224/crops/as{self.subject_id}"
+        crop_folder_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{self.crop_size}/crops/as{self.subject_id}"
 
         datapoints_by_session_and_split = {"sessions": {}}
         # For each session: create crop datasets based on respective splits
