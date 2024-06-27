@@ -31,8 +31,8 @@ pca_components = 30
 meg_channels = [1731, 1921, 2111, 2341, 2511]
 n_grad = 0
 n_mag = 5
-timepoint_min = 200  # fixation: 200, saccade: 275
-timepoint_max = 300  # fixation: 300, saccade: 375
+timepoint_min = 170  # fixation: 200, saccade: 275
+timepoint_max = 250  # fixation: 300, saccade: 375
 
 normalizations = ["mean_centered_ch_then_global_robust_scaling"] # , "no_norm", "mean_centered_ch_t"]  #, "no_norm", "mean_centered_ch_t", "robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
 
@@ -52,8 +52,8 @@ create_crop_datset_numpy = False
 create_meg_dataset = False
 extract_features = False
 perform_pca = False
-train_GLM = True
-generate_predictions_with_GLM = True
+train_GLM = False
+generate_predictions_with_GLM = False
 visualization = True
 
 z_score_features_before_pca = True
@@ -164,18 +164,21 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_meg_ERP_style(plot_norms=["no_norm", "mean_centered_ch_t"])  # ,"robust_scaling_ch_t", "z_score_ch_t", "robust_scaling", "z_score"
 
             # Visualize encoding model performance
-            visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["train","test"], all_sessions_combined=all_sessions_combined)
+            ##visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["train","test"], all_sessions_combined=all_sessions_combined)
             #visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["test"], all_sessions_combined=all_sessions_combined)
 
             # Visualize prediction results
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
-            visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
+            #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["1","7","10"], var_explained=True)
-            visualization_helper.visualize_GLM_results(by_timepoints=True, var_explained=True, separate_plots=True)
+            ##visualization_helper.visualize_GLM_results(by_timepoints=True, var_explained=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
+
+            # Visuzalize distance based predictions at timepoint scale
+            visualization_helper.three_dim_timepoint_predictions()
             
             # Visualize model perspective (values by timepoint)
-            visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"
+            ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"
 
             logger.custom_info("Visualization completed. \n \n")
             

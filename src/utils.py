@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import logging
 import random
 from matplotlib.lines import Line2D  
+from mpl_toolkits.mplot3d import Axes3D
 from collections import defaultdict, Counter
 from typing import Tuple, Dict
 import time
@@ -1775,7 +1776,7 @@ class VisualizationHelper(GLMHelper):
 
                 # Plot
                 title_addition = "in days" if distance_in_days else ""
-                ax1.plot(x_values, y_values, marker='o', linestyle='-', label=f'Average {type_of_fit_measure}')
+                ax1.plot(x_values, y_values, marker='o', linestyle='none', label=f'Average {type_of_fit_measure}')
                 ax1.plot(x_values, trend_line, color='green', linestyle='-', label=f'Trend line (r={r_value})', linewidth=3)
                 ax1.set_xlabel(f'Distance {title_addition} between "train" and "test" Session')
                 ax1.set_ylabel(f'{type_of_fit_measure}')
@@ -1925,6 +1926,52 @@ class VisualizationHelper(GLMHelper):
                     logger.warning(f"Same loss for norm {norm} and norm {norm_new}")  # raise ValueError()
 
                 fit_measures_new[norm] = fit_measure
+
+    def three_dim_timepoint_predictions(self):
+        """
+        Creates a 3D plot. Every singular position on the third axis is similar to the 'by_timepoints' plit in visualize_GLM_results.
+        """
+        def plot_timepoint_fit_measure_3d(fit_measures_by_session_by_timepoint, session_train_id):
+            num_timepoints = len([timepoint for timepoint in fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"]["2"]["timepoint"]])
+            num_sessions = len(fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"])
+        
+            fig = plt.figure(figsize=(14, 8))
+            ax = fig.add_subplot(111, projection='3d')
+            
+            x = np.arange(num_timepoints)
+            y = np.arange(num_sessions)
+            X, Y = np.meshgrid(x, y)
+
+            # Z will store the variance explained values
+            Z = np.zeros((num_sessions, num_timepoints))
+
+            for session_idx, session_id in enumerate(fit_measures_by_session_by_timepoint["session_mapping"]):
+                for timepoint in range(num_timepoints):
+                    Z[session_idx, timepoint] = fit_measures_by_session_by_timepoint["session_mapping"][session_id]["session_pred"][session_id]["timepoint"][str(timepoint)]
+
+            ax.plot_surface(X, Y, Z, cmap='viridis')
+            ax.set_xlabel('Timepoints')
+            ax.set_ylabel('Sessions')
+            ax.set_zlabel('Variance Explained')
+            ax.set_title(f'Variance Explained for Each Session and Timepoint')
+
+            plt.show()
+            
+            return plt
+
+        for normalization in self.normalizations:
+            storage_folder = f"data_files/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+            json_storage_file = f"var_explained_timepoints_dict.json"
+            json_storage_path = os.path.join(storage_folder, json_storage_file)
+            with open(json_storage_path, 'r') as file:
+                fit_measures_by_session_by_timepoint = json.load(file)
+
+            for session_id in self.session_ids_num:
+                timepoints_sessions_plot = plot_timepoint_fit_measure_3d(fit_measures_by_session_by_timepoint, session_train_id=session_id)
+
+                plot_folder = f"data_files/visualizations/3D_Plots/cross_session_preds_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                plot_file = f"cross_session_preds_timepoints_session_{session_id}.png"
+                self.save_plot_as_file(plt=timepoints_sessions_plot, plot_folder=plot_folder, plot_file=plot_file)
 
     
     def visualize_meg_epochs_mne(self):
