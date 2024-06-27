@@ -33,6 +33,7 @@ normalizations = ["mean_centered_ch_then_global_robust_scaling"] # , "mean_cente
 timepoint_min = 200
 timepoint_max = 300
 
+fractional_grid = np.array([0.000_000_000_000_1, 0.000_000_000_001, 0.000_000_000_01, 0.000_000_000_1, 0.000_000_001, 0.000_000_01, 0.000_000_1, 0.000_001, 0.000_01, 0.000_1, 0.001, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.])
 alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
 
 assert len(meg_channels) == n_grad+n_mag, "Inconsistency in chosen channels and n_grad/n_mag."
@@ -46,7 +47,7 @@ create_train_test_split = False  # Careful! Everytime this is set to true, all f
 create_crop_datset_numpy = False
 create_meg_dataset = True
 extract_features = False
-perform_pca = True
+perform_pca = False
 train_GLM = True
 generate_predictions_with_GLM = True
 visualization = True
@@ -59,6 +60,7 @@ use_ica_cleaned_data = True
 interpolate_outliers = False  # Currently only implemented for mean_centered_ch_then_global_z! Cuts off everything over +-3 std
 clip_outliers = True
 
+fractional_ridge = True
 
 # Debugging
 store_timepoint_based_losses = False
@@ -131,7 +133,7 @@ for run in range(run_pipeline_n_times):
 
         ##### Train GLM from features to meg #####
         if train_GLM or generate_predictions_with_GLM:
-            glm_helper = GLMHelper(crop_size=crop_size, normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, lock_event=lock_event, ann_model=ann_model, module_name=module_name, batch_size=batch_size)
+            glm_helper = GLMHelper(fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, crop_size=crop_size, normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, lock_event=lock_event, ann_model=ann_model, module_name=module_name, batch_size=batch_size)
 
             # Train GLM
             if train_GLM:
@@ -148,7 +150,7 @@ for run in range(run_pipeline_n_times):
 
         ##### Visualization #####
         if visualization:
-            visualization_helper = VisualizationHelper(crop_size=crop_size, normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag)
+            visualization_helper = VisualizationHelper(fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, crop_size=crop_size, normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag)
 
             # Visualize meg data with mne
             #visualization_helper.visualize_meg_epochs_mne()

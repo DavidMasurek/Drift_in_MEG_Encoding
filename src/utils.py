@@ -17,10 +17,12 @@ from datetime import date
 
 # ML specific imports
 import torch
+import fracridge
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 from torchvision import transforms
 from thingsvision import get_extractor
 
+from fracridge import FracRidgeRegressorCV
 from sklearn.decomposition import PCA
 from sklearn.linear_model import RidgeCV, ElasticNetCV
 from sklearn.metrics import mean_squared_error
@@ -1223,9 +1225,11 @@ class ExtractionHelper(BasicOperationsHelper):
 
 
 class GLMHelper(DatasetHelper, ExtractionHelper):
-    def __init__(self, alphas: list, pca_features:bool, **kwargs):
+    def __init__(self, fractional_ridge:bool, fractional_grid:list, alphas: list, pca_features:bool, **kwargs):
         super().__init__(**kwargs)
 
+        self.fractional_ridge = fractional_ridge
+        self.fractional_grid = fractional_grid
         self.alphas = alphas
         self.ann_features_type = "ann_features_pca" if pca_features else "ann_features"
 
@@ -1481,22 +1485,28 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
     class MultiDimensionalRidge:
         """
-        Inner class to apply Ridge Regression over all timepoints. Enables training and prediction, as well as initialization of random weights for baseline comparison.
+        Inner class to apply (fractional) Ridge Regression over all timepoints. Enables training and prediction, as well as initialization of random weights for baseline comparison.
         """
         def __init__(self, GLM_helper_instance, models:list=[], random_weights:bool=False):
-            self.GLM_helper_instance = GLM_helper_instance
             self.random_weights = random_weights
             self.models = models  # Standardly initialized as empty list, otherwise with passed, previously trained models
-            self.selected_alphas = None
+            self.selected_alphas = None  # Placeholder to store alphas selected by CV
+
+            self.GLM_helper_instance = GLM_helper_instance
+            self.alphas = GLM_helper_instance.alphas
 
         def fit(self, X=None, Y=None):
             n_features = X.shape[1]
             n_sensors = Y.shape[1]
             n_timepoints = Y.shape[2]
 
-            self.models = [RidgeCV(alphas=self.GLM_helper_instance.alphas) for _ in range(n_timepoints)]
+            if self.GLM_helper_instance.fractional_ridge:
+                self.models = [FracRidgeRegressorCV() for _ in range(n_timepoints)]
+            else:
+                self.models = [RidgeCV(alphas=self.alphas) for _ in range(n_timepoints)]
             logger.custom_debug(f"Fit model with alphas {self.GLM_helper_instance.alphas}")
             if self.random_weights:
+                logger.warning("Fitting Regression model with random weights.")
                 # Randomly initialize weights and intercepts
                 # Careful, in the current implementation the random model does not use an alpha
                 for model in self.models:
@@ -1505,14 +1515,18 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
             else:
                 for t in range(n_timepoints):
                     Y_t = Y[:, :, t]
-                    self.models[t].fit(X, Y_t)
+                    if self.GLM_helper_instance.fractional_ridge:
+                        self.models[t].fit(X, Y_t, frac_grid=self.GLM_helper_instance.fractional_grid)
+                    else:
+                        self.models[t].fit(X, Y_t)
 
-            # For each model (aka for each timepoint) store the alpha that was selected as best fit in RidgeCV
-            self.selected_alphas = [timepoint_model.alpha_ for timepoint_model in self.models]
+            if not self.GLM_helper_instance.fractional_ridge:
+                # For each model (aka for each timepoint) store the alpha that was selected as best fit in RidgeCV
+                self.selected_alphas = [timepoint_model.alpha_ for timepoint_model in self.models]
 
-            counts = Counter(self.selected_alphas)
-            sorted_counts = sorted(counts.items(), key=lambda x: x[1], reverse=True)
-            logger.custom_info(f"selected alphas: {sorted_counts}")
+                counts = Counter(self.selected_alphas)
+                sorted_counts = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+                logger.custom_info(f"selected alphas: {sorted_counts}")
 
 
         def predict(self, X, downscale_features:bool=False):
@@ -1520,9 +1534,12 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 X = self.GLM_helper_instance.normalize_array(data=X, normalization="range_-1_to_1")
 
             n_samples = X.shape[0]
-            n_sensors = self.models[0].coef_.shape[0]
+            n_sensors = self.models[0].coef_.shape[0] if not self.GLM_helper_instance.fractional_ridge else self.models[0].coef_.shape[1]
             n_timepoints = len(self.models)
             predictions = np.zeros((n_samples, n_sensors, n_timepoints))
+
+            #logger.custom_info(f"self.models[0].coef_.shape: {self.models[0].coef_.shape}")
+
             for t, model in enumerate(self.models):
                 if self.random_weights:
                     # Use the random weights and intercept to predict; we are missing configurations implicitly achieved when calling .fit()
