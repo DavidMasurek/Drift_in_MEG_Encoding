@@ -867,7 +867,7 @@ class DatasetHelper(MetadataHelper):
                 #meg_data_z_scored = self.normalize_array(meg_data_normalized, normalization="z_score")
                 logger.custom_info(f"Clipping outliers.")
                 q0_3, q99_7 = np.percentile(meg_data_normalized, [0.3, 99.7], axis=None)
-                meg_data_normalized = np.clip(meg_data_normalized, a_min=-2.5, a_max=2.5) # q0_3, q99_7
+                meg_data_normalized = np.clip(meg_data_normalized, a_min=q0_3, a_max=q99_7) # q0_3, q99_7
 
             logger.custom_debug(f"meg_data_normalized.shape: {meg_data_normalized.shape}")
             logger.custom_debug(f"meg_timepoints_in_dataset after final norm, before split into sessions: {meg_data_normalized.shape[0]}")
@@ -1285,6 +1285,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 logger.custom_info(f"Training mapping for normalization {normalization}")
                 session_alphas = {}
                 for session_id_num in self.session_ids_num:
+                    logger.custom_info(f"Training mapping for Session {session_id_num}")
                     logger.custom_debug(f"[Session {session_id_num}] Before relevant load_split_data_from_file")
                     # Get ANN features for session
                     ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content=self.ann_features_type, ann_model=self.ann_model, module=self.module_name)
@@ -1507,20 +1508,19 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
             self.GLM_helper_instance = GLM_helper_instance
             self.random_weights = random_weights
             self.models = models  # Standardly initialized as empty list, otherwise with passed, previously trained models
-            self.selected_alphas = None
             self.alphas = self.GLM_helper_instance.alphas
-
-            if GLM_helper_instance.fractional_ridge:
-                self.regression_model = FracRidgeRegressorCV()
-            else:
-                self.regression_model = RidgeCV(alphas=self.GLM_helper_instance.alphas)
+            self.selected_alphas = None
 
         def fit(self, X=None, Y=None):
             n_features = X.shape[1]
             n_sensors = Y.shape[1]
             n_timepoints = Y.shape[2]
 
-            self.models = [self.regression_model for _ in range(n_timepoints)]
+            if self.GLM_helper_instance.fractional_ridge:
+                self.models = [FracRidgeRegressorCV() for _ in range(n_timepoints)]
+            else:
+                self.models = [RidgeCV(alphas=self.GLM_helper_instance.alphas) for _ in range(n_timepoints)]
+            
             logger.custom_debug(f"Fit model with alphas {self.GLM_helper_instance.alphas}")
             if self.random_weights:
                 # Randomly initialize weights and intercepts
@@ -1533,18 +1533,24 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     Y_t = Y[:, :, t]
                     if self.GLM_helper_instance.fractional_ridge:
                         self.models[t].fit(X, Y_t, frac_grid=self.GLM_helper_instance.fractional_grid)
-                        if self.models[t].best_frac_ <= 0.000_000_000_001:
+                        if self.models[t].best_frac_ <= 0.000_000_000_000_000_1:  # log if smallest fraction has been chosen
                             logger.custom_debug(f"\n Timepoint {self.GLM_helper_instance.timepoint_min+t}: frac = {self.models[t].best_frac_}, alpha = {self.models[t].alpha_}") 
                     else:
                         self.models[t].fit(X, Y_t)
 
+            # Debugging: For each model (aka for each timepoint) store the alpha/fraction that was selected as best fit in RidgeCV/FracRidgeRegressorCV
             if not self.GLM_helper_instance.fractional_ridge:
-                # For each model (aka for each timepoint) store the alpha that was selected as best fit in RidgeCV
-                self.selected_alphas = [timepoint_model.alpha_ for timepoint_model in self.models]
+                selected_regularize_param = [timepoint_model.alpha_ for timepoint_model in self.models]
+                param_type = "alphas"
+                self.selected_alphas = selected_regularize_param
+            else:
+                selected_regularize_param = [timepoint_model.best_frac_ for timepoint_model in self.models]
+                param_type = "fractions"
 
-                counts = Counter(self.selected_alphas)
-                sorted_counts = sorted(counts.items(), key=lambda x: x[1], reverse=True)
-                logger.custom_debug(f"selected alphas: {sorted_counts}")
+            counts_regularize_params = Counter(selected_regularize_param)
+            sorted_counts_regularize_params = sorted(counts_regularize_params.items(), key=lambda x: x[1], reverse=True)
+            logger.custom_info(f"selected {param_type}: {sorted_counts_regularize_params}")
+
 
 
         def predict(self, X, downscale_features:bool=False):
