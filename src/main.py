@@ -17,22 +17,25 @@ os.chdir(__location__)
 
 # Choose params
 subject_ids = ["02"]
-normalizations = ["mean_centered_ch_then_global_robust_scaling"] # , "mean_centered_ch_then_global_z", "no_norm", "mean_centered_ch_t", "robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
 lock_event = "fixation"  # "saccade" "fixation"
 
-crop_size = 224
+crop_size = 112
+
+pca_components = 30
+ann_model = "Alexnet"  # "Resnet50"
+module_name =  "features.12" # "fc" # features.12 has 9216 dimensions
+batch_size = 32
 
 meg_channels = [1731, 1921, 2111, 2341, 2511]
 n_grad = 0
 n_mag = 5
-assert len(meg_channels) == n_grad+n_mag, "Inconsistency in chosen channels and n_grad/n_mag."
+normalizations = ["mean_centered_ch_then_global_robust_scaling"] # , "mean_centered_ch_then_global_z", "no_norm", "mean_centered_ch_t", "robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
 timepoint_min = 200
 timepoint_max = 300
+
 alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
-pca_components = 4
-ann_model = "Alexnet"  # "Resnet50"
-module_name =  "features.12" # "fc" # features.12 has 9216 dimensions
-batch_size = 32
+
+assert len(meg_channels) == n_grad+n_mag, "Inconsistency in chosen channels and n_grad/n_mag."
 
 logger_level = 25
 debugging = True if logger_level <= 25 else False  # TODO: Use this as class attribute rather than passing it to every function
@@ -43,14 +46,19 @@ create_train_test_split = False  # Careful! Everytime this is set to true, all f
 create_crop_datset_numpy = False
 create_meg_dataset = True
 extract_features = False
-perform_pca = False
+perform_pca = True
 train_GLM = True
 generate_predictions_with_GLM = True
 visualization = True
 
+
+use_pca_features = True
+z_score_features_before_pca = True
+
+use_ica_cleaned_data = True
 interpolate_outliers = False  # Currently only implemented for mean_centered_ch_then_global_z! Cuts off everything over +-3 std
 clip_outliers = True
-use_pca_features = True
+
 
 # Debugging
 store_timepoint_based_losses = False
@@ -103,7 +111,7 @@ for run in range(run_pipeline_n_times):
 
             if create_meg_dataset:
                 # Create meg dataset based on split
-                dataset_helper.create_meg_dataset(interpolate_outliers=interpolate_outliers, clip_outliers=clip_outliers)
+                dataset_helper.create_meg_dataset(use_ica_cleaned_data=use_ica_cleaned_data, interpolate_outliers=interpolate_outliers, clip_outliers=clip_outliers)
 
                 logger.custom_info("MEG datasets created. \n \n")
 
@@ -117,7 +125,7 @@ for run in range(run_pipeline_n_times):
                 logger.custom_info("Features extracted. \n \n")
 
             if perform_pca:
-                extraction_helper.reduce_feature_dimensionality(all_sessions_combined=all_sessions_combined)
+                extraction_helper.reduce_feature_dimensionality(all_sessions_combined=all_sessions_combined, z_score_features_before_pca=z_score_features_before_pca)
                 logger.custom_info("PCA applied to features. \n \n")
             
 

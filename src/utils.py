@@ -684,7 +684,7 @@ class DatasetHelper(MetadataHelper):
                 logger.custom_debug(f"Session {session_id} Total Datapoints: {n_datapoints_session}")           
 
 
-    def create_meg_dataset(self, interpolate_outliers=False, clip_outliers=True) -> None:
+    def create_meg_dataset(self, use_ica_cleaned_data:bool, interpolate_outliers:bool, clip_outliers:bool) -> None:
         """
         Creates the crop dataset with all crops in the combined_metadata (crops for which meg data exists)
         """
@@ -693,8 +693,11 @@ class DatasetHelper(MetadataHelper):
         combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
         meg_metadata = self.read_dict_from_json(type_of_content="meg_metadata")
 
-        meg_data_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
-
+        if use_ica_cleaned_data:
+            meg_data_folder = f"/share/klab/camme/aklimenok/avs-encoding/data/meg_input/as{self.subject_id}/fixation_ica_cleaned"
+        else:
+            meg_data_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
+        
         # Select relevant channels
         selected_channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
 
@@ -1154,7 +1157,7 @@ class ExtractionHelper(BasicOperationsHelper):
             # Export numpy array to .npz
             self.export_split_data_as_file(session_id=session_id, type_of_content="ann_features", array_dict=features_split, ann_model=self.ann_model, module=self.module_name)
 
-    def reduce_feature_dimensionality(self, all_sessions_combined:bool = False):
+    def reduce_feature_dimensionality(self, z_score_features_before_pca:bool, all_sessions_combined:bool = False):
         """
         Reduces dimensionality of extracted features using PCA. This seems to be necessary to avoid overfit in the ridge Regression.
         """
@@ -1162,8 +1165,15 @@ class ExtractionHelper(BasicOperationsHelper):
             """
             Fits pca on train and test features  combined. Use fix amount of components to allow cross-session predictions
             """
+            ann_features_combined = np.concatenate((ann_features["train"], ann_features["test"]))
+            if z_score_features_before_pca:
+                ann_features_combined = self.normalize_array(data=ann_features_combined, normalization="z_score")
+                n_train = len(ann_features["train"])
+                ann_features["train"] = ann_features_combined[:n_train,:]
+                ann_features["test"] = ann_features_combined[n_train:,:]
+
             pca = PCA(n_components=self.pca_components)
-            pca.fit(np.concatenate((ann_features["train"], ann_features["test"])))
+            pca.fit(ann_features_combined)
             explained_var_per_component = pca.explained_variance_ratio_
             explained_var = 0
             for explained_var_component in explained_var_per_component:
