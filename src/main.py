@@ -20,13 +20,13 @@ os.chdir(__location__)
 subject_ids = ["02"]  # , # , "01", "03", "04", "05"
 lock_event = "fixation" # "saccade" "fixation"
 
-crop_size = 224  # 224 112
+crop_size = 112  # 224 112
 
 ann_model = "Alexnet"  # "Resnet50"
 module_name =  "features.12" # "fc" # features.12 has 9216 dimensions
 batch_size = 32
 
-pca_components = 4
+pca_components = 30
 
 meg_channels = [1731, 1921, 2111, 2341, 2511]
 n_grad = 0
@@ -45,23 +45,24 @@ logger_level = 25
 debugging = True if logger_level <= 23 else False  # TODO: Use this as class attribute rather than passing it to every function
 
 # Choose Calculations to be performed
-create_metadata = True
-create_train_test_split = True  # Careful! Everytime this is set to true, all following steps will be misalligned
-create_crop_datset_numpy = True
+create_metadata = False
+create_train_test_split = False  # Careful! Everytime this is set to true, all following steps will be misalligned
+create_crop_datset_numpy = False
 create_meg_dataset = True
-extract_features = True
+extract_features = False
 perform_pca = True
 train_GLM = True
 generate_predictions_with_GLM = True
 visualization = True
 
-z_score_features_before_pca = False
+z_score_features_before_pca = True
 use_pca_features = True
-use_ica_cleaned_data = False
-fractional_ridge = False
-clip_outliers = False
 
-interpolate_outliers = True  # Currently only implemented for mean_centered_ch_then_global_z! Cuts off everything over +-3 std
+use_ica_cleaned_data = True
+clip_outliers = True
+interpolate_outliers = False  # Currently only implemented for mean_centered_ch_then_global_z! Cuts off everything over +-3 std
+
+fractional_ridge = False
 
 # Debugging
 run_pipeline_n_times = 1
