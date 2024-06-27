@@ -1429,9 +1429,10 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         # Serialize and save the dictionary to the file
                         json.dump(variance_explained_dict, file, indent=4)
 
-                for session_id in variance_explained_dict["session_mapping"]:
-                    session_explained_var = variance_explained_dict['session_mapping'][session_id]['session_pred'][session_id]
-                    logger.custom_debug(f"[Session {session_id}]: Variance_explained_dict: {session_explained_var}")
+                if not store_timepoint_based_losses:
+                    for session_id in variance_explained_dict["session_mapping"]:
+                        session_explained_var = variance_explained_dict['session_mapping'][session_id]['session_pred'][session_id]
+                        logger.custom_info(f"[Session {session_id}]: Variance_explained_dict: {session_explained_var}")
         else:
             for normalization in self.normalizations:
                 logger.custom_info(f"Predicting from mapping for normalization {normalization}")
