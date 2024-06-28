@@ -12,6 +12,7 @@ import logging
 import random
 from matplotlib.lines import Line2D  
 from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from collections import defaultdict, Counter
 from typing import Tuple, Dict
 import time
@@ -321,7 +322,7 @@ class BasicOperationsHelper:
         plot_path = os.path.join(plot_folder, plot_file)
         plt.savefig(plot_path)
         # Mne plots cannot be closed
-        if plot_type != "mne":
+        if plot_type not in ["mne", "figure"]:
             plt.close()
 
 
@@ -1954,7 +1955,7 @@ class VisualizationHelper(GLMHelper):
             for session_id_pred in fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"]:
                 session_pred_data = fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"][session_id_pred]
                 num_timepoints = len(session_pred_data["timepoint"])
-                
+
                 x = np.full(num_timepoints, session_id_pred, dtype=int)
                 y = np.arange(0, num_timepoints)
                 z = np.array([session_pred_data["timepoint"][str(timepoint)] for timepoint in session_pred_data["timepoint"]])
@@ -1964,19 +1965,32 @@ class VisualizationHelper(GLMHelper):
 
                 color = colors[int(session_id_pred)-1] if session_train_id != session_id_pred else "red"
                 ax.plot(x, y, z, label=f'Session {session_id_pred}', linewidth=2.5, color=color)
+
+                # Create vertices for the polygon
+                # Add a zero line at the bottom
+                x2 = np.append(x, x[::-1])
+                y2 = np.append(y, y[::-1])
+                z2 = np.append(z, np.zeros_like(z))
+                verts = [list(zip(x2, y2, z2))]
+
+                #verts = [list(zip(x, y, z))]
+
+                # Create the polygon and add it to the plot
+                poly = Poly3DCollection(verts, facecolor=color, alpha=0.3)
+                ax.add_collection3d(poly)
             
-            """
+            
             for session_id_pred in fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"]:
                 session_pred_data = fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"][session_id_pred]
                 num_timepoints = len(session_pred_data["timepoint"])
 
                 x = np.full(num_timepoints, session_id_pred, dtype=int)
                 y = np.arange(0, num_timepoints)
-                z_control = np.array([min_z for timepoint in range(num_timepoints)])
+                z_control = np.array([0 for timepoint in range(num_timepoints)])
 
                 color = colors[int(session_id_pred)-1] if session_train_id != session_id_pred else "red"
                 ax.plot(x, y, z_control, linewidth=2.5, color=color)
-            """
+            
 
             ax.set_xlabel('X: Predicted Sessions')
             ax.set_ylabel('Y: Timepoints')
@@ -1994,7 +2008,7 @@ class VisualizationHelper(GLMHelper):
 
             plt.show()
             
-            return plt
+            return fig
 
         for normalization in self.normalizations:
             storage_folder = f"data_files/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
@@ -2008,7 +2022,13 @@ class VisualizationHelper(GLMHelper):
 
                 plot_folder = f"data_files/visualizations/3D_Plots/cross_session_preds_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
                 plot_file = f"cross_session_preds_timepoints_session_{session_id}.png"
-                self.save_plot_as_file(plt=timepoints_sessions_plot, plot_folder=plot_folder, plot_file=plot_file)
+                plot_dest = os.path.join(plot_folder, plot_file)
+                
+                self.save_plot_as_file(plt=timepoints_sessions_plot, plot_folder=plot_folder, plot_file=plot_file, plot_type="figure")
+
+                # Save with pickle to keep plot interactive
+                #with open(plot_dest, 'wb') as file: 
+                #    pickle.dump(timepoints_sessions_plot, file)
 
     
     def visualize_meg_epochs_mne(self):
