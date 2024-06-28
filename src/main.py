@@ -164,12 +164,12 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_meg_ERP_style(plot_norms=["no_norm", "mean_centered_ch_t"])  # ,"robust_scaling_ch_t", "z_score_ch_t", "robust_scaling", "z_score"
 
             # Visualize encoding model performance
-            ##visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["train","test"], all_sessions_combined=all_sessions_combined)
+            visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["train","test"], all_sessions_combined=all_sessions_combined)
             #visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["test"], all_sessions_combined=all_sessions_combined)
 
             # Visualize prediction results
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
-            #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
+            visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["1","7","10"], var_explained=True)
             ##visualization_helper.visualize_GLM_results(by_timepoints=True, var_explained=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)

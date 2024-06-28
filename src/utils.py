@@ -7,6 +7,7 @@ import numpy as np
 import imageio
 import mne
 import matplotlib.pyplot as plt
+from matplotlib import cm
 import logging
 import random
 from matplotlib.lines import Line2D  
@@ -1932,28 +1933,64 @@ class VisualizationHelper(GLMHelper):
         Creates a 3D plot. Every singular position on the third axis is similar to the 'by_timepoints' plit in visualize_GLM_results.
         """
         def plot_timepoint_fit_measure_3d(fit_measures_by_session_by_timepoint, session_train_id):
-            num_timepoints = len([timepoint for timepoint in fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"]["2"]["timepoint"]])
             num_sessions = len(fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"])
+
+            """
+            timepoint_10 = fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"][session_train_id]["timepoint"][str(10)]
+            timepoint_50 = fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"][session_train_id]["timepoint"][str(50)]
+            logger.custom_info(f"timepoint_10: {timepoint_10}")
+            logger.custom_info(f"timepoint_50: {timepoint_50}")
+            """
         
+            colormap = cm.viridis  # You can choose any colormap you prefer
+            colors = colormap(np.linspace(0, 1, num_sessions))
+
+            #logger.custom_info(f"colors: {colors}")
+
             fig = plt.figure(figsize=(14, 8))
             ax = fig.add_subplot(111, projection='3d')
+
+            min_z = None
+            for session_id_pred in fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"]:
+                session_pred_data = fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"][session_id_pred]
+                num_timepoints = len(session_pred_data["timepoint"])
+                
+                x = np.full(num_timepoints, session_id_pred, dtype=int)
+                y = np.arange(0, num_timepoints)
+                z = np.array([session_pred_data["timepoint"][str(timepoint)] for timepoint in session_pred_data["timepoint"]])
+
+                if min_z is None or np.any(min(z) < min_z):
+                    min_z = min(z)
+
+                color = colors[int(session_id_pred)-1] if session_train_id != session_id_pred else "red"
+                ax.plot(x, y, z, label=f'Session {session_id_pred}', linewidth=2.5, color=color)
             
-            x = np.arange(num_timepoints)
-            y = np.arange(num_sessions)
-            X, Y = np.meshgrid(x, y)
+            """
+            for session_id_pred in fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"]:
+                session_pred_data = fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"][session_id_pred]
+                num_timepoints = len(session_pred_data["timepoint"])
 
-            # Z will store the variance explained values
-            Z = np.zeros((num_sessions, num_timepoints))
+                x = np.full(num_timepoints, session_id_pred, dtype=int)
+                y = np.arange(0, num_timepoints)
+                z_control = np.array([min_z for timepoint in range(num_timepoints)])
 
-            for session_idx, session_id in enumerate(fit_measures_by_session_by_timepoint["session_mapping"]):
-                for timepoint in range(num_timepoints):
-                    Z[session_idx, timepoint] = fit_measures_by_session_by_timepoint["session_mapping"][session_id]["session_pred"][session_id]["timepoint"][str(timepoint)]
+                color = colors[int(session_id_pred)-1] if session_train_id != session_id_pred else "red"
+                ax.plot(x, y, z_control, linewidth=2.5, color=color)
+            """
 
-            ax.plot_surface(X, Y, Z, cmap='viridis')
-            ax.set_xlabel('Timepoints')
-            ax.set_ylabel('Sessions')
-            ax.set_zlabel('Variance Explained')
-            ax.set_title(f'Variance Explained for Each Session and Timepoint')
+            ax.set_xlabel('X: Predicted Sessions')
+            ax.set_ylabel('Y: Timepoints')
+            ax.set_zlabel('Z: Variance Explained')
+            ax.set_title(f'Variance Explained for Each Session and Timepoint for Model trained on Session {session_train_id}')
+            plt.legend()
+
+            # Set x-axis (session) ticks and labels
+            ax.set_xticks(np.arange(1, num_sessions+1))
+            ax.set_xticklabels([str(i) for i in range(1, num_sessions+1)])
+
+            ax.set_yticks(np.arange(0, num_timepoints+1, 10))
+            #logger.custom_info(f"yticks: {np.arange(0, num_timepoints+1, 10)}")
+            
 
             plt.show()
             
