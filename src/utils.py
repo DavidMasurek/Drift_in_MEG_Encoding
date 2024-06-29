@@ -1929,7 +1929,7 @@ class VisualizationHelper(GLMHelper):
 
                 fit_measures_new[norm] = fit_measure
 
-    def three_dim_timepoint_predictions(self):
+    def three_dim_timepoint_predictions(self, subtract_self_pred:bool):
         """
         Creates a 3D plot. Every singular position on the third axis is similar to the 'by_timepoints' plit in visualize_GLM_results.
         """
@@ -2016,6 +2016,21 @@ class VisualizationHelper(GLMHelper):
             json_storage_path = os.path.join(storage_folder, json_storage_file)
             with open(json_storage_path, 'r') as file:
                 fit_measures_by_session_by_timepoint = json.load(file)
+
+            if subtract_self_pred:
+                for session_train_id in fit_measures_by_session_by_timepoint['session_mapping']:
+                    for session_pred_id in fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"]:
+                        if session_train_id != session_pred_id:
+                            for timepoint_idx in fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"]:
+                                timepoint_val_non_normalized = fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"][timepoint_idx]
+                                timepoint_val_self_pred = fit_measures_by_session_by_timepoint['session_mapping'][session_pred_id]["session_pred"][session_pred_id]["timepoint"][timepoint_idx]
+
+                                timepoint_val_normalized = timepoint_val_non_normalized - timepoint_val_self_pred
+                                fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"][timepoint_idx] = timepoint_val_normalized
+                # Now "normalize the self preds aswell. Needed to be kept constant before to apply same normalization to all sessions"
+                for session_id in fit_measures_by_session_by_timepoint['session_mapping']:
+                    for timepoint_idx in fit_measures_by_session_by_timepoint['session_mapping'][session_id]["session_pred"][session_id]["timepoint"]:
+                            fit_measures_by_session_by_timepoint['session_mapping'][session_id]["session_pred"][session_id]["timepoint"][timepoint_idx] = 0
 
             for session_id in self.session_ids_num:
                 timepoints_sessions_plot = plot_timepoint_fit_measure_3d(fit_measures_by_session_by_timepoint, session_train_id=session_id)

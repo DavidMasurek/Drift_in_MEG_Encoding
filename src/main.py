@@ -65,6 +65,8 @@ interpolate_outliers = False  # Currently only implemented for mean_centered_ch_
 
 fractional_ridge = False
 
+subtract_self_pred = True
+
 # Debugging
 run_pipeline_n_times = 1
 store_timepoint_based_losses = False
@@ -175,7 +177,7 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
             # Visuzalize distance based predictions at timepoint scale
-            visualization_helper.three_dim_timepoint_predictions()
+            visualization_helper.three_dim_timepoint_predictions(s=subtract_self_pred)
             
             # Visualize model perspective (values by timepoint)
             ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"
