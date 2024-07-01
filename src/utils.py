@@ -254,6 +254,59 @@ class BasicOperationsHelper:
             if split == "train" and type_of_content == "torch_dataset":
                 logger.custom_debug(f"[Session {session_id}][Content TorchDataset]: Train: Saving dataset to {save_path}")
 
+    
+    def normalize_cross_session_preds_with_self_preds(fit_measures_by_session_by_timepoint: dict):
+        """
+        Normalizes the by-timepoint cross-session prediction performances based on the self-prediction performance of the predicted session.
+        """
+        for session_train_id in fit_measures_by_session_by_timepoint['session_mapping']:
+            for session_pred_id in fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"]:
+                if session_train_id != session_pred_id:
+                    for timepoint_idx in fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"]:
+                        timepoint_val_non_normalized = fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"][timepoint_idx]
+                        timepoint_val_self_pred = fit_measures_by_session_by_timepoint['session_mapping'][session_pred_id]["session_pred"][session_pred_id]["timepoint"][timepoint_idx]
+
+                        timepoint_val_normalized = timepoint_val_non_normalized - timepoint_val_self_pred
+                        fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"][timepoint_idx] = timepoint_val_normalized
+        # Now "normalize the self preds aswell. Needed to be kept constant before to apply same normalization to all sessions"
+        for session_id in fit_measures_by_session_by_timepoint['session_mapping']:
+            for timepoint_idx in fit_measures_by_session_by_timepoint['session_mapping'][session_id]["session_pred"][session_id]["timepoint"]:
+                    fit_measures_by_session_by_timepoint['session_mapping'][session_id]["session_pred"][session_id]["timepoint"][timepoint_idx] = 0
+
+
+    def calculate_drift_based_on_timepoint_preds(fit_measures_by_session: dict, timepoint_level_input: bool):
+        """
+        Calculates the correlation between distance and variance explained / fit measure. Input should be a dict containing all cross-session fit measures (on a timepoint level).
+        """
+        session_day_differences = self.get_session_date_differences()
+
+        if timepoint_level_input:
+            # If input is provided on timepoint level, average each predicted session (for each model/train-session of course)
+            fit_measures_by_session_averaged_over_timepoints = {}
+            for session_train_id, fit_measures_train_session in fit_measures_by_session['session_mapping'].items():
+                for session_pred_id, fit_measures_pred_session in fit_measures_train_session["session_pred"].items():
+                    fit_sum_over_timepoints = sum(timepoint_value for timepoint_value in fit_measures_pred_session["timepoint"].values())
+                    n_timepoints_fit = len(fit_measures_pred_session["timepoint"].keys())
+
+                    fit_averaged_over_timepoints = fit_sum_over_timepoints / n_timepoints_fit
+                    fit_measures_by_session_averaged_over_timepoints['session_mapping'][session_train_id]["session_pred"][session_pred_id] = fit_averaged_over_timepoints
+
+            fit_measures_by_session = fit_measures_by_session_averaged_over_timepoints
+
+
+        # Calculate fit measures relative to distance in time between train and pred session
+        fit_by_distances = {}
+        for session_train_id, fit_measures_train_session in fit_measures_by_session['session_mapping'].items():
+            for session_pred_id, fit_measure_pred_session in fit_measures_train_session["session_pred"].items():
+                if train_session != pred_session:
+                    distance = session_day_differences[session_train_id][session_pred_id]
+                    if distance not in fit_by_distances:
+                        fit_by_distances[distance] = {"fit_measure": fit_measure_pred_session, "num_measures": 1}
+                    else:
+                        fit_by_distances[distance]["fit_measure"] += fit_measure
+                        fit_by_distances[distance]["num_measures"] += 1
+
+        return fit_by_distances
 
     
     def load_split_data_from_file(self, session_id_num: str, type_of_content: str, type_of_norm:str = None, ann_model: str = None, module: str = None) -> dict:
