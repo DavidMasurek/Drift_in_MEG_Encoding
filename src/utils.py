@@ -255,7 +255,7 @@ class BasicOperationsHelper:
                 logger.custom_debug(f"[Session {session_id}][Content TorchDataset]: Train: Saving dataset to {save_path}")
 
     
-    def normalize_cross_session_preds_with_self_preds(fit_measures_by_session_by_timepoint: dict):
+    def normalize_cross_session_preds_with_self_preds(self, fit_measures_by_session_by_timepoint: dict):
         """
         Normalizes the by-timepoint cross-session prediction performances based on the self-prediction performance of the predicted session.
         """
@@ -273,8 +273,10 @@ class BasicOperationsHelper:
             for timepoint_idx in fit_measures_by_session_by_timepoint['session_mapping'][session_id]["session_pred"][session_id]["timepoint"]:
                     fit_measures_by_session_by_timepoint['session_mapping'][session_id]["session_pred"][session_id]["timepoint"][timepoint_idx] = 0
 
+        return fit_measures_by_session_by_timepoint
 
-    def calculate_drift_based_on_timepoint_preds(fit_measures_by_session: dict, timepoint_level_input: bool):
+
+    def calculate_drift_based_on_timepoint_preds(self, fit_measures_by_session: dict, timepoint_level_input: bool):
         """
         Calculates the correlation between distance and variance explained / fit measure. Input should be a dict containing all cross-session fit measures (on a timepoint level).
         """
@@ -282,7 +284,7 @@ class BasicOperationsHelper:
 
         if timepoint_level_input:
             # If input is provided on timepoint level, average each predicted session (for each model/train-session of course)
-            fit_measures_by_session_averaged_over_timepoints = {}
+            fit_measures_by_session_averaged_over_timepoints = self.recursive_defaultdict()
             for session_train_id, fit_measures_train_session in fit_measures_by_session['session_mapping'].items():
                 for session_pred_id, fit_measures_pred_session in fit_measures_train_session["session_pred"].items():
                     fit_sum_over_timepoints = sum(timepoint_value for timepoint_value in fit_measures_pred_session["timepoint"].values())
@@ -298,12 +300,12 @@ class BasicOperationsHelper:
         fit_by_distances = {}
         for session_train_id, fit_measures_train_session in fit_measures_by_session['session_mapping'].items():
             for session_pred_id, fit_measure_pred_session in fit_measures_train_session["session_pred"].items():
-                if train_session != pred_session:
+                if session_train_id != session_pred_id:
                     distance = session_day_differences[session_train_id][session_pred_id]
                     if distance not in fit_by_distances:
                         fit_by_distances[distance] = {"fit_measure": fit_measure_pred_session, "num_measures": 1}
                     else:
-                        fit_by_distances[distance]["fit_measure"] += fit_measure
+                        fit_by_distances[distance]["fit_measure"] += fit_measure_pred_session
                         fit_by_distances[distance]["num_measures"] += 1
 
         return fit_by_distances
@@ -1641,6 +1643,57 @@ class VisualizationHelper(GLMHelper):
         self.n_grad = n_grad
         self.n_mag = n_mag
 
+    
+    def _plot_drift_distance_based(self, fit_measures_by_distances:dict, self_pred_normalized:bool, cut_repeated_session:bool):
+        """
+        Creates drift plot based on fit measures data by distance. Expects keys of distance in days as string number, each key containing keys "fit_measure" and "num_measures"
+        """
+        if cut_repeated_session:
+            # Only consider non repeated measurements; Cuts out outlier session 4 for subject 02
+            fit_measures_by_distances_filtered = {}
+            for distance in fit_measures_by_distances:
+                if int(distance) < 30:
+                    fit_measures_by_distances_filtered[distance] = fit_measures_by_distances[distance]
+            fit_measures_by_distances = fit_measures_by_distances_filtered
+        
+        # Plot loss as a function of distance of predicted session from "training" session
+        fig, ax1 = plt.subplots(figsize=(12, 8))
+
+        # Sort by distance for readable plot
+        fit_measures_by_distances = {distance: fit_measures_by_distances[distance] for distance in sorted(fit_measures_by_distances, key=int)}
+
+        x_values = np.array(list(fit_measures_by_distances.keys())).astype(int)
+        y_values = np.array([data_by_distance["fit_measure"] for data_by_distance in fit_measures_by_distances.values()])
+        num_measures_values = np.array([data_by_distance["num_measures"] for data_by_distance in fit_measures_by_distances.values()])
+
+        # Calculate trend line 
+        slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
+        trend_line = slope * x_values + intercept
+        r_value = "{:.3f}".format(r_value)  # limit to three decimals
+
+        ax1.plot(x_values, y_values, marker='o', linestyle='none', label=f'Average Variance Explained')
+        ax1.plot(x_values, trend_line, color='green', linestyle='-', label=f'Trend line (r={r_value})', linewidth=3)
+        ax1.set_xlabel(f'Distance in days between "train" and "test" Session')
+        ax1.set_ylabel(f'Variance Explained')
+        ax1.tick_params(axis='y', labelcolor='b')
+        ax1.grid(True)
+
+        # Add secondary y-axis for num of datapoints in each average
+        ax2 = ax1.twinx()
+        ax2.plot(x_values, num_measures_values, 'r--', label='Number of datapoints averaged')
+        ax2.set_ylabel('Number of Datapoints', color='r')
+        ax2.tick_params(axis='y', labelcolor='r')
+
+        # Add a legend with all labels
+        lines, labels = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines + lines2, labels + labels2, loc='upper right')
+        ax1.set_title(f'Averaged Normalized Variance Explained vs Distance in days. \n Self-Pred Normalized?: {self_pred_normalized} \n Norm "mean_centered_ch_then_global_robust_scaling", cut_repeated_session?: {cut_repeated_session}, {date.today()}')
+        plt.grid(True)
+        
+        # plt.show required?
+        return fig
+
     def visualize_self_prediction(self, var_explained:bool=True, pred_splits:list=["train","test"], all_sessions_combined:bool=False, plot_outliers:bool=False):
         if var_explained:
             type_of_fit_measure = "Variance Explained"
@@ -1984,7 +2037,7 @@ class VisualizationHelper(GLMHelper):
 
     def three_dim_timepoint_predictions(self, subtract_self_pred:bool):
         """
-        Creates a 3D plot. Every singular position on the third axis is similar to the 'by_timepoints' plit in visualize_GLM_results.
+        Creates a 3D plot. Every singular position on the third axis is similar to the 'by_timepoints' plot in visualize_GLM_results.
         """
         def plot_timepoint_fit_measure_3d(fit_measures_by_session_by_timepoint, session_train_id):
             num_sessions = len(fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"])
@@ -2071,19 +2124,20 @@ class VisualizationHelper(GLMHelper):
                 fit_measures_by_session_by_timepoint = json.load(file)
 
             if subtract_self_pred:
-                for session_train_id in fit_measures_by_session_by_timepoint['session_mapping']:
-                    for session_pred_id in fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"]:
-                        if session_train_id != session_pred_id:
-                            for timepoint_idx in fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"]:
-                                timepoint_val_non_normalized = fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"][timepoint_idx]
-                                timepoint_val_self_pred = fit_measures_by_session_by_timepoint['session_mapping'][session_pred_id]["session_pred"][session_pred_id]["timepoint"][timepoint_idx]
+                # Normalize with self-predictions
+                fit_measures_by_session_by_timepoint = self.normalize_cross_session_preds_with_self_preds(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint)
 
-                                timepoint_val_normalized = timepoint_val_non_normalized - timepoint_val_self_pred
-                                fit_measures_by_session_by_timepoint['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"][timepoint_idx] = timepoint_val_normalized
-                # Now "normalize the self preds aswell. Needed to be kept constant before to apply same normalization to all sessions"
-                for session_id in fit_measures_by_session_by_timepoint['session_mapping']:
-                    for timepoint_idx in fit_measures_by_session_by_timepoint['session_mapping'][session_id]["session_pred"][session_id]["timepoint"]:
-                            fit_measures_by_session_by_timepoint['session_mapping'][session_id]["session_pred"][session_id]["timepoint"][timepoint_idx] = 0
+                # Also store new distance based measures
+                fit_measures_by_distances = self.calculate_drift_based_on_timepoint_preds(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True)
+                
+                json_storage_folder = f"data_files/var_explained/by_distance/self_pred_normalized/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                json_storage_file = f"fit_measures_by_distances_self_pred_normalized_dict.json"
+                json_storage_path = os.path.join(json_storage_folder, json_storage_file)
+                os.makedirs(json_storage_folder, exist_ok=True)
+
+                with open(json_storage_path, 'w') as file:
+                    # Serialize and save the dictionary to the file
+                    json.dump(fit_measures_by_distances, file, indent=4)
 
             for session_id in self.session_ids_num:
                 timepoints_sessions_plot = plot_timepoint_fit_measure_3d(fit_measures_by_session_by_timepoint, session_train_id=session_id)
@@ -2098,6 +2152,66 @@ class VisualizationHelper(GLMHelper):
                 #with open(plot_dest, 'wb') as file: 
                 #    pickle.dump(timepoints_sessions_plot, file)
 
+
+    def timepoint_window_drift(self, subtract_self_pred:bool, cut_repeated_session:bool, time_window_size:int):
+        for normalization in self.normalizations:
+            # Load timepoint-based variance explained
+            storage_folder = f"data_files/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+            json_storage_file = f"var_explained_timepoints_dict.json"
+            json_storage_path = os.path.join(storage_folder, json_storage_file)
+            with open(json_storage_path, 'r') as file:
+                fit_measures_by_session_by_timepoint = json.load(file)
+
+            if subtract_self_pred:
+                # Normalize with self-predictions
+                fit_measures_by_session_by_timepoint = self.normalize_cross_session_preds_with_self_preds(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint)
+
+            def filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint: dict, timepoint_window_start_idx:int, time_window_size:int):
+                """
+                Contains a copy of the input fit measure dict by timepoints that only contains the timepoints within the selected window
+                """
+                fit_measures_by_session_by_chosen_timepoints = self.recursive_defaultdict()
+                for session_train_id, fit_measures_train_session in fit_measures_by_session_by_timepoint['session_mapping'].items():
+                    for session_pred_id, fit_measures_pred_session in fit_measures_train_session["session_pred"].items():
+                        for timepoint_idx, timepoint_value in fit_measures_pred_session["timepoint"].items():
+                            if int(timepoint_idx) >= timepoint_window_start_idx and int(timepoint_idx) < (timepoint_window_start_idx + time_window_size):
+                                fit_measures_by_session_by_chosen_timepoints['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"][timepoint_idx] = timepoint_value
+                        # Only consider full windows (i.e. cut off potential smaller last timepoint window)
+                        current_window_size = len(fit_measures_by_session_by_chosen_timepoints['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"])
+                        if current_window_size < time_window_size:
+                            return None
+                        assert current_window_size == time_window_size, f"Time window size is incorrect. current_window_size: {current_window_size}, time_window_size: {time_window_size}"
+                
+                return fit_measures_by_session_by_chosen_timepoints
+            
+            # Calculate drift for various timewindows by slicing 
+            num_timepoints = (self.timepoint_max - self.timepoint_min) + 1  # +1 because of index 0 ofc
+            timepoint_window_start_idx = 0
+            while timepoint_window_start_idx < num_timepoints:
+                logger.custom_info("Iterating while loop.")
+
+                # Filter timepoint values for current window
+                fit_measures_by_session_by_timepoint_window = filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint,
+                                                                                                timepoint_window_start_idx=timepoint_window_start_idx,
+                                                                                                time_window_size=time_window_size)
+                # Only consider full windows (i.e. don't use potential smaller last timepoint window)
+                if fit_measures_by_session_by_timepoint_window is not None:
+                    # Calculate distance based variance explained for current window
+                    fit_measures_by_distances_window = self.calculate_drift_based_on_timepoint_preds(fit_measures_by_session=fit_measures_by_session_by_timepoint_window, timepoint_level_input=True)
+
+                    # Plot drift for current window
+                    drift_plot_window = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_window, self_pred_normalized=subtract_self_pred, cut_repeated_session=cut_repeated_session)
+
+                    # Store plot for current window
+                    window_end = timepoint_window_start_idx + time_window_size
+                    timepoint_window_description = f"window_{timepoint_window_start_idx}-{window_end}"
+                    storage_folder = f"data_files/visualizations/only_distance/timepoint_windows/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
+                    storage_filename = f"drift_plot_{timepoint_window_description}"
+                    self.save_plot_as_file(plt=drift_plot_window, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+
+                timepoint_window_start_idx += time_window_size
+
+            
     
     def visualize_meg_epochs_mne(self):
         """
