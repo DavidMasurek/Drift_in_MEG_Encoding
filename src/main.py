@@ -17,7 +17,7 @@ sys.path.append(str(__location__))
 os.chdir(__location__)
 
 # Choose params
-subject_ids = ["02"]  # , # , "01", "03", "04", "05"
+subject_ids = ["01", "03", "04", "05"]  # , # , "01", "03","02", "04", "05"
 lock_event = "fixation" # "saccade" "fixation"
 
 crop_size = 112  # 224 112
@@ -31,8 +31,8 @@ pca_components = 30
 meg_channels = [1731, 1921, 2111, 2341, 2511]
 n_grad = 0
 n_mag = 5
-timepoint_min = 170  # fixation: 200, saccade: 275
-timepoint_max = 250  # fixation: 300, saccade: 375
+timepoint_min = 170  # fixation: 170, saccade: 275
+timepoint_max = 250  # fixation: 250, saccade: 375
 
 normalizations = ["mean_centered_ch_then_global_robust_scaling"] # , "no_norm", "mean_centered_ch_t"]  #, "no_norm", "mean_centered_ch_t", "robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
 
@@ -46,14 +46,14 @@ logger_level = 25
 debugging = True if logger_level <= 23 else False  # TODO: Use this as class attribute rather than passing it to every function
 
 # Choose Calculations to be performed
-create_metadata = False
-create_train_test_split = False  # Careful! Everytime this is set to true, all following steps will be misalligned
-create_crop_datset_numpy = False
-create_meg_dataset = False
-extract_features = False
-perform_pca = False
-train_GLM = False
-generate_predictions_with_GLM = False
+create_metadata = True
+create_train_test_split = True  # Careful! Everytime this is set to true, all following steps will be misalligned
+create_crop_datset_numpy = True
+create_meg_dataset = True
+extract_features = True
+perform_pca = True
+train_GLM = True
+generate_predictions_with_GLM = True
 visualization = True
 
 z_score_features_before_pca = True
@@ -173,7 +173,7 @@ for run in range(run_pipeline_n_times):
 
             # Visualize prediction results
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
-            ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
+            visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["1","7","10"], var_explained=True)
             ##visualization_helper.visualize_GLM_results(by_timepoints=True, var_explained=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
