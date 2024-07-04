@@ -17,7 +17,7 @@ sys.path.append(str(__location__))
 os.chdir(__location__)
 
 # Choose params
-subject_ids = ["01", "03", "04", "05"]  # , # , "01", "03","02", "04", "05"
+subject_ids = ["05"]  # , "02", "03", "05"]  # "01", "02", "03", "04", "05" 
 lock_event = "fixation" # "saccade" "fixation"
 
 crop_size = 112  # 224 112
@@ -31,8 +31,13 @@ pca_components = 30
 meg_channels = [1731, 1921, 2111, 2341, 2511]
 n_grad = 0
 n_mag = 5
-timepoint_min = 170  # fixation: 170, saccade: 275
-timepoint_max = 250  # fixation: 250, saccade: 375
+
+best_timepoints_by_subject = {"01": {"timepoint_min": 175, "timepoint_max": 275},
+                              "02": {"timepoint_min": 175, "timepoint_max": 255},
+                              "03": {"timepoint_min": 175, "timepoint_max": 225},
+                              "05": {"timepoint_min": 160, "timepoint_max": 250},}
+timepoint_min = 0  # fixation: 170, saccade: 275
+timepoint_max = 400  # fixation: 250, saccade: 375
 
 normalizations = ["mean_centered_ch_then_global_robust_scaling"] # , "no_norm", "mean_centered_ch_t"]  #, "no_norm", "mean_centered_ch_t", "robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
 
@@ -40,20 +45,26 @@ normalizations = ["mean_centered_ch_then_global_robust_scaling"] # , "no_norm", 
 fractional_grid = np.array([fraction/100 for fraction in range(1, 100, 3)]) # range from 0.01 to 1 in steps or 0.03
 alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
 
+omit_sessions_by_subject = {"01": ["1"],
+                            "02": ["4"],
+                            "03": [],
+                            "05": ["9"],
+                            }
+
 assert len(meg_channels) == n_grad+n_mag, "Inconsistency in chosen channels and n_grad/n_mag."
 
 logger_level = 25
 debugging = True if logger_level <= 23 else False  # TODO: Use this as class attribute rather than passing it to every function
 
 # Choose Calculations to be performed
-create_metadata = True
-create_train_test_split = True  # Careful! Everytime this is set to true, all following steps will be misalligned
-create_crop_datset_numpy = True
-create_meg_dataset = True
-extract_features = True
-perform_pca = True
-train_GLM = True
-generate_predictions_with_GLM = True
+create_metadata = False
+create_train_test_split = False  # Careful! Everytime this is set to true, all following steps will be misalligned
+create_crop_datset_numpy = False
+create_meg_dataset = False
+extract_features = False
+perform_pca = False
+train_GLM = False
+generate_predictions_with_GLM = False
 visualization = True
 
 z_score_features_before_pca = True
@@ -62,12 +73,15 @@ use_pca_features = True
 use_ica_cleaned_data = True
 clip_outliers = True
 interpolate_outliers = False  # Currently only implemented for mean_centered_ch_then_global_z! Cuts off everything over +-3 std
+use_best_timepoints_for_subject = True
 
 fractional_ridge = False
 
 subtract_self_pred = False
 time_window_size = 10
 cut_repeated_session = False
+omit_best_sessions = True
+
 
 # Debugging
 run_pipeline_n_times = 1
@@ -81,12 +95,16 @@ shuffle_test_labels = False  # shuffles the data that is to be predicted! (In co
 logging_setup = setup_logger(logger_level)
 logger = logging.getLogger(__name__)
 
-#if lock_event != "saccade":
-#    raise NotImplementedError("Lock event is currently expected to be saccade! timepoint_min and timepoint_max need to be considered relative to the lock event!")
-
-
 for run in range(run_pipeline_n_times):
     for subject_id in subject_ids:
+        if use_best_timepoints_for_subject:
+            timepoint_min = best_timepoints_by_subject[subject_id]["timepoint_min"]
+            timepoint_max = best_timepoints_by_subject[subject_id]["timepoint_max"]
+        if omit_best_sessions:
+            sessions_to_omit = omit_sessions_by_subject[subject_id]
+        else:
+            sessions_to_omit = []
+
         logger.custom_info(f"Processing subject {subject_id}.\n \n \n")
 
         ##### Process metadata for subject #####
@@ -168,12 +186,12 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_meg_ERP_style(plot_norms=["no_norm", "mean_centered_ch_t"])  # ,"robust_scaling_ch_t", "z_score_ch_t", "robust_scaling", "z_score"
 
             # Visualize encoding model performance
-            ###visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["train","test"], all_sessions_combined=all_sessions_combined)
-            #visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["test"], all_sessions_combined=all_sessions_combined)
+            ##visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["train","test"], all_sessions_combined=all_sessions_combined)
+            ##visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["test"], all_sessions_combined=all_sessions_combined)
 
             # Visualize prediction results
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
-            visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
+            visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit, var_explained=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["1","7","10"], var_explained=True)
             ##visualization_helper.visualize_GLM_results(by_timepoints=True, var_explained=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)

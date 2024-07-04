@@ -52,8 +52,8 @@ class BasicOperationsHelper:
         Example out: {'grad': {}, 'mag': {194: 'MEG1731', 215: 'MEG1921', 236: 'MEG2111', 269: 'MEG2341', 284: 'MEG2511'}}
         """
         
-        # pick first session, the sensors should always be the same
-        fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/{self.lock_event}_evoked_{self.subject_id}_01_.fif'
+        # pick first session, and saccade-locked (only saccade-locked exists for all) the sensors should always be the same
+        fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/saccade_evoked_{self.subject_id}_01_.fif'
         
         processing_channels_indices = {"grad": {}, "mag": {}}
         evoked = mne.read_evokeds(fif_file_path)[0]
@@ -484,8 +484,7 @@ class MetadataHelper(BasicOperationsHelper):
 
         self.crop_size = crop_size
         self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{crop_size}/metadata/as{self.subject_id}_crops_metadata.csv"
-        self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
-
+        self.meg_metadata_folder = f"/share/klab/camme/aklimenok/avs-encoding/data/meg_input/as{self.subject_id}/fixation_ica_cleaned"  # f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
 
     def create_combined_metadata_dict(self, investigate_missing_metadata=False) -> None:
         """
@@ -783,8 +782,8 @@ class DatasetHelper(MetadataHelper):
             meg_data_file = f"as{self.subject_id}{session_id_char}_population_codes_{self.lock_event}_500hz_masked_False.h5"
             with h5py.File(os.path.join(meg_data_folder, meg_data_file), "r") as f:
                 meg_data = {}
-                meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a saccade: (2945, 204, 401), fixation: (2874, 204, 601) 
-                meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a saccade: (2945, 102, 401), fixation: (2874, 102, 601)
+                meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a saccade: (2945, 204, 4601), fixation: (2874, 204, 401) 
+                meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a saccade: (2945, 102, 601), fixation: (2874, 102, 401)
 
                 logger.custom_debug(f"H5 f.attrs['times']: {f.attrs['times']}")
                 logger.custom_debug(f"H5 len(f.attrs['times']): {len(f.attrs['times'])}")
@@ -1703,6 +1702,9 @@ class VisualizationHelper(GLMHelper):
 
         x_values = np.array(list(fit_measures_by_distances.keys())).astype(int)
         y_values = np.array([data_by_distance["fit_measure"] for data_by_distance in fit_measures_by_distances.values()])
+
+        #logger.custom_info(f"len(y_values): {len(y_values)}")
+
         num_measures_values = np.array([data_by_distance["num_measures"] for data_by_distance in fit_measures_by_distances.values()])
 
         # Calculate trend line 
@@ -1790,6 +1792,7 @@ class VisualizationHelper(GLMHelper):
                 pred_split_addition = pred_split[0] if len(pred_splits) == 1 else "both"
                 plot_file = f"{type_of_fit_measure}_session_self_prediction_{normalization}_pred_splits_{pred_split_addition}.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+                plt.close()
 
                 logger.custom_debug(f"self_pred_measures: {self_pred_measures}")
         else:
@@ -1949,6 +1952,7 @@ class VisualizationHelper(GLMHelper):
                 plot_folder = f"data_files/visualizations/only_distance/subject_{self.subject_id}/norm_{normalization}"
                 plot_file = f"{type_of_fit_measure}_plot_over_distance_{normalization}.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+                plt.close()
 
             elif not by_timepoints:
                 # Collect self-prediction {type_of_fit_measure}s for baseline and prepare average non-self-{type_of_fit_measure} calculation
@@ -2257,6 +2261,7 @@ class VisualizationHelper(GLMHelper):
             storage_folder = f"data_files/visualizations/only_distance/timepoint_windows/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
             storage_filename = f"drift_plot_all_timepoints"
             self.save_plot_as_file(plt=drift_plot_all_timepoints, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+            plt.close(drift_plot_all_timepoints)
 
 
             # Debugging: average timepoint data to compare values to non-timepoint dict
