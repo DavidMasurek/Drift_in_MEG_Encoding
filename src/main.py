@@ -17,7 +17,7 @@ sys.path.append(str(__location__))
 os.chdir(__location__)
 
 # Choose params
-subject_ids = ["05"]  # , "02", "03", "05"]  # "01", "02", "03", "04", "05" 
+subject_ids = ["01", "02", "03", "05"]  # , "02", "03", "05"]  # "01", "02", "03", "04", "05" 
 lock_event = "fixation" # "saccade" "fixation"
 
 crop_size = 112  # 224 112
@@ -80,7 +80,7 @@ fractional_ridge = False
 subtract_self_pred = False
 time_window_size = 10
 cut_repeated_session = False
-omit_best_sessions = True
+omit_non_generalizing_sessions = True
 
 
 # Debugging
@@ -100,7 +100,7 @@ for run in range(run_pipeline_n_times):
         if use_best_timepoints_for_subject:
             timepoint_min = best_timepoints_by_subject[subject_id]["timepoint_min"]
             timepoint_max = best_timepoints_by_subject[subject_id]["timepoint_max"]
-        if omit_best_sessions:
+        if omit_non_generalizing_sessions:
             sessions_to_omit = omit_sessions_by_subject[subject_id]
         else:
             sessions_to_omit = []
