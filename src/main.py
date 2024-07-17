@@ -17,8 +17,8 @@ sys.path.append(str(__location__))
 os.chdir(__location__)
 
 # Choose params
-subject_ids = ["01", "02", "03", "05"]  # , "02", "03", "05"]  # "01", "02", "03", "04", "05" 
-lock_event = "fixation" # "saccade" "fixation"
+subject_ids = ["02"]  # , "02", "03", "05"]  # "01", "02", "03", "04", "05" 
+lock_event = "saccade" # "saccade" "fixation"
 
 crop_size = 112  # 224 112
 
@@ -52,6 +52,26 @@ omit_sessions_by_subject = {"01": ["1"],
                             }
 
 assert len(meg_channels) == n_grad+n_mag, "Inconsistency in chosen channels and n_grad/n_mag."
+
+# Map timepoint idx to ms
+# fixation locked: [-300 ms : 500 ms], 0.5Hz, 601 timepoints, 
+def map_timepoint_idx_to_ms(timepoint_idx:int, lock_event:str) -> int:
+    """
+    Maps a timepoint index to its time in ms relative to the respective lock-event
+    !!! Attention, ms cuts around lock_event different for ICA cleaned and non-ICA cleaned? ICA cleaned same for both lock events 401 timepoints from -0.3 to 0.5?
+    """
+    if lock_event == "fixation":
+        available_ms_values = list(range(-300, 502, 2))
+        ms_value = available_ms_values[timepoint_idx]
+        return ms_value
+    elif lock_event == "saccade":
+        available_ms_values = list(range(-300, 502, 2))
+        #raise NotImplementedError("Mapping from timepoint_idx to ms relative to lock_event has not been implemented for saccade-locked data yet.")
+    else:
+        raise ValueError(f"map_timepoint_idx_to_ms called with invalid lock_event {lock_event}")
+        
+map_timepoint_idx_to_ms(timepoint_idx=0, lock_event="saccade")
+###
 
 logger_level = 25
 debugging = True if logger_level <= 23 else False  # TODO: Use this as class attribute rather than passing it to every function
@@ -198,7 +218,7 @@ for run in range(run_pipeline_n_times):
 
             # Visuzalize distance based predictions at timepoint scale
             ##visualization_helper.three_dim_timepoint_predictions(subtract_self_pred=subtract_self_pred) 
-            visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, cut_repeated_session=cut_repeated_session, time_window_size=time_window_size)  
+            #visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, time_window_size=time_window_size)  
             
             # Visualize model perspective (values by timepoint)
             ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"

@@ -782,16 +782,17 @@ class DatasetHelper(MetadataHelper):
             meg_data_file = f"as{self.subject_id}{session_id_char}_population_codes_{self.lock_event}_500hz_masked_False.h5"
             with h5py.File(os.path.join(meg_data_folder, meg_data_file), "r") as f:
                 meg_data = {}
-                meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a saccade: (2945, 204, 4601), fixation: (2874, 204, 401) 
+                meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a saccade: (2945, 204, 601), fixation: (2874, 204, 401) 
                 meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a saccade: (2945, 102, 601), fixation: (2874, 102, 401)
 
-                logger.custom_debug(f"H5 f.attrs['times']: {f.attrs['times']}")
-                logger.custom_debug(f"H5 len(f.attrs['times']): {len(f.attrs['times'])}")
+                logger.custom_info(f"self.lock_event: {self.lock_event}")
+                logger.custom_info(f"H5 f.attrs['times']: {f.attrs['times']}")
+                logger.custom_info(f"H5 len(f.attrs['times']): {len(f.attrs['times'])}")
 
                 num_meg_timepoints = meg_data['grad'].shape[0]
 
-                logger.custom_debug(f"[Session {session_id_num}]: Pre filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
-                logger.custom_debug(f"[Session {session_id_num}]: Pre filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
+                logger.custom_info(f"[Session {session_id_num}]: Pre filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
+                logger.custom_info(f"[Session {session_id_num}]: Pre filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
 
                 for sensor_type in selected_channel_indices:
                     # Check if this type of sensor is part of the selected channels
@@ -1682,18 +1683,10 @@ class VisualizationHelper(GLMHelper):
         self.n_mag = n_mag
 
     
-    def _plot_drift_distance_based(self, fit_measures_by_distances:dict, self_pred_normalized:bool, cut_repeated_session:bool):
+    def _plot_drift_distance_based(self, fit_measures_by_distances:dict, self_pred_normalized:bool, omitted_sessions:list):
         """
         Creates drift plot based on fit measures data by distance. Expects keys of distance in days as string number, each key containing keys "fit_measure" and "num_measures"
         """
-        if cut_repeated_session:
-            # Only consider non repeated measurements; Cuts out outlier session 4 for subject 02
-            fit_measures_by_distances_filtered = {}
-            for distance in fit_measures_by_distances:
-                if int(distance) < 30:
-                    fit_measures_by_distances_filtered[distance] = fit_measures_by_distances[distance]
-            fit_measures_by_distances = fit_measures_by_distances_filtered
-        
         # Plot loss as a function of distance of predicted session from "training" session
         fig, ax1 = plt.subplots(figsize=(12, 8))
 
@@ -1729,7 +1722,7 @@ class VisualizationHelper(GLMHelper):
         lines, labels = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
         ax1.legend(lines + lines2, labels + labels2, loc='upper right')
-        ax1.set_title(f'Averaged Normalized Variance Explained vs Distance in days. \n Self-Pred Normalized?: {self_pred_normalized} \n Norm "mean_centered_ch_then_global_robust_scaling", cut_repeated_session?: {cut_repeated_session}, {date.today()}')
+        ax1.set_title(f'Averaged Normalized Variance Explained vs Distance in days. \n Self-Pred Normalized?: {self_pred_normalized} \n Norm "mean_centered_ch_then_global_robust_scaling", omitted_sessions: {omitted_sessions}, {date.today()}')
         plt.grid(True)
         
         # plt.show required?
@@ -1837,7 +1830,7 @@ class VisualizationHelper(GLMHelper):
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
                 
 
-    def visualize_GLM_results(self, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True, var_explained:bool = True):
+    def visualize_GLM_results(self, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True, var_explained:bool = True, average_distance_vals:bool = False):
         """
         Visualizes results from GLMHelper.predict_from_mapping
         """
@@ -1898,51 +1891,77 @@ class VisualizationHelper(GLMHelper):
                                 distance = abs(int(train_session) - int(pred_session))
                             else:
                                 distance = session_day_differences[train_session][pred_session]
-                            if distance not in losses_by_distances:
-                                losses_by_distances[distance] = {"fit_measure": fit_measure, "num_measures": 1}
+                            if average_distance_vals:
+                                if distance not in losses_by_distances:
+                                    losses_by_distances[distance] = {"fit_measure": fit_measure, "num_measures": 1}
+                                else:
+                                    losses_by_distances[distance]["fit_measure"] += fit_measure
+                                    losses_by_distances[distance]["num_measures"] += 1
                             else:
-                                losses_by_distances[distance]["fit_measure"] += fit_measure
-                                losses_by_distances[distance]["num_measures"] += 1
+                                if distance not in losses_by_distances:
+                                    losses_by_distances[distance] = [fit_measure]
+                                else:
+                                    losses_by_distances[distance].append(fit_measure)
+                                
 
-                # Calculate average losses over distances
-                avg_losses = {}
-                num_datapoints = {}
+                if average_distance_vals:
+                    # Calculate average losses over distances
+                    avg_losses = {}
+                    num_datapoints = {}
 
-                for distance in losses_by_distances:
-                    avg_losses[distance] = losses_by_distances[distance]["fit_measure"] / losses_by_distances[distance]["num_measures"]
-                    num_datapoints[distance] = losses_by_distances[distance]["num_measures"]
+                    for distance in losses_by_distances:
+                        avg_losses[distance] = losses_by_distances[distance]["fit_measure"] / losses_by_distances[distance]["num_measures"]
+                        num_datapoints[distance] = losses_by_distances[distance]["num_measures"]
 
-                # Sort by distance for plot lines
-                avg_losses = dict(sorted(avg_losses.items()))
-                num_datapoints = dict(sorted(num_datapoints.items()))
+                    # Sort by distance for plot lines
+                    avg_losses = dict(sorted(avg_losses.items()))
+                    num_datapoints = dict(sorted(num_datapoints.items()))
 
-                x_values = np.array(list(avg_losses.keys()))
-                y_values = np.array(list(avg_losses.values()))
-
+                    x_values = np.array(list(avg_losses.keys()))
+                    y_values = np.array(list(avg_losses.values()))
+                else:
+                    # Extract values, sorted by x
+                    logger.custom_info(f"losses_by_distances: {losses_by_distances}")
+                    sorted_losses_by_distances = dict(sorted(losses_by_distances.items(), key=lambda item: item[0], reverse=False))
+                    logger.custom_info(f"sorted_losses_by_distances: {sorted_losses_by_distances}")
+                    x_values = []
+                    y_values = []
+                    for distance in sorted_losses_by_distances:
+                        for fit_measure in sorted_losses_by_distances[distance]:
+                            x_values.append(distance)
+                            y_values.append(fit_measure)
+                    x_values = np.array(x_values)
+                    y_values = np.array(y_values)
+                            
                 # Calculate trend line 
-                slope, intercept, r_value, p_value, std_err = linregress(list(avg_losses.keys()), list(avg_losses.values()))
-                trend_line = slope * x_values + intercept
+                x_values_set = np.array(list(set(x_values)))
+                slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
+                trend_line = slope * x_values_set + intercept
                 r_value = "{:.3f}".format(r_value)  # limit to three decimals
 
                 # Plot
                 title_addition = "in days" if distance_in_days else ""
                 ax1.plot(x_values, y_values, marker='o', linestyle='none', label=f'Average {type_of_fit_measure}')
-                ax1.plot(x_values, trend_line, color='green', linestyle='-', label=f'Trend line (r={r_value})', linewidth=3)
+                ax1.plot(x_values_set, trend_line, color='green', linestyle='-', label=f'Trend line (r={r_value})', linewidth=3)
                 ax1.set_xlabel(f'Distance {title_addition} between "train" and "test" Session')
                 ax1.set_ylabel(f'{type_of_fit_measure}')
                 ax1.tick_params(axis='y', labelcolor='b')
                 ax1.grid(True)
         
-                # Add secondary y-axis for datapoints
-                ax2 = ax1.twinx()
-                ax2.plot(num_datapoints.keys(), num_datapoints.values(), 'r--', label='Number of datapoints averaged')
-                ax2.set_ylabel('Number of Datapoints', color='r')
-                ax2.tick_params(axis='y', labelcolor='r')
-
-                # Add a legend with all labels
                 lines, labels = ax1.get_legend_handles_labels()
-                lines2, labels2 = ax2.get_legend_handles_labels()
-                ax1.legend(lines + lines2, labels + labels2, loc='upper right')
+                if average_distance_vals:
+                    # Add secondary y-axis for datapoints
+                    ax2 = ax1.twinx()
+                    ax2.plot(num_datapoints.keys(), num_datapoints.values(), 'r--', label='Number of datapoints averaged')
+                    ax2.set_ylabel('Number of Datapoints', color='r')
+                    ax2.tick_params(axis='y', labelcolor='r')
+
+                    # Create legend labels for secondary axis aswell
+                    lines2, labels2 = ax2.get_legend_handles_labels()
+                    lines = lines + lines2
+                    labels = labels + labels2
+                ax1.legend(lines, labels, loc='upper right')
+
                 
                 ax1.set_title(f'{type_of_fit_measure} vs Distance for Predictions Averaged Across all Sessions. \n Norm {normalization}, sessions omitted: {omit_sessions}, {date.today()}')
                 plt.grid(True)
@@ -2196,7 +2215,7 @@ class VisualizationHelper(GLMHelper):
                 #    pickle.dump(timepoints_sessions_plot, file)
 
 
-    def timepoint_window_drift(self, subtract_self_pred:bool, cut_repeated_session:bool, time_window_size:int, debugging=False):
+    def timepoint_window_drift(self, subtract_self_pred:bool, omitted_sessions:list, time_window_size:int, debugging=False):
         for normalization in self.normalizations:
             # Load timepoint-based variance explained
             storage_folder = f"data_files/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
@@ -2209,6 +2228,16 @@ class VisualizationHelper(GLMHelper):
             if subtract_self_pred:
                 # Normalize with self-predictions
                 fit_measures_by_session_by_timepoint = self.normalize_cross_session_preds_with_self_preds(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint)
+            if omitted_sessions:
+                fit_measures_sessions_omitted = self.recursive_defaultdict()
+                for session_train_id, fit_measures_train_session in fit_measures_by_session_by_timepoint['session_mapping'].items():
+                    if session_train_id in omitted_sessions:
+                        continue
+                    for session_pred_id, fit_measures_pred_session in fit_measures_train_session["session_pred"].items():
+                        if session_pred_id in omitted_sessions:
+                            continue
+                        fit_measures_sessions_omitted['session_mapping'][session_train_id]["session_pred"][session_pred_id] = fit_measures_pred_session
+                fit_measures_by_session_by_timepoint = fit_measures_sessions_omitted
 
             def filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint: dict, timepoint_window_start_idx:int, time_window_size:int):
                 """
@@ -2242,7 +2271,7 @@ class VisualizationHelper(GLMHelper):
                     fit_measures_by_distances_window = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint_window, timepoint_level_input=True)
 
                     # Plot drift for current window
-                    drift_plot_window = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_window, self_pred_normalized=subtract_self_pred, cut_repeated_session=cut_repeated_session)
+                    drift_plot_window = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_window, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions)
 
                     # Store plot for current window
                     window_end = timepoint_window_start_idx + time_window_size
@@ -2255,7 +2284,7 @@ class VisualizationHelper(GLMHelper):
 
             # For control/comparison, plot the drift for the all timepoints aswell
             fit_measures_by_distances_all_timepoints = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True)
-            drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, cut_repeated_session=cut_repeated_session)
+            drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions)
 
             # Store plot for current window
             storage_folder = f"data_files/visualizations/only_distance/timepoint_windows/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
