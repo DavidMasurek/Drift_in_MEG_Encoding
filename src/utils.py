@@ -291,9 +291,9 @@ class BasicOperationsHelper:
         return fit_measures_by_session_averaged_over_timepoints
 
 
-    def calculate_fit_by_distances(self, fit_measures_by_session: dict, timepoint_level_input: bool):
+    def calculate_fit_by_distances(self, fit_measures_by_session: dict, timepoint_level_input: bool, average_within_distances:bool):
         """
-        Calculates the correlation between distance and variance explained / fit measure. Input should be a dict containing all cross-session fit measures (on a timepoint level).
+        Aligns fit measures by distances. Input should be a dict containing all cross-session fit measures (on a timepoint level).
         """
         session_day_differences = self.get_session_date_differences()
 
@@ -306,16 +306,23 @@ class BasicOperationsHelper:
             for session_pred_id, fit_measure_pred_session in fit_measures_train_session["session_pred"].items():
                 if session_train_id != session_pred_id:
                     distance = session_day_differences[session_train_id][session_pred_id]
-                    if distance not in fit_by_distances:
-                        fit_by_distances[distance] = {"fit_measure": fit_measure_pred_session, "num_measures": 1}
+                    if average_within_distances:
+                        if distance not in fit_by_distances:
+                            fit_by_distances[distance] = {"fit_measure": fit_measure_pred_session, "num_measures": 1}
+                        else:
+                            fit_by_distances[distance]["fit_measure"] += fit_measure_pred_session
+                            fit_by_distances[distance]["num_measures"] += 1
                     else:
-                        fit_by_distances[distance]["fit_measure"] += fit_measure_pred_session
-                        fit_by_distances[distance]["num_measures"] += 1
+                        if distance not in fit_by_distances:
+                            fit_by_distances[distance] = [fit_measure_pred_session]
+                        else:
+                            fit_by_distances[distance].append(fit_measure_pred_session)
 
-        for distance in fit_by_distances:
-            fit_measure_distance = fit_by_distances[distance]["fit_measure"]
-            num_measures_distance = fit_by_distances[distance]["num_measures"]
-            fit_by_distances[distance]["fit_measure"] = fit_measure_distance / num_measures_distance
+        if average_within_distances:               
+            for distance in fit_by_distances:
+                fit_measure_distance = fit_by_distances[distance]["fit_measure"]
+                num_measures_distance = fit_by_distances[distance]["num_measures"]
+                fit_by_distances[distance]["fit_measure"] = fit_measure_distance / num_measures_distance
 
         return fit_by_distances
 
@@ -386,8 +393,8 @@ class BasicOperationsHelper:
         plot_path = os.path.join(plot_folder, plot_file)
         plt.savefig(plot_path)
         # Mne plots cannot be closed
-        if plot_type not in ["mne", "figure"]:
-            plt.close()
+        #if plot_type not in ["mne", "figure"]:
+        #    plt.close()
 
 
     def normalize_array(self, data: np.ndarray, normalization: str, session_id: str = None):
@@ -1683,45 +1690,89 @@ class VisualizationHelper(GLMHelper):
         self.n_mag = n_mag
 
     
-    def _plot_drift_distance_based(self, fit_measures_by_distances:dict, self_pred_normalized:bool, omitted_sessions:list):
+    def _plot_drift_distance_based(self, fit_measures_by_distances:dict, omitted_sessions:list, self_pred_normalized:bool, losses_averaged_within_distances:bool, all_windows_one_plot:bool):
         """
         Creates drift plot based on fit measures data by distance. Expects keys of distance in days as string number, each key containing keys "fit_measure" and "num_measures"
         """
         # Plot loss as a function of distance of predicted session from "training" session
         fig, ax1 = plt.subplots(figsize=(12, 8))
 
-        # Sort by distance for readable plot
-        fit_measures_by_distances = {distance: fit_measures_by_distances[distance] for distance in sorted(fit_measures_by_distances, key=int)}
+        def extract_x_y_arrays(fit_measures_by_distances):
+            """
+            Helper function to extract two arrays 'x_values' and 'y_values' from fit_measures_by_distances
+            """
+            # Sort by distance for readable plot
+            fit_measures_by_distances = {distance: fit_measures_by_distances[distance] for distance in sorted(fit_measures_by_distances, key=int)}
 
-        x_values = np.array(list(fit_measures_by_distances.keys())).astype(int)
-        y_values = np.array([data_by_distance["fit_measure"] for data_by_distance in fit_measures_by_distances.values()])
+            if losses_averaged_within_distances:
+                x_values = np.array(list(fit_measures_by_distances.keys())).astype(int)
+                y_values = np.array([data_by_distance["fit_measure"] for data_by_distance in fit_measures_by_distances.values()])
 
-        #logger.custom_info(f"len(y_values): {len(y_values)}")
+                num_measures_values = np.array([data_by_distance["num_measures"] for data_by_distance in fit_measures_by_distances.values()])
+            else:
+                x_values = []
+                y_values = []
+                for distance in fit_measures_by_distances:
+                    for fit_measure in fit_measures_by_distances[distance]:
+                        x_values.append(distance)
+                        y_values.append(fit_measure)
+                x_values = np.array(x_values)
+                y_values = np.array(y_values)
+            
+            return x_values, y_values
 
-        num_measures_values = np.array([data_by_distance["num_measures"] for data_by_distance in fit_measures_by_distances.values()])
+        def plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances:dict, ax1, color:str, timepoint_start_idx:str = None):
+            """
+            Helper function that insert scattered fit measures (mostly variance explained) over distances into a given plot
+            """
+            x_values, y_values = extract_x_y_arrays(fit_measures_by_distances)
 
-        # Calculate trend line 
-        slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
-        trend_line = slope * x_values + intercept
-        r_value = "{:.3f}".format(r_value)  # limit to three decimals
+            # Calculate trend line 
+            x_values_set = np.array(list(set(x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
+            slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
+            trend_line = slope * x_values_set + intercept
+            r_value = "{:.3f}".format(r_value)  # limit to three decimals
 
-        ax1.plot(x_values, y_values, marker='o', linestyle='none', label=f'Average Variance Explained')
-        ax1.plot(x_values, trend_line, color='green', linestyle='-', label=f'Trend line (r={r_value})', linewidth=3)
+            label = f"Timepoint Start Idx: {timepoint_start_idx}, (r={r_value})" if timepoint_start_idx is not None else None
+            ax1.plot(x_values, y_values, label=label, color=color, marker='o', linestyle='none')
+            trend_color = color if color != 'C0' else 'green'  # If only a single window is plotted, we want different colors for scatter points and trend. If all windows are plotted this gets too confusing
+            ax1.plot(x_values_set, trend_line, color=trend_color, linestyle='-', linewidth=3)
+
+        # Insert scatter values based on distance into plot
+        if not all_windows_one_plot:
+            plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances, ax1, color='C0')  # using default blue color
+        else:
+            # Create colormap to differentiate time-windows
+            n_windows = len(fit_measures_by_distances["timewindow_start"].keys())
+            colormap = cm.viridis  
+            colors = colormap(np.linspace(0, 1, num=n_windows))
+
+            for timepoint_idx, timepoint_window_start_idx in enumerate(fit_measures_by_distances["timewindow_start"]):
+                logger.custom_info(f"timepoint_idx: {timepoint_idx}")
+                fit_measures_by_distances_window = fit_measures_by_distances["timewindow_start"][timepoint_window_start_idx]["fit_measures_by_distances"]
+                color = colors[timepoint_idx]
+                plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances_window, ax1, color=color, timepoint_start_idx=timepoint_window_start_idx) 
+
         ax1.set_xlabel(f'Distance in days between "train" and "test" Session')
         ax1.set_ylabel(f'Variance Explained')
+        #plt.legend(loc="upper right")  # , bbox_to_anchor=(1.5, 1))
         ax1.tick_params(axis='y', labelcolor='b')
         ax1.grid(True)
 
-        # Add secondary y-axis for num of datapoints in each average
-        ax2 = ax1.twinx()
-        ax2.plot(x_values, num_measures_values, 'r--', label='Number of datapoints averaged')
-        ax2.set_ylabel('Number of Datapoints', color='r')
-        ax2.tick_params(axis='y', labelcolor='r')
-
-        # Add a legend with all labels
         lines, labels = ax1.get_legend_handles_labels()
-        lines2, labels2 = ax2.get_legend_handles_labels()
-        ax1.legend(lines + lines2, labels + labels2, loc='upper right')
+        if losses_averaged_within_distances:
+            # Add secondary y-axis for num of datapoints in each average
+            ax2 = ax1.twinx()
+            ax2.plot(x_values, num_measures_values, 'r--', label='Number of datapoints averaged')
+            ax2.set_ylabel('Number of Datapoints', color='r')
+            ax2.tick_params(axis='y', labelcolor='r')
+
+            # Create legend labels for secondary axis aswell
+            lines2, labels2 = ax2.get_legend_handles_labels()
+            lines = lines + lines2
+            labels = labels + labels2
+
+        ax1.legend(lines, labels, loc='upper right')
         ax1.set_title(f'Averaged Normalized Variance Explained vs Distance in days. \n Self-Pred Normalized?: {self_pred_normalized} \n Norm "mean_centered_ch_then_global_robust_scaling", omitted_sessions: {omitted_sessions}, {date.today()}')
         plt.grid(True)
         
@@ -1778,14 +1829,14 @@ class VisualizationHelper(GLMHelper):
 
                 plt.title(f'{type_of_fit_measure} Session Self-prediction with Norm {normalization}, {date.today()}')
                 plt.grid(True)
-                plt.show()
+                #plt.show()
 
                 # Save the plot to a file
                 plot_folder = f"data_files/visualizations/encoding_performance/subject_{self.subject_id}/norm_{normalization}"
                 pred_split_addition = pred_split[0] if len(pred_splits) == 1 else "both"
                 plot_file = f"{type_of_fit_measure}_session_self_prediction_{normalization}_pred_splits_{pred_split_addition}.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
-                plt.close()
+                #plt.close()
 
                 logger.custom_debug(f"self_pred_measures: {self_pred_measures}")
         else:
@@ -1821,7 +1872,7 @@ class VisualizationHelper(GLMHelper):
                 plt.legend(loc='upper right')
                 plt.title(f'{type_of_fit_measure} Self-prediction combined over all Sessions with Norm {normalization}, {date.today()}')
                 plt.grid(True)
-                plt.show()
+                #plt.show()
 
                 # Save the plot to a file
                 plot_folder = f"data_files/visualizations/encoding_performance/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}"
@@ -1922,7 +1973,8 @@ class VisualizationHelper(GLMHelper):
                 else:
                     # Extract values, sorted by x
                     logger.custom_info(f"losses_by_distances: {losses_by_distances}")
-                    sorted_losses_by_distances = dict(sorted(losses_by_distances.items(), key=lambda item: item[0], reverse=False))
+                    sorted_losses_by_distances = {distance: losses_by_distances[distance] for distance in sorted(losses_by_distances, key=int)}
+                    #sorted_losses_by_distances = dict(sorted(losses_by_distances.items(), key=lambda item: item[0], reverse=False))
                     logger.custom_info(f"sorted_losses_by_distances: {sorted_losses_by_distances}")
                     x_values = []
                     y_values = []
@@ -1960,18 +2012,17 @@ class VisualizationHelper(GLMHelper):
                     lines2, labels2 = ax2.get_legend_handles_labels()
                     lines = lines + lines2
                     labels = labels + labels2
-                ax1.legend(lines, labels, loc='upper right')
 
-                
+                ax1.legend(lines, labels, loc='upper right')
                 ax1.set_title(f'{type_of_fit_measure} vs Distance for Predictions Averaged Across all Sessions. \n Norm {normalization}, sessions omitted: {omit_sessions}, {date.today()}')
                 plt.grid(True)
-                plt.show()
+                #plt.show()
 
                 # Save the plot to a file
                 plot_folder = f"data_files/visualizations/only_distance/subject_{self.subject_id}/norm_{normalization}"
                 plot_file = f"{type_of_fit_measure}_plot_over_distance_{normalization}.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
-                plt.close()
+                #plt.close()
 
             elif not by_timepoints:
                 # Collect self-prediction {type_of_fit_measure}s for baseline and prepare average non-self-{type_of_fit_measure} calculation
@@ -2111,7 +2162,7 @@ class VisualizationHelper(GLMHelper):
             logger.custom_info(f"timepoint_50: {timepoint_50}")
             """
         
-            colormap = cm.viridis  # You can choose any colormap you prefer
+            colormap = cm.viridis  
             colors = colormap(np.linspace(0, 1, num_sessions))
 
             #logger.custom_info(f"colors: {colors}")
@@ -2174,7 +2225,7 @@ class VisualizationHelper(GLMHelper):
             #logger.custom_info(f"yticks: {np.arange(0, num_timepoints+1, 10)}")
             
 
-            plt.show()
+            #plt.show()
             
             return fig
 
@@ -2215,7 +2266,7 @@ class VisualizationHelper(GLMHelper):
                 #    pickle.dump(timepoints_sessions_plot, file)
 
 
-    def timepoint_window_drift(self, subtract_self_pred:bool, omitted_sessions:list, time_window_size:int, debugging=False):
+    def timepoint_window_drift(self, omitted_sessions:list, time_window_size:int, all_windows_one_plot:bool, subtract_self_pred:bool, debugging=False):
         for normalization in self.normalizations:
             # Load timepoint-based variance explained
             storage_folder = f"data_files/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
@@ -2256,50 +2307,62 @@ class VisualizationHelper(GLMHelper):
                         assert current_window_size == time_window_size, f"Time window size is incorrect. current_window_size: {current_window_size}, time_window_size: {time_window_size}"
                 
                 return fit_measures_by_session_by_chosen_timepoints
+
+            # Define storage folder for all plots in function
+            storage_folder = f"data_files/visualizations/only_distance/timepoint_windows/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
             
             # Calculate drift for various timewindows by slicing 
+            if all_windows_one_plot:
+                fit_measures_by_distance_by_time_window = {"timewindow_start": {}}
+
             num_timepoints = (self.timepoint_max - self.timepoint_min) + 1  # +1 because of index 0 ofc
             timepoint_window_start_idx = 0
             while timepoint_window_start_idx < num_timepoints:
                 # Filter timepoint values for current window
-                fit_measures_by_session_by_timepoint_window = filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint,
+                fit_measures_window_by_session = filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint,
                                                                                                 timepoint_window_start_idx=timepoint_window_start_idx,
                                                                                                 time_window_size=time_window_size)
                 # Only consider full windows (i.e. don't use potential smaller last timepoint window)
-                if fit_measures_by_session_by_timepoint_window is not None:
+                if fit_measures_window_by_session is not None:
                     # Calculate distance based variance explained for current window
-                    fit_measures_by_distances_window = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint_window, timepoint_level_input=True)
+                    fit_measures_by_distances_window = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_window_by_session, timepoint_level_input=True, average_within_distances=False)
 
-                    # Plot drift for current window
-                    drift_plot_window = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_window, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions)
+                    if not all_windows_one_plot:
+                        # Plot drift for current window
+                        drift_plot_window = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_window, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False)
 
-                    # Store plot for current window
-                    window_end = timepoint_window_start_idx + time_window_size
-                    timepoint_window_description = f"window_{timepoint_window_start_idx}-{window_end}"
-                    storage_folder = f"data_files/visualizations/only_distance/timepoint_windows/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
-                    storage_filename = f"drift_plot_{timepoint_window_description}"
-                    self.save_plot_as_file(plt=drift_plot_window, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+                        # Store plot for current window
+                        window_end = timepoint_window_start_idx + time_window_size
+                        timepoint_window_description = f"window_{timepoint_window_start_idx}-{window_end}"
+                        storage_filename = f"drift_plot_{timepoint_window_description}"
+                        self.save_plot_as_file(plt=drift_plot_window, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+                    else:
+                        fit_measures_by_distance_by_time_window["timewindow_start"][timepoint_window_start_idx] = {"fit_measures_by_distances": fit_measures_by_distances_window}
 
                 timepoint_window_start_idx += time_window_size
 
+            # Plot all timewindows in the same plot with different colors for comparison
+            if all_windows_one_plot:
+                logger.custom_info(f"Calling from all_windows_one_plot.")
+                drift_plot_all_windows = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distance_by_time_window, omitted_sessions=omitted_sessions, self_pred_normalized=subtract_self_pred, losses_averaged_within_distances=False, all_windows_one_plot=True)
+                storage_filename = f"drift_plot_all_windows_comparison"
+                self.save_plot_as_file(plt=drift_plot_all_windows, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+
             # For control/comparison, plot the drift for the all timepoints aswell
-            fit_measures_by_distances_all_timepoints = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True)
-            drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions)
+            fit_measures_by_distances_all_timepoints = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
+            drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False)
 
             # Store plot for current window
-            storage_folder = f"data_files/visualizations/only_distance/timepoint_windows/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
             storage_filename = f"drift_plot_all_timepoints"
             self.save_plot_as_file(plt=drift_plot_all_timepoints, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
-            plt.close(drift_plot_all_timepoints)
+            #plt.close(drift_plot_all_timepoints)
 
 
             # Debugging: average timepoint data to compare values to non-timepoint dict
             if debugging:
                 fit_measures_by_distances_session_level = self.average_timepoint_data_per_session(fit_measures_by_session_by_timepoint)
 
-                storage_folder = f"data_files/visualizations/only_distance/timepoint_windows/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
                 storage_filename = f"var_explained_session_level_used_for_timepoint_plots.json"
-
                 os.makedirs(storage_folder, exist_ok=True)
                 json_storage_path = os.path.join(storage_folder, storage_filename)
 

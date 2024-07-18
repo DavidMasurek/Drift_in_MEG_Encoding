@@ -99,6 +99,7 @@ fractional_ridge = False
 
 subtract_self_pred = False
 time_window_size = 10
+all_windows_one_plot= True
 cut_repeated_session = False
 omit_non_generalizing_sessions = True
 
@@ -211,14 +212,14 @@ for run in range(run_pipeline_n_times):
 
             # Visualize prediction results
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
-            visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit, var_explained=True)
+            ##visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit, var_explained=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["1","7","10"], var_explained=True)
             ##visualization_helper.visualize_GLM_results(by_timepoints=True, var_explained=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
             # Visuzalize distance based predictions at timepoint scale
             ##visualization_helper.three_dim_timepoint_predictions(subtract_self_pred=subtract_self_pred) 
-            #visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, time_window_size=time_window_size)  
+            visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, time_window_size=time_window_size, all_windows_one_plot=all_windows_one_plot)  
             
             # Visualize model perspective (values by timepoint)
             ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"
