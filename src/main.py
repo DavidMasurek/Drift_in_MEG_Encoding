@@ -98,7 +98,7 @@ use_best_timepoints_for_subject = True
 fractional_ridge = False
 
 subtract_self_pred = False
-time_window_size = 10
+time_window_n_indices = 10
 all_windows_one_plot= True
 cut_repeated_session = False
 omit_non_generalizing_sessions = True
@@ -198,7 +198,7 @@ for run in range(run_pipeline_n_times):
 
         ##### Visualization #####
         if visualization:
-            visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid)
+            visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
 
             # Visualize meg data with mne
             #visualization_helper.visualize_meg_epochs_mne()
@@ -219,7 +219,7 @@ for run in range(run_pipeline_n_times):
 
             # Visuzalize distance based predictions at timepoint scale
             ##visualization_helper.three_dim_timepoint_predictions(subtract_self_pred=subtract_self_pred) 
-            visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, time_window_size=time_window_size, all_windows_one_plot=all_windows_one_plot)  
+            visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot)  
             
             # Visualize model perspective (values by timepoint)
             ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"
@@ -231,4 +231,6 @@ logger.custom_info("Pipeline completed.")
 
 
 logger.warning("Using saccade for .fif file regardless of used lock_event for session date differences because files does not exist for fixations.")
+if use_ica_cleaned_data:
+    logger.warning("idx to ms timepoints mapping in plots is currently based on ica cleaned metadata. Validation is required before generalizing to other data files.")
 

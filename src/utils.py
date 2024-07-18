@@ -45,6 +45,31 @@ class BasicOperationsHelper:
         self.session_ids_num = [str(session_id) for session_id in range(1,11)]
 
 
+    def map_timepoint_idx_to_ms(self, timepoint_idx):
+        """
+        Helper function that maps the index of a timepoint to it's latency in ms relative to lock event (saccade/fixation) onset.
+
+        !!! Based on ICA-cleaned metadata !!!
+        """
+        if self.lock_event == "saccade":
+            # Saccade: 401 timepoints, -0.5 to 0.3
+            min_ms = -500
+            max_ms = 300
+            num_timepoints = 401
+        else:
+            # Fixation: 401 timepoints, -0.3 to 0.5
+            min_ms = -300
+            max_ms =  500
+            num_timepoints = 401
+
+        ms_values = np.linspace(min_ms, max_ms, num=num_timepoints)  # space containing the ms values for all timepoints
+        ms_index = timepoint_idx + self.timepoint_min  # The index for the linspace results from the chosen idx and the beginning of the selected timepoint window (i.e. self.timepoint_min)
+        timepoint_ms = int(ms_values[ms_index])
+        logger.custom_info(f"timepoint_idx: {timepoint_idx}, self.timepoint_min: {self.timepoint_min}, ms_index: {ms_index}, timepoint_ms: {timepoint_ms}")
+
+        return timepoint_ms
+
+
     def get_relevant_meg_channels(self, chosen_channels: list):
         """
         Returns names of the chosen channels and their index in the meg dataset.
@@ -1683,9 +1708,10 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
 
 class VisualizationHelper(GLMHelper):
-    def __init__(self, n_grad: int, n_mag: int, **kwargs):
+    def __init__(self, n_grad: int, n_mag: int, time_window_n_indices:int, **kwargs):
         super().__init__(**kwargs)
 
+        self.time_window_n_indices = time_window_n_indices
         self.n_grad = n_grad
         self.n_mag = n_mag
 
@@ -1733,9 +1759,14 @@ class VisualizationHelper(GLMHelper):
             trend_line = slope * x_values_set + intercept
             r_value = "{:.3f}".format(r_value)  # limit to three decimals
 
-            label = f"Timepoint Start Idx: {timepoint_start_idx}, (r={r_value})" if timepoint_start_idx is not None else None
+            if timepoint_start_idx is not None:
+                timepoint_start_ms = self.map_timepoint_idx_to_ms(timepoint_start_idx)
+                timepoint_end_ms = timepoint_start_ms + (self.time_window_n_indices * 2)  # each timepoint is equivalent to 2ms (i.e. )
+                label = f"{timepoint_start_ms} to {timepoint_end_ms}ms, (r={r_value})" 
+            else:
+                label = None
             ax1.plot(x_values, y_values, label=label, color=color, marker='o', linestyle='none')
-            trend_color = color if color != 'C0' else 'green'  # If only a single window is plotted, we want different colors for scatter points and trend. If all windows are plotted this gets too confusing
+            trend_color = color if not isinstance(color,str) else 'green'  # If only a single window is plotted, we want different colors for scatter points and trend. If all windows are plotted this gets too confusing. In this 'color' will be an array
             ax1.plot(x_values_set, trend_line, color=trend_color, linestyle='-', linewidth=3)
 
         # Insert scatter values based on distance into plot
@@ -1748,7 +1779,6 @@ class VisualizationHelper(GLMHelper):
             colors = colormap(np.linspace(0, 1, num=n_windows))
 
             for timepoint_idx, timepoint_window_start_idx in enumerate(fit_measures_by_distances["timewindow_start"]):
-                logger.custom_info(f"timepoint_idx: {timepoint_idx}")
                 fit_measures_by_distances_window = fit_measures_by_distances["timewindow_start"][timepoint_window_start_idx]["fit_measures_by_distances"]
                 color = colors[timepoint_idx]
                 plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances_window, ax1, color=color, timepoint_start_idx=timepoint_window_start_idx) 
@@ -1972,10 +2002,7 @@ class VisualizationHelper(GLMHelper):
                     y_values = np.array(list(avg_losses.values()))
                 else:
                     # Extract values, sorted by x
-                    logger.custom_info(f"losses_by_distances: {losses_by_distances}")
                     sorted_losses_by_distances = {distance: losses_by_distances[distance] for distance in sorted(losses_by_distances, key=int)}
-                    #sorted_losses_by_distances = dict(sorted(losses_by_distances.items(), key=lambda item: item[0], reverse=False))
-                    logger.custom_info(f"sorted_losses_by_distances: {sorted_losses_by_distances}")
                     x_values = []
                     y_values = []
                     for distance in sorted_losses_by_distances:
@@ -2266,7 +2293,7 @@ class VisualizationHelper(GLMHelper):
                 #    pickle.dump(timepoints_sessions_plot, file)
 
 
-    def timepoint_window_drift(self, omitted_sessions:list, time_window_size:int, all_windows_one_plot:bool, subtract_self_pred:bool, debugging=False):
+    def timepoint_window_drift(self, omitted_sessions:list, all_windows_one_plot:bool, subtract_self_pred:bool, debugging=False):
         for normalization in self.normalizations:
             # Load timepoint-based variance explained
             storage_folder = f"data_files/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
@@ -2290,7 +2317,7 @@ class VisualizationHelper(GLMHelper):
                         fit_measures_sessions_omitted['session_mapping'][session_train_id]["session_pred"][session_pred_id] = fit_measures_pred_session
                 fit_measures_by_session_by_timepoint = fit_measures_sessions_omitted
 
-            def filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint: dict, timepoint_window_start_idx:int, time_window_size:int):
+            def filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint: dict, timepoint_window_start_idx:int):
                 """
                 Contains a copy of the input fit measure dict by timepoints that only contains the timepoints within the selected window
                 """
@@ -2298,13 +2325,13 @@ class VisualizationHelper(GLMHelper):
                 for session_train_id, fit_measures_train_session in fit_measures_by_session_by_timepoint['session_mapping'].items():
                     for session_pred_id, fit_measures_pred_session in fit_measures_train_session["session_pred"].items():
                         for timepoint_idx, timepoint_value in fit_measures_pred_session["timepoint"].items():
-                            if int(timepoint_idx) >= timepoint_window_start_idx and int(timepoint_idx) < (timepoint_window_start_idx + time_window_size):
+                            if int(timepoint_idx) >= timepoint_window_start_idx and int(timepoint_idx) < (timepoint_window_start_idx + self.time_window_n_indices):
                                 fit_measures_by_session_by_chosen_timepoints['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"][timepoint_idx] = timepoint_value
                         # Only consider full windows (i.e. cut off potential smaller last timepoint window)
                         current_window_size = len(fit_measures_by_session_by_chosen_timepoints['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"])
-                        if current_window_size < time_window_size:
+                        if current_window_size < self.time_window_n_indices:
                             return None
-                        assert current_window_size == time_window_size, f"Time window size is incorrect. current_window_size: {current_window_size}, time_window_size: {time_window_size}"
+                        assert current_window_size == self.time_window_n_indices, f"Time window size is incorrect. current_window_size: {current_window_size}, time_window_n_indices: {self.time_window_n_indices}"
                 
                 return fit_measures_by_session_by_chosen_timepoints
 
@@ -2320,8 +2347,7 @@ class VisualizationHelper(GLMHelper):
             while timepoint_window_start_idx < num_timepoints:
                 # Filter timepoint values for current window
                 fit_measures_window_by_session = filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint,
-                                                                                                timepoint_window_start_idx=timepoint_window_start_idx,
-                                                                                                time_window_size=time_window_size)
+                                                                                    timepoint_window_start_idx=timepoint_window_start_idx)
                 # Only consider full windows (i.e. don't use potential smaller last timepoint window)
                 if fit_measures_window_by_session is not None:
                     # Calculate distance based variance explained for current window
@@ -2332,18 +2358,17 @@ class VisualizationHelper(GLMHelper):
                         drift_plot_window = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_window, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False)
 
                         # Store plot for current window
-                        window_end = timepoint_window_start_idx + time_window_size
+                        window_end = timepoint_window_start_idx + self.time_window_n_indices
                         timepoint_window_description = f"window_{timepoint_window_start_idx}-{window_end}"
                         storage_filename = f"drift_plot_{timepoint_window_description}"
                         self.save_plot_as_file(plt=drift_plot_window, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
                     else:
                         fit_measures_by_distance_by_time_window["timewindow_start"][timepoint_window_start_idx] = {"fit_measures_by_distances": fit_measures_by_distances_window}
 
-                timepoint_window_start_idx += time_window_size
+                timepoint_window_start_idx += self.time_window_n_indices
 
             # Plot all timewindows in the same plot with different colors for comparison
             if all_windows_one_plot:
-                logger.custom_info(f"Calling from all_windows_one_plot.")
                 drift_plot_all_windows = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distance_by_time_window, omitted_sessions=omitted_sessions, self_pred_normalized=subtract_self_pred, losses_averaged_within_distances=False, all_windows_one_plot=True)
                 storage_filename = f"drift_plot_all_windows_comparison"
                 self.save_plot_as_file(plt=drift_plot_all_windows, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
