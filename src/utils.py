@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import h5py
 import pickle
@@ -47,25 +48,24 @@ class BasicOperationsHelper:
 
     def map_timepoint_idx_to_ms(self, timepoint_idx):
         """
-        Helper function that maps the index of a timepoint to it's latency in ms relative to lock event (saccade/fixation) onset.
+        Maps the index of a timepoint to it's latency in ms relative to lock event (saccade/fixation) onset.
 
-        !!! Based on ICA-cleaned metadata !!!
+        !!! Based on ICA-cleaned metadata from f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/erf/filter_0.2_200/ica" !!!
         """
         if self.lock_event == "saccade":
-            # Saccade: 401 timepoints, -0.5 to 0.3
-            min_ms = -500
-            max_ms = 300
-            num_timepoints = 401
+            # Old, Andrej: Saccade: 401 timepoints, -500 to 300
+            # AVS ICA-claned: Saccade: 651 timepoints, -800 to 500
+            min_ms = -800
+            max_ms = 500
+            num_timepoints = 651
         else:
-            # Fixation: 401 timepoints, -0.3 to 0.5
-            min_ms = -300
-            max_ms =  500
-            num_timepoints = 401
+            # Old, Andrej: Fixation: 401 timepoints, -300 to 500
+            raise NotImplementedError("Did not check considered timepoints for fixation-locked data in the ICA-cleaned data from AVS.")
 
         ms_values = np.linspace(min_ms, max_ms, num=num_timepoints)  # space containing the ms values for all timepoints
+        #logger.custom_debug(f"ms_values linspace: {ms_values}")
         ms_index = timepoint_idx + self.timepoint_min  # The index for the linspace results from the chosen idx and the beginning of the selected timepoint window (i.e. self.timepoint_min)
         timepoint_ms = int(ms_values[ms_index])
-        logger.custom_info(f"timepoint_idx: {timepoint_idx}, self.timepoint_min: {self.timepoint_min}, ms_index: {ms_index}, timepoint_ms: {timepoint_ms}")
 
         return timepoint_ms
 
@@ -74,6 +74,7 @@ class BasicOperationsHelper:
         """
         Returns names of the chosen channels and their index in the meg dataset.
 
+        Example in: [1731, 1921, 2111, 2341, 2511]
         Example out: {'grad': {}, 'mag': {194: 'MEG1731', 215: 'MEG1921', 236: 'MEG2111', 269: 'MEG2341', 284: 'MEG2511'}}
         """
         
@@ -516,8 +517,8 @@ class MetadataHelper(BasicOperationsHelper):
 
         self.crop_size = crop_size
         self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{crop_size}/metadata/as{self.subject_id}_crops_metadata.csv"
-        self.meg_metadata_folder = f"/share/klab/camme/aklimenok/avs-encoding/data/meg_input/as{self.subject_id}/fixation_ica_cleaned"  # f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
-
+        self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/erf/filter_0.2_200/ica"  # f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
+    
     def create_combined_metadata_dict(self, investigate_missing_metadata=False) -> None:
         """
         Creates the combined metadata dict with timepoints that can be found in both meg and crop metadata for the respective session and trial.
@@ -796,7 +797,7 @@ class DatasetHelper(MetadataHelper):
         meg_metadata = self.read_dict_from_json(type_of_content="meg_metadata")
 
         if use_ica_cleaned_data:
-            meg_data_folder = f"/share/klab/camme/aklimenok/avs-encoding/data/meg_input/as{self.subject_id}/fixation_ica_cleaned"
+            meg_data_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/erf/filter_0.2_200/ica"
         else:
             meg_data_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
         # Select relevant channels
@@ -817,9 +818,9 @@ class DatasetHelper(MetadataHelper):
                 meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a saccade: (2945, 204, 601), fixation: (2874, 204, 401) 
                 meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a saccade: (2945, 102, 601), fixation: (2874, 102, 401)
 
-                logger.custom_info(f"self.lock_event: {self.lock_event}")
-                logger.custom_info(f"H5 f.attrs['times']: {f.attrs['times']}")
-                logger.custom_info(f"H5 len(f.attrs['times']): {len(f.attrs['times'])}")
+                #logger.custom_info(f"self.lock_event: {self.lock_event}")
+                #logger.custom_info(f"H5 f.attrs['times']: {f.attrs['times']}")
+                #logger.custom_info(f"H5 len(f.attrs['times']): {len(f.attrs['times'])}")
 
                 num_meg_timepoints = meg_data['grad'].shape[0]
 
@@ -1716,7 +1717,7 @@ class VisualizationHelper(GLMHelper):
         self.n_mag = n_mag
 
     
-    def _plot_drift_distance_based(self, fit_measures_by_distances:dict, omitted_sessions:list, self_pred_normalized:bool, losses_averaged_within_distances:bool, all_windows_one_plot:bool):
+    def _plot_drift_distance_based(self, fit_measures_by_distances:dict, omitted_sessions:list, self_pred_normalized:bool, losses_averaged_within_distances:bool, all_windows_one_plot:bool, timepoint_window_start_idx:int = None):
         """
         Creates drift plot based on fit measures data by distance. Expects keys of distance in days as string number, each key containing keys "fit_measure" and "num_measures"
         """
@@ -1747,7 +1748,7 @@ class VisualizationHelper(GLMHelper):
             
             return x_values, y_values
 
-        def plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances:dict, ax1, color:str, timepoint_start_idx:str = None):
+        def plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances:dict, ax1, color:str, timepoint_window_start_idx:str = None):
             """
             Helper function that insert scattered fit measures (mostly variance explained) over distances into a given plot
             """
@@ -1759,10 +1760,16 @@ class VisualizationHelper(GLMHelper):
             trend_line = slope * x_values_set + intercept
             r_value = "{:.3f}".format(r_value)  # limit to three decimals
 
-            if timepoint_start_idx is not None:
-                timepoint_start_ms = self.map_timepoint_idx_to_ms(timepoint_start_idx)
+            if timepoint_window_start_idx not in [None, 999]:
+                timepoint_start_ms = self.map_timepoint_idx_to_ms(timepoint_window_start_idx)
                 timepoint_end_ms = timepoint_start_ms + (self.time_window_n_indices * 2)  # each timepoint is equivalent to 2ms (i.e. )
                 label = f"{timepoint_start_ms} to {timepoint_end_ms}ms, (r={r_value})" 
+            elif timepoint_window_start_idx == 999:
+                # In this case we are plotting all timepoints
+                min_index = 0  # 0 because timepoint_min is added in the mapping
+                max_index = self.timepoint_max - self.timepoint_min
+                #logger.custom_info(f"max_index: {max_index}")
+                label = f"{self.map_timepoint_idx_to_ms(min_index)} to {self.map_timepoint_idx_to_ms(max_index)}ms, (r={r_value})"   
             else:
                 label = None
             ax1.plot(x_values, y_values, label=label, color=color, marker='o', linestyle='none')
@@ -1771,7 +1778,7 @@ class VisualizationHelper(GLMHelper):
 
         # Insert scatter values based on distance into plot
         if not all_windows_one_plot:
-            plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances, ax1, color='C0')  # using default blue color
+            plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances, ax1, color='C0', timepoint_window_start_idx=timepoint_window_start_idx)  # using default blue color
         else:
             # Create colormap to differentiate time-windows
             n_windows = len(fit_measures_by_distances["timewindow_start"].keys())
@@ -1781,7 +1788,7 @@ class VisualizationHelper(GLMHelper):
             for timepoint_idx, timepoint_window_start_idx in enumerate(fit_measures_by_distances["timewindow_start"]):
                 fit_measures_by_distances_window = fit_measures_by_distances["timewindow_start"][timepoint_window_start_idx]["fit_measures_by_distances"]
                 color = colors[timepoint_idx]
-                plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances_window, ax1, color=color, timepoint_start_idx=timepoint_window_start_idx) 
+                plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances_window, ax1, color=color, timepoint_window_start_idx=timepoint_window_start_idx) 
 
         ax1.set_xlabel(f'Distance in days between "train" and "test" Session')
         ax1.set_ylabel(f'Variance Explained')
@@ -2112,10 +2119,14 @@ class VisualizationHelper(GLMHelper):
 
                 def plot_timepoint_fit_measure(timepoint_loss_list, num_timepoints, session_id=None):
                     plt.figure(figsize=(10, 6))
+                    timepoints_in_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in list(range(num_timepoints))]
+                    #logger.custom_info(f"timepoints_in_ms: {timepoints_in_ms}")
+                    ##plt.bar(timepoints_in_ms, timepoint_loss_list, color='blue')
                     plt.bar(list(range(num_timepoints)), timepoint_loss_list, color='blue')
+                    #logger.custom_debug(f"list(range(num_timepoints): {list(range(num_timepoints))}")
                     session_subtitle = "Averaged across all Sessions, predicting themselves" if session_id is None else f"Session {session_id}, predicting iteself"
                     plt.title(f'{type_of_fit_measure} Fit measure per Timepoint Model. {session_subtitle} \n omitted sessions: {omit_sessions}.')
-                    plt.xlabel('Timepoints')
+                    plt.xlabel(f'Time relative to {self.lock_event} onset')
                     plt.ylabel(f'{type_of_fit_measure}')
                     plt.grid(True)
 
@@ -2355,7 +2366,7 @@ class VisualizationHelper(GLMHelper):
 
                     if not all_windows_one_plot:
                         # Plot drift for current window
-                        drift_plot_window = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_window, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False)
+                        drift_plot_window = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_window, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=timepoint_window_start_idx)
 
                         # Store plot for current window
                         window_end = timepoint_window_start_idx + self.time_window_n_indices
@@ -2367,15 +2378,15 @@ class VisualizationHelper(GLMHelper):
 
                 timepoint_window_start_idx += self.time_window_n_indices
 
-            # Plot all timewindows in the same plot with different colors for comparison
+            # Plot all timewindows in the same plot (with different colors)
             if all_windows_one_plot:
                 drift_plot_all_windows = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distance_by_time_window, omitted_sessions=omitted_sessions, self_pred_normalized=subtract_self_pred, losses_averaged_within_distances=False, all_windows_one_plot=True)
                 storage_filename = f"drift_plot_all_windows_comparison"
                 self.save_plot_as_file(plt=drift_plot_all_windows, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
 
-            # For control/comparison, plot the drift for the all timepoints aswell
+            # For control/comparison, plot the drift for the all timepoint values combined/averaged aswell
             fit_measures_by_distances_all_timepoints = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
-            drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False)
+            drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999)  # 999 indicates that we are considering all timepoints
 
             # Store plot for current window
             storage_filename = f"drift_plot_all_timepoints"

@@ -17,7 +17,7 @@ sys.path.append(str(__location__))
 os.chdir(__location__)
 
 # Choose params
-subject_ids = ["02"]  # , "02", "03", "05"]  # "01", "02", "03", "04", "05" 
+subject_ids = ["04"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
 lock_event = "saccade" # "saccade" "fixation"
 
 crop_size = 112  # 224 112
@@ -32,12 +32,18 @@ meg_channels = [1731, 1921, 2111, 2341, 2511]
 n_grad = 0
 n_mag = 5
 
-best_timepoints_by_subject = {"01": {"timepoint_min": 175, "timepoint_max": 275},
-                              "02": {"timepoint_min": 175, "timepoint_max": 255},
-                              "03": {"timepoint_min": 175, "timepoint_max": 225},
-                              "05": {"timepoint_min": 160, "timepoint_max": 250},}
+best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 175, "timepoint_max": 275}, 
+                                            "02": {"timepoint_min": 175, "timepoint_max": 255},
+                                            "03": {"timepoint_min": 175, "timepoint_max": 225},
+                                            "05": {"timepoint_min": 160, "timepoint_max": 250},},
+                              "saccade":   {"01": {"timepoint_min": 425, "timepoint_max": 530}, 
+                                            "02": {"timepoint_min": 425, "timepoint_max": 525},
+                                            "03": {"timepoint_min": 400, "timepoint_max": 485},
+                                            "04": {"timepoint_min": 430, "timepoint_max": 515},
+                                            "05": {"timepoint_min": 420, "timepoint_max": 510},}
+                            }
 timepoint_min = 0  # fixation: 170, saccade: 275
-timepoint_max = 400  # fixation: 250, saccade: 375
+timepoint_max = 650  # fixation: 250, saccade: 375
 
 normalizations = ["mean_centered_ch_then_global_robust_scaling"] # , "no_norm", "mean_centered_ch_t"]  #, "no_norm", "mean_centered_ch_t", "robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
 
@@ -48,6 +54,7 @@ alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000,
 omit_sessions_by_subject = {"01": ["1"],
                             "02": ["4"],
                             "03": [],
+                            "04": [],
                             "05": ["9"],
                             }
 
@@ -99,7 +106,7 @@ fractional_ridge = False
 
 subtract_self_pred = False
 time_window_n_indices = 10
-all_windows_one_plot= True
+all_windows_one_plot = True
 cut_repeated_session = False
 omit_non_generalizing_sessions = True
 
@@ -119,8 +126,8 @@ logger = logging.getLogger(__name__)
 for run in range(run_pipeline_n_times):
     for subject_id in subject_ids:
         if use_best_timepoints_for_subject:
-            timepoint_min = best_timepoints_by_subject[subject_id]["timepoint_min"]
-            timepoint_max = best_timepoints_by_subject[subject_id]["timepoint_max"]
+            timepoint_min = best_timepoints_by_subject[lock_event][subject_id]["timepoint_min"]
+            timepoint_max = best_timepoints_by_subject[lock_event][subject_id]["timepoint_max"]
         if omit_non_generalizing_sessions:
             sessions_to_omit = omit_sessions_by_subject[subject_id]
         else:
@@ -207,13 +214,13 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_meg_ERP_style(plot_norms=["no_norm", "mean_centered_ch_t"])  # ,"robust_scaling_ch_t", "z_score_ch_t", "robust_scaling", "z_score"
 
             # Visualize encoding model performance
-            ##visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["train","test"], all_sessions_combined=all_sessions_combined)
+            visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["train","test"], all_sessions_combined=all_sessions_combined)
             ##visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["test"], all_sessions_combined=all_sessions_combined)
 
             # Visualize prediction results
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
             ##visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit, var_explained=True)
-            #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["1","7","10"], var_explained=True)
+            visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             ##visualization_helper.visualize_GLM_results(by_timepoints=True, var_explained=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
