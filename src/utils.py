@@ -46,6 +46,22 @@ class BasicOperationsHelper:
         self.session_ids_num = [str(session_id) for session_id in range(1,11)]
 
 
+    def omit_selected_sessions_from_fit_measures(self, fit_measures_by_session:dict, omitted_sessions:list) -> dict:
+        """
+        Filters out values for omitted sessions from standard fit measure cross-prediction dict.
+        """
+        fit_measures_sessions_omitted = self.recursive_defaultdict()
+        for session_train_id, fit_measures_train_session in fit_measures_by_session['session_mapping'].items():
+            if session_train_id in omitted_sessions:
+                continue
+            for session_pred_id, fit_measures_pred_session in fit_measures_train_session["session_pred"].items():
+                if session_pred_id in omitted_sessions:
+                    continue
+                fit_measures_sessions_omitted['session_mapping'][session_train_id]["session_pred"][session_pred_id] = fit_measures_pred_session
+        
+        return fit_measures_sessions_omitted
+
+
     def map_timepoint_idx_to_ms(self, timepoint_idx):
         """
         Maps the index of a timepoint to it's latency in ms relative to lock event (saccade/fixation) onset.
@@ -1443,11 +1459,13 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
 
         
-    def predict_from_mapping(self, store_timepoint_based_losses:bool=False, predict_train_data:bool=False, all_sessions_combined:bool=False, shuffle_test_labels:bool=False, downscale_features:bool=False):
+    def predict_from_mapping(self, fit_measure_storage_distinction:str="session_level", predict_train_data:bool=False, all_sessions_combined:bool=False, shuffle_test_labels:bool=False, downscale_features:bool=False):
         """
         Based on the trained mapping for each session, predicts MEG data over all sessions from their respective test features.
         If predict_train_data is True, predicts the train data of each session as a sanity check of the complete pipeline. Expect strong overfit.
         """
+        assert fit_measure_storage_distinction in ["session_level", "timepoint_level", "timepoint_sensor_level"], "[predict_from_mapping] Invalid argument for parameter fit_measure_storage_distinction"
+
         if not all_sessions_combined:
             for normalization in self.normalizations:
                 logger.custom_info(f"Predicting from mapping for normalization {normalization}")
@@ -1487,10 +1505,11 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         # Generate predictions
                         predictions = ridge_model.predict(X_test, downscale_features=downscale_features)
 
-                        if store_timepoint_based_losses:
+                        if fit_measure_storage_distinction == "timepoint_level":
                             variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = {"timepoint":{}}
                             # Calculate loss seperately for each timepoint/model
                             n_timepoints = predictions.shape[2]
+                            # Debugging
                             if session_id_model == session_id_pred == "1":
                                 logger.custom_debug(f"predictions.shape: {predictions.shape}")
                                 logger.custom_debug(f"Y_test.shape: {Y_test.shape}")
@@ -1508,6 +1527,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                                 # Save loss
                                 variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = var_explained
                             
+                            # Debugging
                             if session_id_model == session_id_pred == "1":
                                 avg_var_explained = sum_var_explained / n_timepoints
                                 logger.custom_debug(f"avg_var_explained: {avg_var_explained}")
@@ -1520,6 +1540,17 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                                 complete_r_pearson, _ = pearsonr(Y_test.reshape(-1), predictions.reshape(-1))
                                 logger.custom_debug(f"complete_r_pearson: {complete_r_pearson}")
+                        elif fit_measure_storage_distinction == "timepoint_sensor_level":
+                            # Calculate fit measure seperately for each sensor and timepoint
+                            # prediction shape example: (502, 5, 101) (epochs, sensors, timepoints)
+                            n_sensors = predictions.shape[1]
+                            n_timepoints = predictions.shape[2]
+                            for sensor_idx in range(n_sensors):
+                                for timepoint_idx in range(n_timepoints):
+                                    var_explained_sensor_timepoint = r2_score(Y_test[:,sensor_idx,timepoint_idx].reshape(-1), predictions[:,sensor_idx,timepoint_idx].reshape(-1))
+                                
+                                    # Save fit measure for selected sensor and timepoint
+                                    variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["sensor"][str(sensor_idx)]["timepoint"][str(timepoint_idx)] = var_explained_sensor_timepoint
                         else:
                             # Calculate the mean squared error across all flattened features and timepoints
                             mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
@@ -1542,13 +1573,20 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                             variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = var_explained
 
                 # Store loss dict
-                if not store_timepoint_based_losses:
+                if fit_measure_storage_distinction == "session_level":
                     self.save_dict_as_json(type_of_content="mse_losses", dict_to_store=mse_session_losses, type_of_norm=normalization)
                     self.save_dict_as_json(type_of_content="var_explained", dict_to_store=variance_explained_dict, type_of_norm=normalization, predict_train_data=predict_train_data)
                 else:
-                    storage_folder = f"data_files/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                    if fit_measure_storage_distinction == "timepoint_level":
+                        storage_main_folder = "var_explained_timepoints"
+                    elif fit_measure_storage_distinction == "timepoint_sensor_level":
+                        storage_main_folder = "var_explained_sensors_timepoints"
+                    else:
+                        raise ValueError("Invalid value for fit_measure_storage_distinction.")
+
+                    storage_folder = f"data_files/{storage_main_folder}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
                     os.makedirs(storage_folder, exist_ok=True)
-                    json_storage_file = f"var_explained_timepoints_dict.json"
+                    json_storage_file = f"{storage_main_folder}_dict.json"
                     json_storage_path = os.path.join(storage_folder, json_storage_file)
 
                     with open(json_storage_path, 'w') as file:
@@ -1556,7 +1594,8 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         # Serialize and save the dictionary to the file
                         json.dump(variance_explained_dict, file, indent=4)
 
-                if not store_timepoint_based_losses:
+                # Debugging
+                if fit_measure_storage_distinction == "session_level":
                     for session_id in variance_explained_dict["session_mapping"]:
                         session_explained_var = variance_explained_dict['session_mapping'][session_id]['session_pred'][session_id]
                         logger.custom_info(f"[Session {session_id}]: Variance_explained_dict: {session_explained_var}")
@@ -2318,15 +2357,7 @@ class VisualizationHelper(GLMHelper):
                 # Normalize with self-predictions
                 fit_measures_by_session_by_timepoint = self.normalize_cross_session_preds_with_self_preds(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint)
             if omitted_sessions:
-                fit_measures_sessions_omitted = self.recursive_defaultdict()
-                for session_train_id, fit_measures_train_session in fit_measures_by_session_by_timepoint['session_mapping'].items():
-                    if session_train_id in omitted_sessions:
-                        continue
-                    for session_pred_id, fit_measures_pred_session in fit_measures_train_session["session_pred"].items():
-                        if session_pred_id in omitted_sessions:
-                            continue
-                        fit_measures_sessions_omitted['session_mapping'][session_train_id]["session_pred"][session_pred_id] = fit_measures_pred_session
-                fit_measures_by_session_by_timepoint = fit_measures_sessions_omitted
+                fit_measures_by_session_by_timepoint = self.omit_selected_sessions_from_fit_measures(fit_measures_by_session=fit_measures_by_session_by_timepoint, omitted_sessions=omitted_sessions)
 
             def filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint: dict, timepoint_window_start_idx:int):
                 """
@@ -2385,6 +2416,7 @@ class VisualizationHelper(GLMHelper):
                 self.save_plot_as_file(plt=drift_plot_all_windows, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
 
             # For control/comparison, plot the drift for the all timepoint values combined/averaged aswell
+            logger.custom_info(f"fit_measures_by_session_by_timepoint: {fit_measures_by_session_by_timepoint}")
             fit_measures_by_distances_all_timepoints = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
             drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999)  # 999 indicates that we are considering all timepoints
 
@@ -2417,7 +2449,49 @@ class VisualizationHelper(GLMHelper):
                     json.dump(fit_measures_by_session_by_timepoint, file, indent=4)
 
 
-    
+    def visualize_topo_with_drift_per_sensor(self, omitted_sessions:list):
+        for normalization in self.normalizations:
+            # Load sensor- and timepoint-based variance explained
+            storage_folder = f"data_files/var_explained_sensors_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+            json_storage_file = f"var_explained_sensors_timepoints_dict.json"
+            json_storage_path = os.path.join(storage_folder, json_storage_file)
+            with open(json_storage_path, 'r') as file:
+                fit_measures_by_session_by_sensor_by_timepoint = json.load(file)
+
+            if omitted_sessions:
+                fit_measures_by_session_by_sensor_by_timepoint = self.omit_selected_sessions_from_fit_measures(fit_measures_by_session=fit_measures_by_session_by_sensor_by_timepoint, omitted_sessions=omitted_sessions)
+
+            # Calculate drift for each sensor seperate (over all timepoints)
+
+            # Get sensor names (maybe not needed)
+            selected_channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
+            channel_names_by_indices = {}
+            ch_ix = 0
+            for sensor_type in selected_channel_indices:
+                for sensor in selected_channel_indices[sensor_type]:
+                    channel_names_by_indices[ch_ix] = selected_channel_indices[sensor_type][sensor]
+                    ch_ix += 1
+
+            for sensor_idx, _ in enumerate(channel_names_by_indices):
+                sensor_name = channel_names_by_indices[sensor_idx]
+                # Filter dict for current sensor 
+                sensor_fit_measures_by_session_by_timepoint = self.recursive_defaultdict()
+                for session_train_id, fit_measures_train_session in fit_measures_by_session_by_sensor_by_timepoint['session_mapping'].items():
+                    for session_pred_id, fit_measures_pred_session in fit_measures_train_session["session_pred"].items():
+                        sensor_fit_measures_by_session_by_timepoint["session_mapping"][session_train_id]["session_pred"][session_pred_id] = fit_measures_pred_session["sensor"][str(sensor_idx)]
+                
+                sensor_fit_measures_by_distances = self.calculate_fit_by_distances(fit_measures_by_session=sensor_fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
+                drift_plot_sensor = self._plot_drift_distance_based(fit_measures_by_distances=sensor_fit_measures_by_distances, self_pred_normalized=False, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999)  # 999 indicates that we are considering all timepoints
+
+                if sensor_idx == 0:
+                    logger.custom_info(f"sensor_fit_measures_by_distances: {sensor_fit_measures_by_distances}")
+
+                # Store plot for current window
+                storage_folder = f"data_files/visualizations/only_distance/sensor_level/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
+                storage_filename = f"drift_plot_sensor_{sensor_name}_all_timepoints"
+                self.save_plot_as_file(plt=drift_plot_sensor, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+
+
     def visualize_meg_epochs_mne(self):
         """
         Visualizes meg data at various processing steps

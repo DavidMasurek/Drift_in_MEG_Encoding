@@ -17,7 +17,7 @@ sys.path.append(str(__location__))
 os.chdir(__location__)
 
 # Choose params
-subject_ids = ["04"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
+subject_ids = ["02"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
 lock_event = "saccade" # "saccade" "fixation"
 
 crop_size = 112  # 224 112
@@ -104,6 +104,8 @@ use_best_timepoints_for_subject = True
 
 fractional_ridge = False
 
+fit_measure_storage_distinction = "session_level"
+
 subtract_self_pred = False
 time_window_n_indices = 10
 all_windows_one_plot = True
@@ -113,7 +115,6 @@ omit_non_generalizing_sessions = True
 
 # Debugging
 run_pipeline_n_times = 1
-store_timepoint_based_losses = False
 downscale_features = False
 all_sessions_combined = False
 investigate_missing_metadata = False
@@ -196,9 +197,10 @@ for run in range(run_pipeline_n_times):
 
             # Generate meg predictions from GLMs
             if generate_predictions_with_GLM:
-                glm_helper.predict_from_mapping(store_timepoint_based_losses=store_timepoint_based_losses, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
-                glm_helper.predict_from_mapping(store_timepoint_based_losses=store_timepoint_based_losses, predict_train_data=True, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
-                glm_helper.predict_from_mapping(store_timepoint_based_losses=True, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
+                glm_helper.predict_from_mapping(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
+                glm_helper.predict_from_mapping(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=True, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
+                glm_helper.predict_from_mapping(fit_measure_storage_distinction="timepoint_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
+                glm_helper.predict_from_mapping(fit_measure_storage_distinction="timepoint_sensor_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
 
 
                 logger.custom_info("Predictions generated. \n \n")
@@ -214,13 +216,13 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_meg_ERP_style(plot_norms=["no_norm", "mean_centered_ch_t"])  # ,"robust_scaling_ch_t", "z_score_ch_t", "robust_scaling", "z_score"
 
             # Visualize encoding model performance
-            visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["train","test"], all_sessions_combined=all_sessions_combined)
+            ###visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["train","test"], all_sessions_combined=all_sessions_combined)
             ##visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["test"], all_sessions_combined=all_sessions_combined)
 
             # Visualize prediction results
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
             ##visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit, var_explained=True)
-            visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
+            ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             ##visualization_helper.visualize_GLM_results(by_timepoints=True, var_explained=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
@@ -228,6 +230,9 @@ for run in range(run_pipeline_n_times):
             ##visualization_helper.three_dim_timepoint_predictions(subtract_self_pred=subtract_self_pred) 
             visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot)  
             
+            # Visualize drift topographically with mne based on sensor level data 
+            visualization_helper.visualize_topo_with_drift_per_sensor(omitted_sessions=sessions_to_omit)
+
             # Visualize model perspective (values by timepoint)
             ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"
 
