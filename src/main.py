@@ -17,7 +17,7 @@ sys.path.append(str(__location__))
 os.chdir(__location__)
 
 # Choose params
-subject_ids = ["02"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
+subject_ids = ["04"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
 lock_event = "saccade" # "saccade" "fixation"
 
 crop_size = 112  # 224 112
@@ -28,9 +28,17 @@ batch_size = 32
 
 pca_components = 30
 
-meg_channels = [1731, 1921, 2111, 2341, 2511]
-n_grad = 0
-n_mag = 5
+mag_channels = ["1731", "1921", "2111", "2341", "2511", "1711", "1931", "2331", "2531", "2121", "1741", "2541", "2141", "2131"] #  occipital: [1731, 1921, 2111, 2341, 2511] 
+mag_channels += ["1531", "1721", "1941", "2041", "2031", "2321", "2521", "2631"]
+mag_channels += ["1911", "2311", "1641", "2431", "2011", "2021", "1631", "2241"]
+mag_channels += ["1521", "1841", "2231", "2641", "1541", "1611", "1831", "2241", "2421", "2621"]
+mag_channels += ["1621", "1811", "1821", "0741", "0731", "2211", "2221", "2411"]
+grad_channels = []
+
+meg_channels = mag_channels + grad_channels
+
+n_grad = len(grad_channels)
+n_mag = len(mag_channels)  # 5
 
 best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 175, "timepoint_max": 275}, 
                                             "02": {"timepoint_min": 175, "timepoint_max": 255},
@@ -58,27 +66,7 @@ omit_sessions_by_subject = {"01": ["1"],
                             "05": ["9"],
                             }
 
-assert len(meg_channels) == n_grad+n_mag, "Inconsistency in chosen channels and n_grad/n_mag."
-
-# Map timepoint idx to ms
-# fixation locked: [-300 ms : 500 ms], 0.5Hz, 601 timepoints, 
-def map_timepoint_idx_to_ms(timepoint_idx:int, lock_event:str) -> int:
-    """
-    Maps a timepoint index to its time in ms relative to the respective lock-event
-    !!! Attention, ms cuts around lock_event different for ICA cleaned and non-ICA cleaned? ICA cleaned same for both lock events 401 timepoints from -0.3 to 0.5?
-    """
-    if lock_event == "fixation":
-        available_ms_values = list(range(-300, 502, 2))
-        ms_value = available_ms_values[timepoint_idx]
-        return ms_value
-    elif lock_event == "saccade":
-        available_ms_values = list(range(-300, 502, 2))
-        #raise NotImplementedError("Mapping from timepoint_idx to ms relative to lock_event has not been implemented for saccade-locked data yet.")
-    else:
-        raise ValueError(f"map_timepoint_idx_to_ms called with invalid lock_event {lock_event}")
-        
-map_timepoint_idx_to_ms(timepoint_idx=0, lock_event="saccade")
-###
+#assert len(meg_channels) == n_grad+n_mag, "Inconsistency in chosen channels and n_grad/n_mag."
 
 logger_level = 25
 debugging = True if logger_level <= 23 else False  # TODO: Use this as class attribute rather than passing it to every function
@@ -228,10 +216,10 @@ for run in range(run_pipeline_n_times):
 
             # Visuzalize distance based predictions at timepoint scale
             ##visualization_helper.three_dim_timepoint_predictions(subtract_self_pred=subtract_self_pred) 
-            visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot)  
+            ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot)  
             
             # Visualize drift topographically with mne based on sensor level data 
-            visualization_helper.visualize_topo_with_drift_per_sensor(omitted_sessions=sessions_to_omit)
+            visualization_helper.visualize_topo_with_drift_per_sensor(omitted_sessions=sessions_to_omit, all_timepoints_combined=False)
 
             # Visualize model perspective (values by timepoint)
             ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"

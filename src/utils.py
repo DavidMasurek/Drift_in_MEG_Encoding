@@ -91,25 +91,28 @@ class BasicOperationsHelper:
         Returns names of the chosen channels and their index in the meg dataset.
 
         Example in: [1731, 1921, 2111, 2341, 2511]
-        Example out: {'grad': {}, 'mag': {194: 'MEG1731', 215: 'MEG1921', 236: 'MEG2111', 269: 'MEG2341', 284: 'MEG2511'}}
+        Example out: {'grad': {}, 'mag': {}
+        Example out: {'grad': {}, 'mag': {'sensor_index_within_type': {64: 'MEG1731', 71: 'MEG1921', 78: 'MEG2111', 89: 'MEG2341', 94: 'MEG2511'},
+                                            'sensor_index_total': {194: 'MEG1731', 215: 'MEG1921', 236: 'MEG2111', 269: 'MEG2341', 284: 'MEG2511'}}
         """
         
         # pick first session, and saccade-locked (only saccade-locked exists for all) the sensors should always be the same
         fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/saccade_evoked_{self.subject_id}_01_.fif'
         
-        processing_channels_indices = {"grad": {}, "mag": {}}
+        processing_channels_indices = self.recursive_defaultdict()
         evoked = mne.read_evokeds(fif_file_path)[0]
 
         logger.custom_debug(f"evoked.info: {evoked.info}")
 
-        for sensor_type in processing_channels_indices: # grad, mag
+        for sensor_type in ["grad", "mag"]: # grad, mag
             channel_indices = mne.pick_types(evoked.info, meg=sensor_type)
             #logger.custom_debug(f"channel_indices: {channel_indices}")
-            for sensor_index, channel_idx in enumerate(channel_indices):
-                ch_name = evoked.ch_names[channel_idx]
-                if int(ch_name[3:]) in chosen_channels:
-                    #logger.custom_debug(f"Sensor_index: {sensor_index}, Channel_idx: {channel_idx}")
-                    processing_channels_indices[sensor_type][sensor_index] = ch_name
+            for sensor_index_within_type, sensor_index_total in enumerate(channel_indices):
+                ch_name = evoked.ch_names[sensor_index_total]
+                if str(ch_name[3:]) in chosen_channels:
+                    #logger.custom_debug(f"sensor_index_within_type: {sensor_index_within_type}, sensor_index_total: {sensor_index_total}")
+                    processing_channels_indices[sensor_type]["sensor_index_within_type"][sensor_index_within_type] = ch_name
+                    processing_channels_indices[sensor_type]["sensor_index_total"][sensor_index_total] = ch_name
             #logger.custom_debug(f"{sensor_type}, last index: {sensor_index}")
 
         return processing_channels_indices
@@ -439,7 +442,7 @@ class BasicOperationsHelper:
         #    plt.close()
 
 
-    def normalize_array(self, data: np.ndarray, normalization: str, session_id: str = None):
+    def normalize_array(self, data: np.ndarray, normalization:str, n_channels:int = None, session_id:str = None):
         """
         Helper function to normalize meg
         normalization options: mean centered per channel and per timepoint, min-max over complete session, robust scaling, no normalization
@@ -461,7 +464,7 @@ class BasicOperationsHelper:
 
             case "mean_centered_ch":
                 # 0 centered by mean for each over all epochs and timepoints
-                means_per_sensor = np.mean(data, axis=(0,2)).reshape(1,5,1)
+                means_per_sensor = np.mean(data, axis=(0,2)).reshape(1,n_channels,1)
                 normalized_data = data - means_per_sensor
 
             case "min_max":
@@ -846,7 +849,7 @@ class DatasetHelper(MetadataHelper):
                 for sensor_type in selected_channel_indices:
                     # Check if this type of sensor is part of the selected channels
                     if selected_channel_indices[sensor_type]:
-                        channel_indices = list(selected_channel_indices[sensor_type].keys())
+                        channel_indices = list(selected_channel_indices[sensor_type]["sensor_index_within_type"].keys())
                         # Filter meg data by selected channels
                         meg_data[sensor_type] = meg_data[sensor_type][:,channel_indices,:]
 
@@ -862,23 +865,28 @@ class DatasetHelper(MetadataHelper):
                 for normalization in self.normalizations:
                     normalization_stage = normalization if normalization != "mean_centered_ch_then_global_robust_scaling" else "mean_centered_ch"
                     # Debugging
-                    if session_id_num == "1" and normalization == "no_norm":
+                    if session_id_num == "1":
                         for sensor_type in selected_channel_indices:
                             if selected_channel_indices[sensor_type]:
-                                logger.custom_debug(f"[Session {session_id_num}]: Post filtering: meg_data['{sensor_type}'].shape: {meg_data[sensor_type].shape}")
+                                logger.custom_info(f"[Session {session_id_num}]: Post filtering: meg_data['{sensor_type}'].shape: {meg_data[sensor_type].shape}")
 
                     meg_data_norm = {}
                     # Normalize grad and mag independently
                     for sensor_type in selected_channel_indices:
                         if selected_channel_indices[sensor_type]:
-                            meg_data_norm[sensor_type] = self.normalize_array(np.array(meg_data[sensor_type]), normalization=normalization_stage, session_id=session_id_num)
+                            n_channels = meg_data[sensor_type].shape[1]
+                            meg_data_norm[sensor_type] = self.normalize_array(np.array(meg_data[sensor_type]), normalization=normalization_stage, session_id=session_id_num, n_channels=n_channels)
 
                     # Combine grad and mag data
                     if selected_channel_indices["grad"] and selected_channel_indices["mag"]:
+                        logger.custom_info("Using both grad and mag data.")
                         combined_meg = np.concatenate([meg_data_norm["grad"], meg_data_norm["mag"]], axis=1) #(2874, 306, 601)
                     elif selected_channel_indices["grad"]:
+                        raise NotImplementedError("Not yet implemented for grad channels aswell (need to adjust normalize_array() at the least.)")
+                        logger.custom_info("Using only grad data.")
                         combined_meg = meg_data_norm["grad"]
                     elif selected_channel_indices["mag"]:
+                        logger.custom_info("Using only mag data.")
                         combined_meg = meg_data_norm["mag"]
 
                     # Debugging: Count timepoints in meg metadata
@@ -1755,6 +1763,44 @@ class VisualizationHelper(GLMHelper):
         self.n_grad = n_grad
         self.n_mag = n_mag
 
+
+    def calc_drift_corr_with_fit_measures_by_distances(self, fit_measures_by_distances:dict):
+        """
+        Calculates the drift correlation (corr between distance and fit measures). 
+        Expects dict with fit measures in format dict["session_mapping"][session_train_id]["session_pred"][session_pred_id]
+        """
+        x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances, losses_averaged_within_distances=False)
+        x_values_set = np.array(list(set(x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
+        slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
+        r_value = "{:.3f}".format(r_value)  # limit to three decimals
+
+        return r_value
+
+    
+    def extract_x_y_arrays(self, fit_measures_by_distances:dict, losses_averaged_within_distances:bool):
+        """
+        Helper function to extract two arrays 'x_values' and 'y_values' from fit_measures_by_distances
+        """
+        # Sort by distance for readable plot
+        fit_measures_by_distances = {distance: fit_measures_by_distances[distance] for distance in sorted(fit_measures_by_distances, key=int)}
+
+        if losses_averaged_within_distances:
+            x_values = np.array(list(fit_measures_by_distances.keys())).astype(int)
+            y_values = np.array([data_by_distance["fit_measure"] for data_by_distance in fit_measures_by_distances.values()])
+
+            num_measures_values = np.array([data_by_distance["num_measures"] for data_by_distance in fit_measures_by_distances.values()])
+        else:
+            x_values = []
+            y_values = []
+            for distance in fit_measures_by_distances:
+                for fit_measure in fit_measures_by_distances[distance]:
+                    x_values.append(distance)
+                    y_values.append(fit_measure)
+            x_values = np.array(x_values)
+            y_values = np.array(y_values)
+        
+        return x_values, y_values
+
     
     def _plot_drift_distance_based(self, fit_measures_by_distances:dict, omitted_sessions:list, self_pred_normalized:bool, losses_averaged_within_distances:bool, all_windows_one_plot:bool, timepoint_window_start_idx:int = None):
         """
@@ -1763,35 +1809,11 @@ class VisualizationHelper(GLMHelper):
         # Plot loss as a function of distance of predicted session from "training" session
         fig, ax1 = plt.subplots(figsize=(12, 8))
 
-        def extract_x_y_arrays(fit_measures_by_distances):
-            """
-            Helper function to extract two arrays 'x_values' and 'y_values' from fit_measures_by_distances
-            """
-            # Sort by distance for readable plot
-            fit_measures_by_distances = {distance: fit_measures_by_distances[distance] for distance in sorted(fit_measures_by_distances, key=int)}
-
-            if losses_averaged_within_distances:
-                x_values = np.array(list(fit_measures_by_distances.keys())).astype(int)
-                y_values = np.array([data_by_distance["fit_measure"] for data_by_distance in fit_measures_by_distances.values()])
-
-                num_measures_values = np.array([data_by_distance["num_measures"] for data_by_distance in fit_measures_by_distances.values()])
-            else:
-                x_values = []
-                y_values = []
-                for distance in fit_measures_by_distances:
-                    for fit_measure in fit_measures_by_distances[distance]:
-                        x_values.append(distance)
-                        y_values.append(fit_measure)
-                x_values = np.array(x_values)
-                y_values = np.array(y_values)
-            
-            return x_values, y_values
-
         def plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances:dict, ax1, color:str, timepoint_window_start_idx:str = None):
             """
             Helper function that insert scattered fit measures (mostly variance explained) over distances into a given plot
             """
-            x_values, y_values = extract_x_y_arrays(fit_measures_by_distances)
+            x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances, losses_averaged_within_distances)
 
             # Calculate trend line 
             x_values_set = np.array(list(set(x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
@@ -2416,7 +2438,7 @@ class VisualizationHelper(GLMHelper):
                 self.save_plot_as_file(plt=drift_plot_all_windows, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
 
             # For control/comparison, plot the drift for the all timepoint values combined/averaged aswell
-            logger.custom_info(f"fit_measures_by_session_by_timepoint: {fit_measures_by_session_by_timepoint}")
+            logger.custom_debug(f"fit_measures_by_session_by_timepoint: {fit_measures_by_session_by_timepoint}")
             fit_measures_by_distances_all_timepoints = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
             drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999)  # 999 indicates that we are considering all timepoints
 
@@ -2449,7 +2471,8 @@ class VisualizationHelper(GLMHelper):
                     json.dump(fit_measures_by_session_by_timepoint, file, indent=4)
 
 
-    def visualize_topo_with_drift_per_sensor(self, omitted_sessions:list):
+    def visualize_topo_with_drift_per_sensor(self, omitted_sessions:list, all_timepoints_combined:bool):
+        ### TODO: Find out why this is taking so damn long ###
         for normalization in self.normalizations:
             # Load sensor- and timepoint-based variance explained
             storage_folder = f"data_files/var_explained_sensors_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
@@ -2465,13 +2488,22 @@ class VisualizationHelper(GLMHelper):
 
             # Get sensor names (maybe not needed)
             selected_channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
+            selected_sensors_indices_total = list(selected_channel_indices['mag']['sensor_index_total'].keys())
+            n_sensors_selected = len(selected_sensors_indices_total)
             channel_names_by_indices = {}
             ch_ix = 0
             for sensor_type in selected_channel_indices:
-                for sensor in selected_channel_indices[sensor_type]:
-                    channel_names_by_indices[ch_ix] = selected_channel_indices[sensor_type][sensor]
+                if sensor_type == "grad" and selected_channel_indices[sensor_type]:
+                    raise NotImplementedError("Currently only considering mag sensors.")
+                for sensor_index_within_type in selected_channel_indices[sensor_type]["sensor_index_within_type"]:
+                    channel_names_by_indices[ch_ix] = selected_channel_indices[sensor_type]["sensor_index_within_type"][sensor_index_within_type]
                     ch_ix += 1
-
+            channel_names_arr = np.array([channel_name for channel_name in channel_names_by_indices.values()])
+            channel_indices_arr = np.array([channel_index for channel_index in selected_channel_indices["mag"]["sensor_index_within_type"].keys()])
+            #logger.custom_info(f"channel_names_arr: {channel_names_arr}")
+            timepoint_indices = np.array(list(range(1 + self.timepoint_max - self.timepoint_min)))
+            
+            drift_correlations_sensors = []
             for sensor_idx, _ in enumerate(channel_names_by_indices):
                 sensor_name = channel_names_by_indices[sensor_idx]
                 # Filter dict for current sensor 
@@ -2481,15 +2513,81 @@ class VisualizationHelper(GLMHelper):
                         sensor_fit_measures_by_session_by_timepoint["session_mapping"][session_train_id]["session_pred"][session_pred_id] = fit_measures_pred_session["sensor"][str(sensor_idx)]
                 
                 sensor_fit_measures_by_distances = self.calculate_fit_by_distances(fit_measures_by_session=sensor_fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
-                drift_plot_sensor = self._plot_drift_distance_based(fit_measures_by_distances=sensor_fit_measures_by_distances, self_pred_normalized=False, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999)  # 999 indicates that we are considering all timepoints
 
-                if sensor_idx == 0:
-                    logger.custom_info(f"sensor_fit_measures_by_distances: {sensor_fit_measures_by_distances}")
+                if all_timepoints_combined:
+                    # Plot drift for sensor
+                    #drift_plot_sensor = self._plot_drift_distance_based(fit_measures_by_distances=sensor_fit_measures_by_distances, self_pred_normalized=False, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999)  # 999 indicates that we are considering all timepoints
+                    #storage_folder = f"data_files/visualizations/only_distance/sensor_level/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
+                    #storage_filename = f"drift_plot_sensor_{sensor_name}_all_timepoints"
+                    #self.save_plot_as_file(plt=drift_plot_sensor, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
 
-                # Store plot for current window
-                storage_folder = f"data_files/visualizations/only_distance/sensor_level/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
-                storage_filename = f"drift_plot_sensor_{sensor_name}_all_timepoints"
-                self.save_plot_as_file(plt=drift_plot_sensor, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+                    # Calculate drift correlation (correlation between distance and fit measure)
+                    x_values, y_values = self.extract_x_y_arrays(sensor_fit_measures_by_distances, losses_averaged_within_distances=False)
+                    x_values_set = np.array(list(set(x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
+                    slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
+                    r_value = "{:.3f}".format(r_value)  # limit to three decimals
+
+                    drift_correlations_sensors.append(float(r_value))
+                else:
+                    sensor_drift_correlations_timepoints = []
+                    for timepoint_idx in timepoint_indices:
+                        # Filter dict for current timepoint
+                        sensor_timepoint_fit_measures_by_session = self.recursive_defaultdict()
+                        for session_train_id, fit_measures_train_session in sensor_fit_measures_by_session_by_timepoint['session_mapping'].items():
+                            for session_pred_id, fit_measures_pred_session in fit_measures_train_session["session_pred"].items():
+                                sensor_timepoint_fit_measures_by_session["session_mapping"][session_train_id]["session_pred"][session_pred_id] = fit_measures_pred_session["timepoint"][str(timepoint_idx)]
+
+                        sensor_fit_measures_by_distances = self.calculate_fit_by_distances(fit_measures_by_session=sensor_timepoint_fit_measures_by_session, timepoint_level_input=False, average_within_distances=False)
+                        r_value = float(self.calc_drift_corr_with_fit_measures_by_distances(sensor_fit_measures_by_distances))
+
+                        sensor_drift_correlations_timepoints.append(r_value)
+                drift_correlations_sensors.append(np.array(sensor_drift_correlations_timepoints))
+
+            drift_correlations_sensors = np.array(drift_correlations_sensors)
+            logger.custom_info(f"drift_correlations_sensors.shape: {drift_correlations_sensors.shape}")
+            min_corr = np.min(drift_correlations_sensors)
+            max_corr = np.max(drift_correlations_sensors)
+            # plot_topomap always expects shape (n_sensors, n_timepoints)
+            if all_timepoints_combined:
+                drift_correlations_sensors = drift_correlations_sensors.reshape(n_sensors_selected, 1)
+
+            fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/saccade_evoked_{self.subject_id}_01_.fif'
+        
+            processing_channels_indices = {"grad": {}, "mag": {}}
+            evoked = mne.read_evokeds(fif_file_path)[0]
+            mne_info = evoked.info
+            selected_channels_idx = selected_sensors_indices_total
+            #selected_channels_idx = mne.pick_types(mne_info, meg='mag')  # selects all mag sensors
+            selected_mag_info = mne.pick_info(mne_info, selected_channels_idx)
+
+            # Get arr of timepoints to plot
+            if all_timepoints_combined:
+                # Select random timepoint, we only plot one but plot_topomap() expects a value
+                t_start = 0.05
+                t_end = 0.058
+                timepoints = np.linspace(t_start, t_end, 1)  
+            else:
+                # Timepoints need to be converted from indices to seconds. map_timepoint_idx_to_ms maps only maps to ms
+                timepoints = np.array([float(f"0.{str(map_timepoint_idx_to_ms(timepoint_idx))}") for timepoint_idx in timepoint_indices])
+                t_start = timepoints[0]
+
+            logger.custom_info(f"drift_correlations_sensors shape: {drift_correlations_sensors.shape}")
+            logger.custom_info(f"drift_correlations_sensors: {drift_correlations_sensors}")
+
+            evoked = mne.EvokedArray(drift_correlations_sensors, selected_mag_info, tmin=t_start)
+            fig_main, axes = plt.subplots(1, len(timepoints), figsize=(15, 8))
+            fig = evoked.plot_topomap(timepoints, ch_type="mag", colorbar=False, axes=axes)
+            fig.suptitle(f'Drift on Sensor Level. Negative correlations (drift) are in blue, positive correlations are in red. \n Min r: {min_corr}. Max r: {max_corr}', fontsize=18)
+
+            plot_folder =  f"data_files/visualizations/montage/subject_{self.subject_id}/"
+            plot_file = "montage_topo_channels.png"
+            self.save_plot_as_file(plt=fig, plot_folder=plot_folder, plot_file=plot_file)
+
+            # Plot channel locations
+            #fig = evoked.plot_sensors(show_names=True, ch_type="mag", ch_groups='position')
+            # Reduce font size (otherwise non-readable due to overlap)
+            #for text in fig.axes[0].texts:
+            #    text.set_fontsize(6)  
 
 
     def visualize_meg_epochs_mne(self):
@@ -2686,8 +2784,8 @@ class VisualizationHelper(GLMHelper):
                 channel_names_by_indices = {}
                 ch_ix = 0
                 for sensor_type in selected_channel_indices:
-                    for sensor in selected_channel_indices[sensor_type]:
-                        channel_names_by_indices[ch_ix] = selected_channel_indices[sensor_type][sensor]
+                    for sensor_index_within_type in selected_channel_indices[sensor_type]["sensor_index_within_type"]:
+                        channel_names_by_indices[ch_ix] = selected_channel_indices[sensor_type]["sensor_index_within_type"][sensor_index_within_type]
                         ch_ix += 1
                 
                 timepoints = np.array(list(range(1 + self.timepoint_max - self.timepoint_min)))
