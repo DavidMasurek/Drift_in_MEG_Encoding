@@ -45,6 +45,9 @@ class BasicOperationsHelper:
         self.session_ids_char = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
         self.session_ids_num = [str(session_id) for session_id in range(1,11)]
 
+        with open("data_files/session_metadata/session_datetimes/session_datetimes_dict.pkl", 'rb') as file:
+            self.session_datetimes = pickle.load(file)
+
 
     def omit_selected_sessions_from_fit_measures(self, fit_measures_by_session:dict, omitted_sessions:list) -> dict:
         """
@@ -95,7 +98,6 @@ class BasicOperationsHelper:
         Example out: {'grad': {}, 'mag': {'sensor_index_within_type': {64: 'MEG1731', 71: 'MEG1921', 78: 'MEG2111', 89: 'MEG2341', 94: 'MEG2511'},
                                             'sensor_index_total': {194: 'MEG1731', 215: 'MEG1921', 236: 'MEG2111', 269: 'MEG2341', 284: 'MEG2511'}}
         """
-        
         # pick first session, and saccade-locked (only saccade-locked exists for all) the sensors should always be the same
         fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/saccade_evoked_{self.subject_id}_01_.fif'
         
@@ -123,25 +125,14 @@ class BasicOperationsHelper:
         Calculates the rounded differences in days between all sessions.
         """
         fif_folder = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/erf/filter_0.2_200/'
-        session_dates = {str(num_session): None for num_session in range(1,11)}
-        
-        # Get datetime of each session
-        for session_id_char in self.session_ids_char:
-            fif_file = f"as{self.subject_id}{session_id_char}_et_epochs_info_saccade.fif"
-            fif_complete_path = os.path.join(fif_folder, fif_file)
-
-            session_info = mne.io.read_info(fif_complete_path)
-            date = session_info['meas_date']
-
-            session_dates[self.map_session_letter_id_to_num(session_id_char)] = date
-
+ 
         # Get difference in days (as float) between sessions
         session_day_differences = self.recursive_defaultdict()
         for session_id_num in self.session_ids_num:
-            og_session_date = session_dates[session_id_num]
+            og_session_date = self.session_datetimes[session_id_num]
             for session_comp_id_num in self.session_ids_num:
                 if session_id_num != session_comp_id_num:
-                    comp_session_date = session_dates[session_comp_id_num]
+                    comp_session_date = self.session_datetimes[session_comp_id_num]
 
                     diff_hours =  round(abs((comp_session_date - og_session_date).total_seconds()) / 3600)
                     diff_days = round(diff_hours / 24)
@@ -150,7 +141,6 @@ class BasicOperationsHelper:
         for session_id_num in self.session_ids_num:
             for session_comp_id_num in self.session_ids_num:
                 assert session_day_differences[session_id_num][session_comp_id_num] == session_day_differences[session_comp_id_num][session_id_num], "Difference between Sessions inconsistent."
-
 
         return session_day_differences
 
@@ -2182,8 +2172,8 @@ class VisualizationHelper(GLMHelper):
                     plt.figure(figsize=(10, 6))
                     timepoints_in_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in list(range(num_timepoints))]
                     #logger.custom_info(f"timepoints_in_ms: {timepoints_in_ms}")
-                    ##plt.bar(timepoints_in_ms, timepoint_loss_list, color='blue')
-                    plt.bar(list(range(num_timepoints)), timepoint_loss_list, color='blue')
+                    plt.bar(timepoints_in_ms, timepoint_loss_list, color='blue')
+                    #plt.bar(list(range(num_timepoints)), timepoint_loss_list, color='blue')
                     #logger.custom_debug(f"list(range(num_timepoints): {list(range(num_timepoints))}")
                     session_subtitle = "Averaged across all Sessions, predicting themselves" if session_id is None else f"Session {session_id}, predicting iteself"
                     plt.title(f'{type_of_fit_measure} Fit measure per Timepoint Model. {session_subtitle} \n omitted sessions: {omit_sessions}.')
@@ -2544,7 +2534,6 @@ class VisualizationHelper(GLMHelper):
                 drift_correlations_sensors.append(np.array(sensor_drift_correlations_timepoints))
 
             drift_correlations_sensors = np.array(drift_correlations_sensors)
-            logger.custom_info(f"drift_correlations_sensors.shape: {drift_correlations_sensors.shape}")
             min_corr = np.min(drift_correlations_sensors)
             max_corr = np.max(drift_correlations_sensors)
             # plot_topomap always expects shape (n_sensors, n_timepoints)
@@ -2554,8 +2543,8 @@ class VisualizationHelper(GLMHelper):
             fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/saccade_evoked_{self.subject_id}_01_.fif'
         
             processing_channels_indices = {"grad": {}, "mag": {}}
-            evoked = mne.read_evokeds(fif_file_path)[0]
-            mne_info = evoked.info
+            og_evoked = mne.read_evokeds(fif_file_path)[0]
+            mne_info = og_evoked.info
             selected_channels_idx = selected_sensors_indices_total
             #selected_channels_idx = mne.pick_types(mne_info, meg='mag')  # selects all mag sensors
             selected_mag_info = mne.pick_info(mne_info, selected_channels_idx)
@@ -2567,27 +2556,30 @@ class VisualizationHelper(GLMHelper):
                 t_end = 0.058
                 timepoints = np.linspace(t_start, t_end, 1)  
             else:
-                # Timepoints need to be converted from indices to seconds. map_timepoint_idx_to_ms maps only maps to ms
-                timepoints = np.array([float(f"0.{str(map_timepoint_idx_to_ms(timepoint_idx))}") for timepoint_idx in timepoint_indices])
+                # Timepoints need to be converted from indices to seconds. map_timepoint_idx_to_ms maps only maps to ms, /1000 converts to seconds
+                timepoints = np.array([float(self.map_timepoint_idx_to_ms(timepoint_idx)/1000) for timepoint_idx in timepoint_indices])
                 t_start = timepoints[0]
 
-            logger.custom_info(f"drift_correlations_sensors shape: {drift_correlations_sensors.shape}")
-            logger.custom_info(f"drift_correlations_sensors: {drift_correlations_sensors}")
-
             evoked = mne.EvokedArray(drift_correlations_sensors, selected_mag_info, tmin=t_start)
-            fig_main, axes = plt.subplots(1, len(timepoints), figsize=(15, 8))
-            fig = evoked.plot_topomap(timepoints, ch_type="mag", colorbar=False, axes=axes)
+            #fig_main, axes = plt.subplots(1, len(timepoints), figsize=(65, 30))
+            logger.custom_info(f"Topo plot time range: {evoked.times[0]} - {evoked.times[-1]}")
+
+            fig = evoked.plot_topomap(timepoints, ch_type="mag", colorbar=False)  # , axes=axes)
             fig.suptitle(f'Drift on Sensor Level. Negative correlations (drift) are in blue, positive correlations are in red. \n Min r: {min_corr}. Max r: {max_corr}', fontsize=18)
 
-            plot_folder =  f"data_files/visualizations/montage/subject_{self.subject_id}/"
-            plot_file = "montage_topo_channels.png"
+            plot_folder =  f"data_files/visualizations/topographic_plots/subject_{self.subject_id}/"
+            plot_file = "drift_topo_plot.png"
             self.save_plot_as_file(plt=fig, plot_folder=plot_folder, plot_file=plot_file)
 
             # Plot channel locations
-            #fig = evoked.plot_sensors(show_names=True, ch_type="mag", ch_groups='position')
+            fig = og_evoked.plot_sensors(show_names=True, ch_type="mag")
             # Reduce font size (otherwise non-readable due to overlap)
-            #for text in fig.axes[0].texts:
-            #    text.set_fontsize(6)  
+            for text in fig.axes[0].texts:
+                text.set_fontsize(5)  
+
+            plot_folder =  f"data_files/visualizations/topographic_plots/subject_{self.subject_id}/"
+            plot_file = "sensor_locations.png"
+            self.save_plot_as_file(plt=fig, plot_folder=plot_folder, plot_file=plot_file)
 
 
     def visualize_meg_epochs_mne(self):

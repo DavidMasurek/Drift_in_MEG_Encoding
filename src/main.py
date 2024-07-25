@@ -3,13 +3,13 @@ import sys
 import os
 import numpy as np
 import pandas as pd
+import mne
 import json
 import logging
 from setup_logger import setup_logger
 from datetime import datetime
 from collections import defaultdict
 from utils import BasicOperationsHelper, MetadataHelper, DatasetHelper, ExtractionHelper, GLMHelper, VisualizationHelper
-from sklearn.preprocessing  import RobustScaler
 
 # Add parent folder of src to path and change cwd
 __location__ = Path(__file__).parent.parent
@@ -27,18 +27,6 @@ module_name =  "features.12" # "fc" # features.12 has 9216 dimensions
 batch_size = 32
 
 pca_components = 30
-
-mag_channels = ["1731", "1921", "2111", "2341", "2511", "1711", "1931", "2331", "2531", "2121", "1741", "2541", "2141", "2131"] #  occipital: [1731, 1921, 2111, 2341, 2511] 
-mag_channels += ["1531", "1721", "1941", "2041", "2031", "2321", "2521", "2631"]
-mag_channels += ["1911", "2311", "1641", "2431", "2011", "2021", "1631", "2241"]
-mag_channels += ["1521", "1841", "2231", "2641", "1541", "1611", "1831", "2241", "2421", "2621"]
-mag_channels += ["1621", "1811", "1821", "0741", "0731", "2211", "2221", "2411"]
-grad_channels = []
-
-meg_channels = mag_channels + grad_channels
-
-n_grad = len(grad_channels)
-n_mag = len(mag_channels)  # 5
 
 best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 175, "timepoint_max": 275}, 
                                             "02": {"timepoint_min": 175, "timepoint_max": 255},
@@ -66,8 +54,6 @@ omit_sessions_by_subject = {"01": ["1"],
                             "05": ["9"],
                             }
 
-#assert len(meg_channels) == n_grad+n_mag, "Inconsistency in chosen channels and n_grad/n_mag."
-
 logger_level = 25
 debugging = True if logger_level <= 23 else False  # TODO: Use this as class attribute rather than passing it to every function
 
@@ -75,16 +61,17 @@ debugging = True if logger_level <= 23 else False  # TODO: Use this as class att
 create_metadata = False
 create_train_test_split = False  # Careful! Everytime this is set to true, all following steps will be misalligned
 create_crop_datset_numpy = False
-create_meg_dataset = False
+create_meg_dataset = True
 extract_features = False
 perform_pca = False
-train_GLM = False
-generate_predictions_with_GLM = False
+train_GLM = True
+generate_predictions_with_GLM = True
 visualization = True
 
 z_score_features_before_pca = True
 use_pca_features = True
 
+use_all_mag_sensors = True
 use_ica_cleaned_data = True
 clip_outliers = True
 interpolate_outliers = False  # Currently only implemented for mean_centered_ch_then_global_z! Cuts off everything over +-3 std
@@ -100,6 +87,22 @@ all_windows_one_plot = True
 cut_repeated_session = False
 omit_non_generalizing_sessions = True
 
+if use_all_mag_sensors:
+    # Load all available mag_channels from evoked file
+    sample_evoked = mne.read_evokeds('/share/klab/datasets/avs/population_codes/as02/sensor/filter_0.2_200/saccade_evoked_02_01_.fif')[0]
+    mag_channels = [str(sensor_name[3:]) for sensor_name, sensor_type in zip(sample_evoked.info['ch_names'], sample_evoked.get_channel_types()) if sensor_type == "mag"]
+else:
+    # Mag 'rows' bottom to top
+    mag_channels = ["1731", "1921", "2111", "2341", "2511", "1711", "1931", "2331", "2531", "2121", "1741", "2541", "2141", "2131"] #  occipital: [1731, 1921, 2111, 2341, 2511] 
+    mag_channels += ["1531", "1721", "1941", "2041", "2031", "2321", "2521", "2631"]
+    mag_channels += ["1911", "2311", "1641", "2431", "2011", "2021", "1631", "2241"]
+    mag_channels += ["1521", "1841", "2231", "2641", "1541", "1611", "1831", "2241", "2421", "2621"]
+    mag_channels += ["1621", "1811", "1821", "0741", "0731", "2211", "2221", "2411"]
+grad_channels = []
+
+n_mag = len(mag_channels)
+n_grad = len(grad_channels)
+meg_channels = np.array(mag_channels + grad_channels)
 
 # Debugging
 run_pipeline_n_times = 1
@@ -177,13 +180,12 @@ for run in range(run_pipeline_n_times):
         if train_GLM or generate_predictions_with_GLM:
             glm_helper = GLMHelper(fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, lock_event=lock_event, ann_model=ann_model, module_name=module_name, batch_size=batch_size, crop_size=crop_size)
 
-            # Train GLM
             if train_GLM:
                 glm_helper.train_mapping(all_sessions_combined=all_sessions_combined, shuffle_train_labels=shuffle_train_labels, downscale_features=downscale_features)
 
                 logger.custom_info("GLMs trained. \n \n")
 
-            # Generate meg predictions from GLMs
+            # Generate meg predictions 
             if generate_predictions_with_GLM:
                 glm_helper.predict_from_mapping(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
                 glm_helper.predict_from_mapping(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=True, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
@@ -211,7 +213,7 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
             ##visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit, var_explained=True)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
-            ##visualization_helper.visualize_GLM_results(by_timepoints=True, var_explained=True, separate_plots=True)
+            visualization_helper.visualize_GLM_results(by_timepoints=True, var_explained=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
             # Visuzalize distance based predictions at timepoint scale
