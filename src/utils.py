@@ -1504,40 +1504,34 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         predictions = ridge_model.predict(X_test, downscale_features=downscale_features)
 
                         if fit_measure_storage_distinction == "timepoint_level":
-                            variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = {"timepoint":{}}
-                            # Calculate loss seperately for each timepoint/model
+                            # Store fit measures seperately for each timepoint/model
+                            logger.custom_info(f"predictions.shape : {predictions.shape}")
                             n_timepoints = predictions.shape[2]
-                            # Debugging
-                            if session_id_model == session_id_pred == "1":
-                                logger.custom_debug(f"predictions.shape: {predictions.shape}")
-                                logger.custom_debug(f"Y_test.shape: {Y_test.shape}")
-                                sum_var_explained = 0
-                                sum_r_pearson = 0
+                            n_sensors = predictions.shape[1]
                             for t in range(n_timepoints):
-                                var_explained = r2_score(Y_test[:,:,t].reshape(-1), predictions[:,:,t].reshape(-1))
+                                var_explained_timepoint_sum = 0
+                                r_pearson_timepoint_sum = 0  
+                                for s in range(n_sensors):
+                                    logger.custom_info(f"sensor : {s}")
 
-                                if session_id_model == session_id_pred == "1":
-                                    r_pearson, _ = pearsonr(Y_test[:,:,t].reshape(-1), predictions[:,:,t].reshape(-1))
+                                    var_explained_timepoint_sum += r2_score(Y_test[:,s,t], predictions[:,s,t])
+                                    r_pearson_timepoint_sensor, _ = pearsonr(Y_test[:,s,t], predictions[:,s,t])
+                                    r_pearson_timepoint_sum += r_pearson_timepoint_sensor
 
-                                    sum_var_explained += var_explained
-                                    sum_r_pearson += r_pearson
-                                
-                                # Save loss
-                                variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = var_explained
-                            
-                            # Debugging
-                            if session_id_model == session_id_pred == "1":
-                                avg_var_explained = sum_var_explained / n_timepoints
-                                logger.custom_debug(f"avg_var_explained: {avg_var_explained}")
+                                    logger.custom_info(f"var_explained_timepoint_sensor: {r2_score(Y_test[:,s,t], predictions[:,s,t])}")
+                                    logger.custom_info(f"r_pearson_timepoint_sensor: {r_pearson_timepoint_sensor}")
 
-                                complete_var_explained = r2_score(Y_test.reshape(-1), predictions.reshape(-1))
-                                logger.custom_debug(f"complete_var_explained: {complete_var_explained}")
+                                var_explained_timepoint = var_explained_timepoint_sum / n_sensors
+                                r_pearson_timepoint = r_pearson_timepoint_sum / n_sensors
 
-                                avg_r_pearson = sum_r_pearson / n_timepoints
-                                logger.custom_debug(f"avg_r_pearson: {avg_r_pearson}")
+                                logger.custom_info(f"var_explained_timepoint: {var_explained_timepoint}")
+                                logger.custom_info(f"r_pearson_timepoint: {r_pearson_timepoint}")
+                                sys.exit()
+                                    
+                                # Save fit measures
+                                variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = var_explained_timepoint
+                                correlation_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = r_pearson_timepoint
 
-                                complete_r_pearson, _ = pearsonr(Y_test.reshape(-1), predictions.reshape(-1))
-                                logger.custom_debug(f"complete_r_pearson: {complete_r_pearson}")
                         elif fit_measure_storage_distinction == "timepoint_sensor_level":
                             # Calculate fit measure seperately for each sensor and timepoint
                             # prediction shape example: (502, 5, 101) (epochs, sensors, timepoints)
@@ -1554,7 +1548,19 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                             mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
 
                             # Calculate variance explained 
-                            var_explained = r2_score(Y_test.reshape(-1), predictions.reshape(-1))
+                            var_explained = r2_score(Y_test.reshape(-1), predictions.reshape(-1))  # .reshape(-1)
+                            """
+                            TODO: Investigate effects of flattening; consider alternatives
+                            logger.custom_info(f"Y_test.shape: {Y_test.shape}")
+                            Y_test_reshaped = Y_test.reshape(-1, 102)
+                            logger.custom_info(f"Y_test_reshaped.shape: {Y_test_reshaped.shape}")
+                            first_sensor_pre_reshape = Y_test[:, 0, :].reshape(-1)
+                            first_sensor_post_reshape = Y_test_reshaped[:,0]
+                            print("shape first_sensor_pre_reshape", first_sensor_pre_reshape.shape)
+                            print("shape first_sensor_post_reshape:", first_sensor_post_reshape.shape)
+                            print("Sum first sensor pre reshape:", np.sum(first_sensor_pre_reshape))
+                            print("Sum first sensor post reshape:", np.sum(first_sensor_post_reshape))
+                            """
 
                             # Calculate the Pearson correlation coefficient
                             r_pearson, _ = pearsonr(Y_test.reshape(-1), predictions.reshape(-1))
@@ -1576,21 +1582,22 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     self.save_dict_as_json(type_of_content="var_explained", dict_to_store=variance_explained_dict, type_of_norm=normalization, predict_train_data=predict_train_data)
                 else:
                     if fit_measure_storage_distinction == "timepoint_level":
-                        storage_main_folder = "var_explained_timepoints"
+                        storage_dicts_by_folders = {"var_explained_timepoints": variance_explained_dict, "pearson_r_timepoints": correlation_dict}
                     elif fit_measure_storage_distinction == "timepoint_sensor_level":
-                        storage_main_folder = "var_explained_sensors_timepoints"
+                        storage_dicts_by_folders = {"var_explained_sensors_timepoints": variance_explained_dict}
                     else:
                         raise ValueError("Invalid value for fit_measure_storage_distinction.")
 
-                    storage_folder = f"data_files/{storage_main_folder}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
-                    os.makedirs(storage_folder, exist_ok=True)
-                    json_storage_file = f"{storage_main_folder}_dict.json"
-                    json_storage_path = os.path.join(storage_folder, json_storage_file)
+                    for main_folder, fit_measure_dict in storage_dicts_by_folders.items():
+                        storage_folder = f"data_files/{main_folder}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                        os.makedirs(storage_folder, exist_ok=True)
+                        json_storage_file = f"{main_folder}_dict.json"
+                        json_storage_path = os.path.join(storage_folder, json_storage_file)
 
-                    with open(json_storage_path, 'w') as file:
-                        logger.custom_debug(f"Storing timepoint dict to {json_storage_path}")
-                        # Serialize and save the dictionary to the file
-                        json.dump(variance_explained_dict, file, indent=4)
+                        with open(json_storage_path, 'w') as file:
+                            logger.custom_debug(f"Storing timepoint dict to {json_storage_path}")
+                            # Serialize and save the dictionary to the file
+                            json.dump(variance_explained_dict, file, indent=4)
 
                 # Debugging
                 if fit_measure_storage_distinction == "session_level":
@@ -2462,7 +2469,6 @@ class VisualizationHelper(GLMHelper):
 
 
     def visualize_topo_with_drift_per_sensor(self, omitted_sessions:list, all_timepoints_combined:bool):
-        ### TODO: Find out why this is taking so damn long ###
         for normalization in self.normalizations:
             # Load sensor- and timepoint-based variance explained
             storage_folder = f"data_files/var_explained_sensors_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
@@ -2494,7 +2500,8 @@ class VisualizationHelper(GLMHelper):
             timepoint_indices = np.array(list(range(1 + self.timepoint_max - self.timepoint_min)))
             
             drift_correlations_sensors = []
-            for sensor_idx, _ in enumerate(channel_names_by_indices):
+            for sensor_idx, sensor_name in enumerate(channel_names_by_indices):
+                logger.custom_info(f"Processing sensor {sensor_name}")
                 sensor_name = channel_names_by_indices[sensor_idx]
                 # Filter dict for current sensor 
                 sensor_fit_measures_by_session_by_timepoint = self.recursive_defaultdict()
@@ -2506,10 +2513,10 @@ class VisualizationHelper(GLMHelper):
 
                 if all_timepoints_combined:
                     # Plot drift for sensor
-                    #drift_plot_sensor = self._plot_drift_distance_based(fit_measures_by_distances=sensor_fit_measures_by_distances, self_pred_normalized=False, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999)  # 999 indicates that we are considering all timepoints
-                    #storage_folder = f"data_files/visualizations/only_distance/sensor_level/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
-                    #storage_filename = f"drift_plot_sensor_{sensor_name}_all_timepoints"
-                    #self.save_plot_as_file(plt=drift_plot_sensor, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+                    drift_plot_sensor = self._plot_drift_distance_based(fit_measures_by_distances=sensor_fit_measures_by_distances, self_pred_normalized=False, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999)  # 999 indicates that we are considering all timepoints
+                    storage_folder = f"data_files/visualizations/only_distance/sensor_level/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
+                    storage_filename = f"drift_plot_sensor_{sensor_name}_all_timepoints"
+                    self.save_plot_as_file(plt=drift_plot_sensor, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
 
                     # Calculate drift correlation (correlation between distance and fit measure)
                     x_values, y_values = self.extract_x_y_arrays(sensor_fit_measures_by_distances, losses_averaged_within_distances=False)
@@ -2531,7 +2538,7 @@ class VisualizationHelper(GLMHelper):
                         r_value = float(self.calc_drift_corr_with_fit_measures_by_distances(sensor_fit_measures_by_distances))
 
                         sensor_drift_correlations_timepoints.append(r_value)
-                drift_correlations_sensors.append(np.array(sensor_drift_correlations_timepoints))
+                    drift_correlations_sensors.append(np.array(sensor_drift_correlations_timepoints))
 
             drift_correlations_sensors = np.array(drift_correlations_sensors)
             min_corr = np.min(drift_correlations_sensors)
@@ -2572,10 +2579,10 @@ class VisualizationHelper(GLMHelper):
             self.save_plot_as_file(plt=fig, plot_folder=plot_folder, plot_file=plot_file)
 
             # Plot channel locations
-            fig = og_evoked.plot_sensors(show_names=True, ch_type="mag")
+            #fig = og_evoked.plot_sensors(show_names=True, ch_type="mag")
             # Reduce font size (otherwise non-readable due to overlap)
-            for text in fig.axes[0].texts:
-                text.set_fontsize(5)  
+            #for text in fig.axes[0].texts:
+            #    text.set_fontsize(5)  
 
             plot_folder =  f"data_files/visualizations/topographic_plots/subject_{self.subject_id}/"
             plot_file = "sensor_locations.png"

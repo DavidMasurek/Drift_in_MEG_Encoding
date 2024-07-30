@@ -17,7 +17,7 @@ sys.path.append(str(__location__))
 os.chdir(__location__)
 
 # Choose params
-subject_ids = ["04"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
+subject_ids = ["02"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
 lock_event = "saccade" # "saccade" "fixation"
 
 crop_size = 112  # 224 112
@@ -66,12 +66,12 @@ extract_features = False
 perform_pca = False
 train_GLM = True
 generate_predictions_with_GLM = True
-visualization = True
+visualization = False
 
 z_score_features_before_pca = True
 use_pca_features = True
 
-use_all_mag_sensors = True
+use_all_mag_sensors = False
 use_ica_cleaned_data = True
 clip_outliers = True
 interpolate_outliers = False  # Currently only implemented for mean_centered_ch_then_global_z! Cuts off everything over +-3 std
@@ -93,11 +93,12 @@ if use_all_mag_sensors:
     mag_channels = [str(sensor_name[3:]) for sensor_name, sensor_type in zip(sample_evoked.info['ch_names'], sample_evoked.get_channel_types()) if sensor_type == "mag"]
 else:
     # Mag 'rows' bottom to top
-    mag_channels = ["1731", "1921", "2111", "2341", "2511", "1711", "1931", "2331", "2531", "2121", "1741", "2541", "2141", "2131"] #  occipital: [1731, 1921, 2111, 2341, 2511] 
-    mag_channels += ["1531", "1721", "1941", "2041", "2031", "2321", "2521", "2631"]
-    mag_channels += ["1911", "2311", "1641", "2431", "2011", "2021", "1631", "2241"]
-    mag_channels += ["1521", "1841", "2231", "2641", "1541", "1611", "1831", "2241", "2421", "2621"]
-    mag_channels += ["1621", "1811", "1821", "0741", "0731", "2211", "2221", "2411"]
+    mag_channels = ["1731", "1921", "2111", "2341", "2511"]  # selected occipital sensors: [1731, 1921, 2111, 2341, 2511] 
+    #mag_channels += ["1711", "1931", "2331", "2531", "2121", "1741", "2541", "2141", "2131"]
+    #mag_channels += ["1531", "1721", "1941", "2041", "2031", "2321", "2521", "2631"]
+    #mag_channels += ["1911", "2311", "1641", "2431", "2011", "2021", "1631", "2241"]
+    #mag_channels += ["1521", "1841", "2231", "2641", "1541", "1611", "1831", "2241", "2421", "2621"]
+    #mag_channels += ["1621", "1811", "1821", "0741", "0731", "2211", "2221", "2411"]
 grad_channels = []
 
 n_mag = len(mag_channels)
@@ -114,6 +115,8 @@ shuffle_test_labels = False  # shuffles the data that is to be predicted! (In co
 
 logging_setup = setup_logger(logger_level)
 logger = logging.getLogger(__name__)
+
+logger.custom_info(f"Num meg_channels: {n_grad + n_mag}")
 
 for run in range(run_pipeline_n_times):
     for subject_id in subject_ids:
@@ -187,10 +190,10 @@ for run in range(run_pipeline_n_times):
 
             # Generate meg predictions 
             if generate_predictions_with_GLM:
-                glm_helper.predict_from_mapping(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
-                glm_helper.predict_from_mapping(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=True, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
+                #glm_helper.predict_from_mapping(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
+                #glm_helper.predict_from_mapping(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=True, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
                 glm_helper.predict_from_mapping(fit_measure_storage_distinction="timepoint_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
-                glm_helper.predict_from_mapping(fit_measure_storage_distinction="timepoint_sensor_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
+                #glm_helper.predict_from_mapping(fit_measure_storage_distinction="timepoint_sensor_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
 
 
                 logger.custom_info("Predictions generated. \n \n")
@@ -221,7 +224,7 @@ for run in range(run_pipeline_n_times):
             ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot)  
             
             # Visualize drift topographically with mne based on sensor level data 
-            visualization_helper.visualize_topo_with_drift_per_sensor(omitted_sessions=sessions_to_omit, all_timepoints_combined=False)
+            visualization_helper.visualize_topo_with_drift_per_sensor(omitted_sessions=sessions_to_omit, all_timepoints_combined=True)
 
             # Visualize model perspective (values by timepoint)
             ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"
