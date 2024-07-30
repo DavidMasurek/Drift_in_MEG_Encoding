@@ -1505,28 +1505,18 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                         if fit_measure_storage_distinction == "timepoint_level":
                             # Store fit measures seperately for each timepoint/model
-                            logger.custom_info(f"predictions.shape : {predictions.shape}")
                             n_timepoints = predictions.shape[2]
                             n_sensors = predictions.shape[1]
                             for t in range(n_timepoints):
                                 var_explained_timepoint_sum = 0
                                 r_pearson_timepoint_sum = 0  
                                 for s in range(n_sensors):
-                                    logger.custom_info(f"sensor : {s}")
-
                                     var_explained_timepoint_sum += r2_score(Y_test[:,s,t], predictions[:,s,t])
                                     r_pearson_timepoint_sensor, _ = pearsonr(Y_test[:,s,t], predictions[:,s,t])
                                     r_pearson_timepoint_sum += r_pearson_timepoint_sensor
 
-                                    logger.custom_info(f"var_explained_timepoint_sensor: {r2_score(Y_test[:,s,t], predictions[:,s,t])}")
-                                    logger.custom_info(f"r_pearson_timepoint_sensor: {r_pearson_timepoint_sensor}")
-
                                 var_explained_timepoint = var_explained_timepoint_sum / n_sensors
                                 r_pearson_timepoint = r_pearson_timepoint_sum / n_sensors
-
-                                logger.custom_info(f"var_explained_timepoint: {var_explained_timepoint}")
-                                logger.custom_info(f"r_pearson_timepoint: {r_pearson_timepoint}")
-                                sys.exit()
                                     
                                 # Save fit measures
                                 variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = var_explained_timepoint
@@ -1597,7 +1587,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         with open(json_storage_path, 'w') as file:
                             logger.custom_debug(f"Storing timepoint dict to {json_storage_path}")
                             # Serialize and save the dictionary to the file
-                            json.dump(variance_explained_dict, file, indent=4)
+                            json.dump(fit_measure_dict, file, indent=4)
 
                 # Debugging
                 if fit_measure_storage_distinction == "session_level":
@@ -1976,14 +1966,14 @@ class VisualizationHelper(GLMHelper):
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
                 
 
-    def visualize_GLM_results(self, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True, var_explained:bool = True, average_distance_vals:bool = False):
+    def visualize_GLM_results(self, pearson_fit_measure:bool, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True, var_explained:bool = True, average_distance_vals:bool = False):
         """
         Visualizes results from GLMHelper.predict_from_mapping
         """
         session_day_differences = self.get_session_date_differences()
 
         if by_timepoints:
-            type_of_content = "var_explained_timepoint"
+            type_of_content = "var_explained_timepoint" if not pearson_fit_measure else "pearson_r_timepoint"
         elif var_explained:
             type_of_content = "var_explained"
         else:
@@ -1997,11 +1987,11 @@ class VisualizationHelper(GLMHelper):
         fit_measure_norms = {}
         for normalization in self.normalizations:
             # Load loss/var explained dict
-            if type_of_content != "var_explained_timepoint":
+            if type_of_content not in ["var_explained_timepoint", "pearson_r_timepoint"]:
                 session_fit_measures = self.read_dict_from_json(type_of_content=type_of_content, type_of_norm=normalization)
             else:
-                storage_folder = f"data_files/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
-                json_storage_file = f"var_explained_timepoints_dict.json"
+                storage_folder = f"data_files/{type_of_content}s/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                json_storage_file = f"{type_of_content}s_dict.json"
                 json_storage_path = os.path.join(storage_folder, json_storage_file)
 
                 with open(json_storage_path, 'r') as file:
@@ -2196,7 +2186,7 @@ class VisualizationHelper(GLMHelper):
                     else:
                         plot_folder += f""
                         session_name_addition = f"_session{session_id}"
-                    plot_file = f"fit_measure_timepoint_comparison_{normalization}{session_name_addition}.png"
+                    plot_file = f"{type_of_content}_comparison_{normalization}{session_name_addition}.png"
                     logger.custom_debug(f"plot_folder: {plot_folder}")
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 

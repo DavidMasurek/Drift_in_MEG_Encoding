@@ -61,12 +61,12 @@ debugging = True if logger_level <= 23 else False  # TODO: Use this as class att
 create_metadata = False
 create_train_test_split = False  # Careful! Everytime this is set to true, all following steps will be misalligned
 create_crop_datset_numpy = False
-create_meg_dataset = True
+create_meg_dataset = False
 extract_features = False
 perform_pca = False
-train_GLM = True
-generate_predictions_with_GLM = True
-visualization = False
+train_GLM = False
+generate_predictions_with_GLM = False
+visualization = True
 
 z_score_features_before_pca = True
 use_pca_features = True
@@ -216,7 +216,7 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
             ##visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit, var_explained=True)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
-            visualization_helper.visualize_GLM_results(by_timepoints=True, var_explained=True, separate_plots=True)
+            visualization_helper.visualize_GLM_results(pearson_fit_measure=True, by_timepoints=True, var_explained=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
             # Visuzalize distance based predictions at timepoint scale
@@ -224,7 +224,7 @@ for run in range(run_pipeline_n_times):
             ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot)  
             
             # Visualize drift topographically with mne based on sensor level data 
-            visualization_helper.visualize_topo_with_drift_per_sensor(omitted_sessions=sessions_to_omit, all_timepoints_combined=True)
+            ###visualization_helper.visualize_topo_with_drift_per_sensor(omitted_sessions=sessions_to_omit, all_timepoints_combined=True)
 
             # Visualize model perspective (values by timepoint)
             ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"
