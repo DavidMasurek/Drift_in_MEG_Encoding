@@ -49,21 +49,31 @@ class BasicOperationsHelper:
             self.session_datetimes = pickle.load(file)
 
 
-    def omit_selected_sessions_from_fit_measures(self, fit_measures_by_session:dict, omitted_sessions:list) -> dict:
+    def omit_selected_sessions_from_fit_measures(self, fit_measures_by_session:dict, omitted_sessions:list, sensors_seperated:bool) -> dict:
         """
         Filters out values for omitted sessions from standard fit measure cross-prediction dict.
         """
-        fit_measures_sessions_omitted = self.recursive_defaultdict()
-        for session_train_id, fit_measures_train_session in fit_measures_by_session['session_mapping'].items():
-            if session_train_id in omitted_sessions:
-                continue
-            for session_pred_id, fit_measures_pred_session in fit_measures_train_session["session_pred"].items():
-                if session_pred_id in omitted_sessions:
+        def omit_sessions_from_fit_measures_by_session(fit_measures_by_session:dict, fit_measures_sessions_omitted:dict, omitted_sessions:list):
+            for session_train_id, fit_measures_train_session in fit_measures_by_session['session_mapping'].items():
+                if session_train_id in omitted_sessions:
                     continue
-                fit_measures_sessions_omitted['session_mapping'][session_train_id]["session_pred"][session_pred_id] = fit_measures_pred_session
+                for session_pred_id, fit_measures_pred_session in fit_measures_train_session["session_pred"].items():
+                    if session_pred_id in omitted_sessions:
+                        continue
+                    fit_measures_sessions_omitted['session_mapping'][session_train_id]["session_pred"][session_pred_id] = fit_measures_pred_session
         
-        return fit_measures_sessions_omitted
+            return fit_measures_sessions_omitted
 
+        fit_measures_sessions_omitted = self.recursive_defaultdict()
+
+        if not sensors_seperated:
+            fit_measures_sessions_omitted = omit_sessions_from_fit_measures_by_session(fit_measures_by_session=fit_measures_by_session, fit_measures_sessions_omitted=fit_measures_sessions_omitted, omitted_sessions=omitted_sessions)
+        else:
+            for sensor_idx in fit_measures_by_session['sensor']:
+                fit_measures_sessions_omitted['sensor'][sensor_idx] = omit_sessions_from_fit_measures_by_session(fit_measures_by_session=fit_measures_by_session['sensor'][sensor_idx], fit_measures_sessions_omitted=fit_measures_sessions_omitted, omitted_sessions=omitted_sessions)
+
+        return fit_measures_sessions_omitted
+        
 
     def map_timepoint_idx_to_ms(self, timepoint_idx):
         """
@@ -1532,7 +1542,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                                     var_explained_sensor_timepoint = r2_score(Y_test[:,sensor_idx,timepoint_idx].reshape(-1), predictions[:,sensor_idx,timepoint_idx].reshape(-1))
                                 
                                     # Save fit measure for selected sensor and timepoint
-                                    variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["sensor"][str(sensor_idx)]["timepoint"][str(timepoint_idx)] = var_explained_sensor_timepoint
+                                    variance_explained_dict["sensor"][str(sensor_idx)]["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(timepoint_idx)] = var_explained_sensor_timepoint
                         else:
                             # Calculate the mean squared error across all flattened features and timepoints
                             mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
@@ -1966,48 +1976,35 @@ class VisualizationHelper(GLMHelper):
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
                 
 
-    def visualize_GLM_results(self, pearson_fit_measure:bool, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True, var_explained:bool = True, average_distance_vals:bool = False):
+    def visualize_GLM_results(self, fit_measure_type:str, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True, average_distance_vals:bool = False):
         """
         Visualizes results from GLMHelper.predict_from_mapping
         """
         session_day_differences = self.get_session_date_differences()
 
-        if by_timepoints:
-            type_of_content = "var_explained_timepoint" if not pearson_fit_measure else "pearson_r_timepoint"
-        elif var_explained:
-            type_of_content = "var_explained"
-        else:
-            type_of_content = "mse_losses"
+        # TODO: Remove reprecated var_explained parameter; by_timepoints can now also be var_explained
 
-        if var_explained:
+        if fit_measure_type in ["var_explained_timepoint", "var_explained", "var_explained_sensors_timepoint"]:
             type_of_fit_measure = "Variance Explained"
+        elif fit_measure_type == "pearson_r_timepoint":
+            type_of_fit_measure = "Pearson correlation"
         else:
             type_of_fit_measure = "MSE"
-
+        
         fit_measure_norms = {}
         for normalization in self.normalizations:
             # Load loss/var explained dict
-            if type_of_content not in ["var_explained_timepoint", "pearson_r_timepoint"]:
-                session_fit_measures = self.read_dict_from_json(type_of_content=type_of_content, type_of_norm=normalization)
+            if fit_measure_type not in ["var_explained_timepoint", "var_explained_sensors_timepoint", "pearson_r_timepoint"]:
+                session_fit_measures = self.read_dict_from_json(type_of_content=fit_measure_type, type_of_norm=normalization)
             else:
-                storage_folder = f"data_files/{type_of_content}s/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
-                json_storage_file = f"{type_of_content}s_dict.json"
+                storage_folder = f"data_files/{fit_measure_type}s/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                json_storage_file = f"{fit_measure_type}s_dict.json"
                 json_storage_path = os.path.join(storage_folder, json_storage_file)
 
                 with open(json_storage_path, 'r') as file:
                     session_fit_measures = json.load(file)
 
             fit_measure_norms[normalization] = session_fit_measures
-
-            # Control values
-            #if var_explained:
-            #    for train_session in session_fit_measures['session_mapping']:
-            #        for pred_session in session_fit_measures['session_mapping'][train_session]['session_pred']:
-            #            variance_explained_val = session_fit_measures['session_mapping'][train_session]['session_pred'][pred_session]
-            #            if variance_explained_val < 0:
-            #                raise ValueError("Contains negative values for Variance Explained.")
-            #            elif variance_explained_val > 1:
-            #                raise ValueError("Contains values larger 1 for Variance Explained.")
 
             if only_distance:
                 # Plot loss as a function of distance of predicted session from "training" session
@@ -2164,8 +2161,9 @@ class VisualizationHelper(GLMHelper):
                     plot_file = f"MSE_plot_all_sessions.png"
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
             elif by_timepoints:
+                assert fit_measure_type in ["var_explained_timepoint", "var_explained_sensors_timepoint", "pearson_r_timepoint"]
 
-                def plot_timepoint_fit_measure(timepoint_loss_list, num_timepoints, session_id=None):
+                def plot_timepoint_fit_measure(timepoint_loss_list, num_timepoints, session_id=None, sensor_name=None):
                     plt.figure(figsize=(10, 6))
                     timepoints_in_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in list(range(num_timepoints))]
                     #logger.custom_info(f"timepoints_in_ms: {timepoints_in_ms}")
@@ -2173,7 +2171,8 @@ class VisualizationHelper(GLMHelper):
                     #plt.bar(list(range(num_timepoints)), timepoint_loss_list, color='blue')
                     #logger.custom_debug(f"list(range(num_timepoints): {list(range(num_timepoints))}")
                     session_subtitle = "Averaged across all Sessions, predicting themselves" if session_id is None else f"Session {session_id}, predicting iteself"
-                    plt.title(f'{type_of_fit_measure} Fit measure per Timepoint Model. {session_subtitle} \n omitted sessions: {omit_sessions}.')
+                    sensor_subtile = "Averaged across all sensors" if sensor_name is None else f"Sensor {sensor_name}"
+                    plt.title(f'{type_of_fit_measure} Fit measure per Timepoint Model. \n {sensor_subtile} {session_subtitle} \n omitted sessions: {omit_sessions}.')
                     plt.xlabel(f'Time relative to {self.lock_event} onset')
                     plt.ylabel(f'{type_of_fit_measure}')
                     plt.grid(True)
@@ -2182,43 +2181,63 @@ class VisualizationHelper(GLMHelper):
                     plot_folder = f"data_files/visualizations/timepoint_model_comparison/subject_{self.subject_id}/norm_{normalization}"
                     if session_id is None:
                         plot_folder += "/all_sessions_combined"  
-                        session_name_addition = ""
+                        session_sensor_name_addition = "" if sensor_name is None else f"_sensor_{sensor_name}"
                     else:
                         plot_folder += f""
-                        session_name_addition = f"_session{session_id}"
-                    plot_file = f"{type_of_content}_comparison_{normalization}{session_name_addition}.png"
+                        session_name_addition = f"_session{session_id}" if sensor_name is None else f"_sensor_{sensor_name}_session{session_id}"
+                    plot_file = f"{fit_measure_type}_comparison_{normalization}{session_name_addition}.png"
                     logger.custom_debug(f"plot_folder: {plot_folder}")
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+                    plt.close()
 
-                # Collect fit_measures for timepoint models on predictions on the own session
-                fit_measures_by_session_by_timepoint = {"session": {}}
-                for session_id in session_fit_measures['session_mapping']:
-                    if session_id in omit_sessions:
-                        continue
-                    fit_measures_by_session_by_timepoint["session"][session_id] = {"timepoint":{}}
-                    for timepoint in session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]["timepoint"]:
-                        fit_measure_timepoint = session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]["timepoint"][timepoint]
-                        fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"][timepoint] = fit_measure_timepoint
+                def extract_self_session_pred_and_plot_by_timepoints(session_fit_measures:dict, sensor_name=None) -> None:
+                    # Collect fit_measures for timepoint models on predictions on the own session
+                    fit_measures_by_session_by_timepoint = {"session": {}}
+                    for session_id in session_fit_measures['session_mapping']:
+                        if session_id in omit_sessions:
+                            continue
+                        fit_measures_by_session_by_timepoint["session"][session_id] = {"timepoint":{}}
+                        for timepoint in session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]["timepoint"]:
+                            fit_measure_timepoint = session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]["timepoint"][timepoint]
+                            fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"][timepoint] = fit_measure_timepoint
 
-                # Plot results averaged over all sessions
-                num_timepoints = len([timepoint for timepoint in fit_measures_by_session_by_timepoint["session"]["3"]["timepoint"]])
-                timepoint_average_fit_measure = {}
-                if not separate_plots:
-                    for timepoint in range(num_timepoints):
-                        # Calculate average over all within session predictions for this timepoint
-                        fit_measures = []
-                        for session in fit_measures_by_session_by_timepoint["session"]:
-                            timepoint_session_loss = fit_measures_by_session_by_timepoint["session"][session]["timepoint"][str(timepoint)]
-                            fit_measures.append(timepoint_session_loss)
-                        avg_loss = np.sum(fit_measures) / len(fit_measures)
-                        timepoint_average_fit_measure[timepoint] = avg_loss
-                    timepoint_avg_loss_list = [timepoint_average_fit_measure[timepoint] for timepoint in timepoint_average_fit_measure]
+                    num_timepoints = len([timepoint for timepoint in fit_measures_by_session_by_timepoint["session"]["3"]["timepoint"]])
+                    timepoint_average_fit_measure = {}
+                    if not separate_plots:
+                        # Plot results averaged over all sessions
+                        for timepoint in range(num_timepoints):
+                            # Calculate average over all within session predictions for this timepoint
+                            fit_measures = []
+                            for session in fit_measures_by_session_by_timepoint["session"]:
+                                timepoint_session_loss = fit_measures_by_session_by_timepoint["session"][session]["timepoint"][str(timepoint)]
+                                fit_measures.append(timepoint_session_loss)
+                            avg_loss = np.sum(fit_measures) / len(fit_measures)
+                            timepoint_average_fit_measure[timepoint] = avg_loss
+                        timepoint_avg_loss_list = [timepoint_average_fit_measure[timepoint] for timepoint in timepoint_average_fit_measure]
 
-                    plot_timepoint_fit_measure(timepoint_loss_list=timepoint_avg_loss_list, num_timepoints=num_timepoints)
+                        plot_timepoint_fit_measure(timepoint_loss_list=timepoint_avg_loss_list, num_timepoints=num_timepoints, sensor_name=sensor_name)
+                    else:
+                        for session_id in fit_measures_by_session_by_timepoint["session"]:
+                            timepoint_loss_list = [fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"][timepoint] for timepoint in fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"]]
+                            plot_timepoint_fit_measure(timepoint_loss_list=timepoint_loss_list, num_timepoints=num_timepoints, session_id=session_id, sensor_name=sensor_name)
+            
+                if fit_measure_type != "var_explained_sensors_timepoint":
+                    # All sensors combined
+                    extract_self_session_pred_and_plot_by_timepoints(session_fit_measures=session_fit_measures)
                 else:
-                    for session_id in fit_measures_by_session_by_timepoint["session"]:
-                        timepoint_loss_list = [fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"][timepoint] for timepoint in fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"]]
-                        plot_timepoint_fit_measure(timepoint_loss_list=timepoint_loss_list, num_timepoints=num_timepoints, session_id=session_id)
+                    # Each sensor seperate
+                    sensor_index_name_dict = self.get_relevant_meg_channels(self.chosen_channels)
+                    if sensor_index_name_dict['grad']:
+                        raise NotImplementedError("Plot not yet implemented for grad sensors")
+                    sensor_names = [sensor_name for sensor_name in sensor_index_name_dict['mag']['sensor_index_within_type'].values()]
+
+                    # TODO: Store and retrieve sensors by name out of dict instead of by index? Seems to be safest
+                    # TODO: I adjusted the sensor timepoint dict so that the sensor is the outmost attribute. Assure that this does not cause issues elsewhere
+                    
+                    for sensor_idx, sensor_session_fit_measures in session_fit_measures["sensor"].items():
+                        sensor_name = sensor_names[int(sensor_idx)]
+                        extract_self_session_pred_and_plot_by_timepoints(session_fit_measures=sensor_session_fit_measures, sensor_name=sensor_name)
+
             else:
                 raise ValueError("[ERROR][visualize_GLM_results] Function called with invalid parameter configuration.")
 
@@ -2465,10 +2484,10 @@ class VisualizationHelper(GLMHelper):
             json_storage_file = f"var_explained_sensors_timepoints_dict.json"
             json_storage_path = os.path.join(storage_folder, json_storage_file)
             with open(json_storage_path, 'r') as file:
-                fit_measures_by_session_by_sensor_by_timepoint = json.load(file)
+                fit_measures_by_sensor_by_session_by_timepoint = json.load(file)
 
             if omitted_sessions:
-                fit_measures_by_session_by_sensor_by_timepoint = self.omit_selected_sessions_from_fit_measures(fit_measures_by_session=fit_measures_by_session_by_sensor_by_timepoint, omitted_sessions=omitted_sessions)
+                fit_measures_by_sensor_by_session_by_timepoint = self.omit_selected_sessions_from_fit_measures(fit_measures_by_session=fit_measures_by_sensor_by_session_by_timepoint, omitted_sessions=omitted_sessions, sensors_seperated=True)
 
             # Calculate drift for each sensor seperate (over all timepoints)
 
@@ -2491,13 +2510,9 @@ class VisualizationHelper(GLMHelper):
             
             drift_correlations_sensors = []
             for sensor_idx, sensor_name in enumerate(channel_names_by_indices):
+                sensor_fit_measures_by_session_by_timepoint = fit_measures_by_sensor_by_session_by_timepoint["sensor"][str(sensor_idx)]
                 logger.custom_info(f"Processing sensor {sensor_name}")
                 sensor_name = channel_names_by_indices[sensor_idx]
-                # Filter dict for current sensor 
-                sensor_fit_measures_by_session_by_timepoint = self.recursive_defaultdict()
-                for session_train_id, fit_measures_train_session in fit_measures_by_session_by_sensor_by_timepoint['session_mapping'].items():
-                    for session_pred_id, fit_measures_pred_session in fit_measures_train_session["session_pred"].items():
-                        sensor_fit_measures_by_session_by_timepoint["session_mapping"][session_train_id]["session_pred"][session_pred_id] = fit_measures_pred_session["sensor"][str(sensor_idx)]
                 
                 sensor_fit_measures_by_distances = self.calculate_fit_by_distances(fit_measures_by_session=sensor_fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
 
