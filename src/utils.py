@@ -53,7 +53,8 @@ class BasicOperationsHelper:
         """
         Filters out values for omitted sessions from standard fit measure cross-prediction dict.
         """
-        def omit_sessions_from_fit_measures_by_session(fit_measures_by_session:dict, fit_measures_sessions_omitted:dict, omitted_sessions:list):
+        def omit_sessions_from_fit_measures_by_session(fit_measures_by_session:dict, omitted_sessions:list):
+            fit_measures_sessions_omitted = self.recursive_defaultdict()
             for session_train_id, fit_measures_train_session in fit_measures_by_session['session_mapping'].items():
                 if session_train_id in omitted_sessions:
                     continue
@@ -64,15 +65,14 @@ class BasicOperationsHelper:
         
             return fit_measures_sessions_omitted
 
-        fit_measures_sessions_omitted = self.recursive_defaultdict()
-
         if not sensors_seperated:
-            fit_measures_sessions_omitted = omit_sessions_from_fit_measures_by_session(fit_measures_by_session=fit_measures_by_session, fit_measures_sessions_omitted=fit_measures_sessions_omitted, omitted_sessions=omitted_sessions)
+            fit_measures_sessions_omitted_complete = omit_sessions_from_fit_measures_by_session(fit_measures_by_session=fit_measures_by_session, fit_measures_sessions_omitted=fit_measures_sessions_omitted, omitted_sessions=omitted_sessions)
         else:
+            fit_measures_sessions_omitted_complete = self.recursive_defaultdict()
             for sensor_idx in fit_measures_by_session['sensor']:
-                fit_measures_sessions_omitted['sensor'][sensor_idx] = omit_sessions_from_fit_measures_by_session(fit_measures_by_session=fit_measures_by_session['sensor'][sensor_idx], fit_measures_sessions_omitted=fit_measures_sessions_omitted, omitted_sessions=omitted_sessions)
+                fit_measures_sessions_omitted_complete['sensor'][sensor_idx] = omit_sessions_from_fit_measures_by_session(fit_measures_by_session=fit_measures_by_session['sensor'][sensor_idx], omitted_sessions=omitted_sessions)
 
-        return fit_measures_sessions_omitted
+        return fit_measures_sessions_omitted_complete
         
 
     def map_timepoint_idx_to_ms(self, timepoint_idx):
@@ -2488,37 +2488,27 @@ class VisualizationHelper(GLMHelper):
 
             if omitted_sessions:
                 fit_measures_by_sensor_by_session_by_timepoint = self.omit_selected_sessions_from_fit_measures(fit_measures_by_session=fit_measures_by_sensor_by_session_by_timepoint, omitted_sessions=omitted_sessions, sensors_seperated=True)
-
-            # Calculate drift for each sensor seperate (over all timepoints)
-
+           
             # Get sensor names (maybe not needed)
-            selected_channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
-            selected_sensors_indices_total = list(selected_channel_indices['mag']['sensor_index_total'].keys())
-            n_sensors_selected = len(selected_sensors_indices_total)
-            channel_names_by_indices = {}
-            ch_ix = 0
-            for sensor_type in selected_channel_indices:
-                if sensor_type == "grad" and selected_channel_indices[sensor_type]:
-                    raise NotImplementedError("Currently only considering mag sensors.")
-                for sensor_index_within_type in selected_channel_indices[sensor_type]["sensor_index_within_type"]:
-                    channel_names_by_indices[ch_ix] = selected_channel_indices[sensor_type]["sensor_index_within_type"][sensor_index_within_type]
-                    ch_ix += 1
-            channel_names_arr = np.array([channel_name for channel_name in channel_names_by_indices.values()])
-            channel_indices_arr = np.array([channel_index for channel_index in selected_channel_indices["mag"]["sensor_index_within_type"].keys()])
-            #logger.custom_info(f"channel_names_arr: {channel_names_arr}")
+            sensor_index_name_dict = self.get_relevant_meg_channels(self.chosen_channels)
+            if sensor_index_name_dict['grad']:
+                raise NotImplementedError("Plot not yet implemented for grad sensors")
+            sensor_names = np.array([sensor_name for sensor_name in sensor_index_name_dict['mag']['sensor_index_within_type'].values()])
+            n_sensors_selected = len(sensor_names)
+
             timepoint_indices = np.array(list(range(1 + self.timepoint_max - self.timepoint_min)))
             
+            # Calculate drift for each sensor seperate (over all timepoints)
             drift_correlations_sensors = []
-            for sensor_idx, sensor_name in enumerate(channel_names_by_indices):
+            for sensor_idx, sensor_name in enumerate(sensor_names):
                 sensor_fit_measures_by_session_by_timepoint = fit_measures_by_sensor_by_session_by_timepoint["sensor"][str(sensor_idx)]
                 logger.custom_info(f"Processing sensor {sensor_name}")
-                sensor_name = channel_names_by_indices[sensor_idx]
                 
                 sensor_fit_measures_by_distances = self.calculate_fit_by_distances(fit_measures_by_session=sensor_fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
 
                 if all_timepoints_combined:
                     # Plot drift for sensor
-                    drift_plot_sensor = self._plot_drift_distance_based(fit_measures_by_distances=sensor_fit_measures_by_distances, self_pred_normalized=False, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999)  # 999 indicates that we are considering all timepoints
+                    drift_plot_sensor = self._plot_drift_distance_based(fit_measures_by_distances=sensor_fit_measures_by_distances, self_pred_normalized=False, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999)  # 999 indicates that we are considering all given timepoints
                     storage_folder = f"data_files/visualizations/only_distance/sensor_level/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
                     storage_filename = f"drift_plot_sensor_{sensor_name}_all_timepoints"
                     self.save_plot_as_file(plt=drift_plot_sensor, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")

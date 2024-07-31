@@ -33,7 +33,7 @@ best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 175, "timepo
                                             "03": {"timepoint_min": 175, "timepoint_max": 225},
                                             "05": {"timepoint_min": 160, "timepoint_max": 250},},
                               "saccade":   {"01": {"timepoint_min": 425, "timepoint_max": 530}, 
-                                            "02": {"timepoint_min": 425, "timepoint_max": 525},
+                                            "02": {"timepoint_min": 475, "timepoint_max": 525},  # ! Currently testing smaller windows due to sensor-level encoding differences. Old range: "02": {"timepoint_min": 425, "timepoint_max": 525}
                                             "03": {"timepoint_min": 400, "timepoint_max": 485},
                                             "04": {"timepoint_min": 430, "timepoint_max": 515},
                                             "05": {"timepoint_min": 420, "timepoint_max": 510},}
@@ -61,11 +61,11 @@ debugging = True if logger_level <= 23 else False  # TODO: Use this as class att
 create_metadata = False
 create_train_test_split = False  # Careful! Everytime this is set to true, all following steps will be misalligned
 create_crop_datset_numpy = False
-create_meg_dataset = False
+create_meg_dataset = True
 extract_features = False
 perform_pca = False
-train_GLM = False
-generate_predictions_with_GLM = False
+train_GLM = True
+generate_predictions_with_GLM = True
 visualization = True
 
 z_score_features_before_pca = True
@@ -216,7 +216,7 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
             ##visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit, var_explained=True)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
-            ####visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
+            visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
             # Visuzalize distance based predictions at timepoint scale
