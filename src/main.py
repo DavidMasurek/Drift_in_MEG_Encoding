@@ -33,7 +33,7 @@ best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 175, "timepo
                                             "03": {"timepoint_min": 175, "timepoint_max": 225},
                                             "05": {"timepoint_min": 160, "timepoint_max": 250},},
                               "saccade":   {"01": {"timepoint_min": 425, "timepoint_max": 530}, 
-                                            "02": {"timepoint_min": 475, "timepoint_max": 525},  # ! Currently testing smaller windows due to sensor-level encoding differences. Old range: "02": {"timepoint_min": 425, "timepoint_max": 525}
+                                            "02": {"timepoint_min": 450, "timepoint_max": 500},  # ! Currently testing smaller windows due to sensor-level encoding differences. Old range: "02": {"timepoint_min": 425, "timepoint_max": 525}
                                             "03": {"timepoint_min": 400, "timepoint_max": 485},
                                             "04": {"timepoint_min": 430, "timepoint_max": 515},
                                             "05": {"timepoint_min": 420, "timepoint_max": 510},}
@@ -193,6 +193,7 @@ for run in range(run_pipeline_n_times):
                 #glm_helper.predict_from_mapping(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
                 #glm_helper.predict_from_mapping(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=True, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
                 glm_helper.predict_from_mapping(fit_measure_storage_distinction="timepoint_sensor_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
+                glm_helper.predict_from_mapping(fit_measure_storage_distinction="timepoint_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
                 #glm_helper.predict_from_mapping(fit_measure_storage_distinction="timepoint_sensor_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
 
 
@@ -217,6 +218,7 @@ for run in range(run_pipeline_n_times):
             ##visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit, var_explained=True)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
+            visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
             # Visuzalize distance based predictions at timepoint scale
