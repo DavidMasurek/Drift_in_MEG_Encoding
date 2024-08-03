@@ -45,7 +45,7 @@ class BasicOperationsHelper:
         self.session_ids_char = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
         self.session_ids_num = [str(session_id) for session_id in range(1,11)]
 
-        with open("data_files/session_metadata/session_datetimes/session_datetimes_dict.pkl", 'rb') as file:
+        with open(f"data_files/session_metadata/session_datetimes/session_datetimes_dict.pkl", 'rb') as file:
             self.session_datetimes = pickle.load(file)
 
 
@@ -66,7 +66,7 @@ class BasicOperationsHelper:
             return fit_measures_sessions_omitted
 
         if not sensors_seperated:
-            fit_measures_sessions_omitted_complete = omit_sessions_from_fit_measures_by_session(fit_measures_by_session=fit_measures_by_session, fit_measures_sessions_omitted=fit_measures_sessions_omitted, omitted_sessions=omitted_sessions)
+            fit_measures_sessions_omitted_complete = omit_sessions_from_fit_measures_by_session(fit_measures_by_session=fit_measures_by_session, omitted_sessions=omitted_sessions)
         else:
             fit_measures_sessions_omitted_complete = self.recursive_defaultdict()
             for sensor_idx in fit_measures_by_session['sensor']:
@@ -81,15 +81,17 @@ class BasicOperationsHelper:
 
         !!! Based on ICA-cleaned metadata from f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/erf/filter_0.2_200/ica" !!!
         """
+        num_timepoints = 651
         if self.lock_event == "saccade":
             # Old, Andrej: Saccade: 401 timepoints, -500 to 300
             # AVS ICA-claned: Saccade: 651 timepoints, -800 to 500
             min_ms = -800
             max_ms = 500
-            num_timepoints = 651
         else:
             # Old, Andrej: Fixation: 401 timepoints, -300 to 500
-            raise NotImplementedError("Did not check considered timepoints for fixation-locked data in the ICA-cleaned data from AVS.")
+            # AVS ICA-claned: Fixation: 651 timepoints, -500 to 800
+            min_ms = -800
+            max_ms = 500
 
         ms_values = np.linspace(min_ms, max_ms, num=num_timepoints)  # space containing the ms values for all timepoints
         #logger.custom_debug(f"ms_values linspace: {ms_values}")
@@ -187,13 +189,13 @@ class BasicOperationsHelper:
             raise ValueError(f"Function read_dict_from_json called with unrecognized type {type_of_content}.")
 
         if type_of_content == "mse_losses":
-            file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/mse_losses_{type_of_norm}_dict.json"
+            file_path = f"data_files/{self.lock_event}/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/mse_losses_{type_of_norm}_dict.json"
         elif type_of_content == "mse_losses_timepoint":
-            file_path = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/timepoints/norm_{type_of_norm}/mse_losses_timepoint_{type_of_norm}_dict.json"
+            file_path = f"data_files/{self.lock_event}/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/timepoints/norm_{type_of_norm}/mse_losses_timepoint_{type_of_norm}_dict.json"
         elif type_of_content == "var_explained":
-            file_path = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/predict_train_data_{predict_train_data}/var_explained_{type_of_norm}_dict.json"
+            file_path = f"data_files/{self.lock_event}/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/predict_train_data_{predict_train_data}/var_explained_{type_of_norm}_dict.json"
         else:
-            file_path = f"data_files/metadata/{type_of_content}/subject_{self.subject_id}/{type_of_content}_dict.json"
+            file_path = f"data_files/{self.lock_event}/metadata/{type_of_content}/subject_{self.subject_id}/{type_of_content}_dict.json"
         
         try:
             with open(file_path, 'r') as data_file:
@@ -224,13 +226,13 @@ class BasicOperationsHelper:
                 else:
                     timepoint_folder = ""
                     timepoint_name = ""
-                storage_folder = f"data_files/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/{timepoint_folder}norm_{type_of_norm}"
+                storage_folder = f"data_files/{self.lock_event}/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/{timepoint_folder}norm_{type_of_norm}"
             elif type_of_content == "var_explained":
-                storage_folder = f"data_files/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/predict_train_data_{predict_train_data}"
+                storage_folder = f"data_files/{self.lock_event}/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/predict_train_data_{predict_train_data}"
             name_addition = f"_{type_of_norm}"
         # metadata
         elif type_of_content in ["combined_metadata", "meg_metadata", "crop_metadata"]:
-            storage_folder = f'data_files/metadata/{type_of_content}/subject_{self.subject_id}'
+            storage_folder = f'data_files/{self.lock_event}/metadata/{type_of_content}/subject_{self.subject_id}'
             name_addition = ""
 
         os.makedirs(storage_folder, exist_ok=True)
@@ -283,7 +285,7 @@ class BasicOperationsHelper:
 
         # Export train/test split arrays to .npz
         for split in array_dict:
-            save_folder = f"data_files/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}{intermediate_norm_folder}subject_{self.subject_id}{session_folder}/{split}"  
+            save_folder = f"data_files/{self.lock_event}/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}{intermediate_norm_folder}subject_{self.subject_id}{session_folder}/{split}"  
             save_file = f"{type_of_content}{file_type}"
             os.makedirs(save_folder, exist_ok=True)
             save_path = os.path.join(save_folder, save_file)
@@ -411,7 +413,7 @@ class BasicOperationsHelper:
         split_dict = {}
         for split in ["train", "test"]:
             # Load split trial array
-            split_path = f"data_files/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}{session_folder}/{split}/{type_of_content}{file_type}"  
+            split_path = f"data_files/{self.lock_event}/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}{session_folder}/{split}/{type_of_content}{file_type}"  
             if file_type == ".npy":
                 split_data = np.load(split_path)
                 #logger.custom_debug(f"Loaded array of shape {split_data.shape} from {split_path}")
@@ -774,7 +776,7 @@ class DatasetHelper(MetadataHelper):
                         crop_split[split].append(crop)
 
                         if debugging and session_id in ["2", "5", "8"] and crop_split_index in [0, 10, 100, 1000]:
-                            save_folder = f"data_files/debugging/crop_data/numpy_dataset/session_{session_id}/{split}/crop_split_index_{crop_split_index}"
+                            save_folder = f"data_files/{self.lock_event}/debugging/crop_data/numpy_dataset/session_{session_id}/{split}/crop_split_index_{crop_split_index}"
                             os.makedirs(save_folder, exist_ok=True)
                             save_path = os.path.join(save_folder, "crop_image_numpy")
                             np.save(save_path, crop)
@@ -837,9 +839,9 @@ class DatasetHelper(MetadataHelper):
                 meg_data["grad"] = f['grad']['onset']  # shape participant 2, session a saccade: (2945, 204, 601), fixation: (2874, 204, 401) 
                 meg_data["mag"] = f['mag']['onset']  # shape participant 2, session a saccade: (2945, 102, 601), fixation: (2874, 102, 401)
 
-                #logger.custom_info(f"self.lock_event: {self.lock_event}")
-                #logger.custom_info(f"H5 f.attrs['times']: {f.attrs['times']}")
-                #logger.custom_info(f"H5 len(f.attrs['times']): {len(f.attrs['times'])}")
+                logger.custom_debug(f"self.lock_event: {self.lock_event}")
+                logger.custom_debug(f"H5 f.attrs['times']: {f.attrs['times']}")
+                logger.custom_debug(f"H5 len(f.attrs['times']): {len(f.attrs['times'])}")
 
                 num_meg_timepoints = meg_data['grad'].shape[0]
 
@@ -1204,7 +1206,7 @@ class DatasetHelper(MetadataHelper):
                 for split in tensor_dict:
                     for crop_split_index in [0, 10, 100, 1000]:
                         if len(tensor_dict[split]) >= crop_split_index:
-                            save_folder = f"data_files/debugging/crop_data/pytorch_dataset/session_{session_id}/{split}/crop_split_index_{crop_split_index}"
+                            save_folder = f"data_files/{self.lock_event}/debugging/crop_data/pytorch_dataset/session_{session_id}/{split}/crop_split_index_{crop_split_index}"
                             os.makedirs(save_folder, exist_ok=True)
                             save_path = os.path.join(save_folder, "crop_image_pytorch.pt")
                             torch.save(tensor_dict[split][crop_split_index], save_path)
@@ -1394,7 +1396,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
             session_addition = f"/session_{session_id_num}" if not all_sessions_combined else ""
 
             # Store trained models as pickle
-            save_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}{all_session_folder}/norm_{normalization}{session_addition}"  
+            save_folder = f"data_files/{self.lock_event}/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}{all_session_folder}/norm_{normalization}{session_addition}"  
             save_file = "GLM_models.pkl"
             os.makedirs(save_folder, exist_ok=True)
             save_path = os.path.join(save_folder, save_file)
@@ -1484,7 +1486,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     mse_session_losses["session_mapping"][session_id_model] = {"session_pred": {}}
                     # Get trained ridge regression model for this session
                     # Load ridge model
-                    storage_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/session_{session_id_model}"  
+                    storage_folder = f"data_files/{self.lock_event}/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/session_{session_id_model}"  
                     storage_file = "GLM_models.pkl"
                     storage_path = os.path.join(storage_folder, storage_file)
                     with open(storage_path, 'rb') as file:
@@ -1539,7 +1541,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                             n_timepoints = predictions.shape[2]
                             for sensor_idx in range(n_sensors):
                                 for timepoint_idx in range(n_timepoints):
-                                    var_explained_sensor_timepoint = r2_score(Y_test[:,sensor_idx,timepoint_idx].reshape(-1), predictions[:,sensor_idx,timepoint_idx].reshape(-1))
+                                    var_explained_sensor_timepoint = r2_score(Y_test[:,sensor_idx,timepoint_idx], predictions[:,sensor_idx,timepoint_idx])  # .reshape(-1)
                                 
                                     # Save fit measure for selected sensor and timepoint
                                     variance_explained_dict["sensor"][str(sensor_idx)]["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(timepoint_idx)] = var_explained_sensor_timepoint
@@ -1589,7 +1591,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         raise ValueError("Invalid value for fit_measure_storage_distinction.")
 
                     for main_folder, fit_measure_dict in storage_dicts_by_folders.items():
-                        storage_folder = f"data_files/{main_folder}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                        storage_folder = f"data_files/{self.lock_event}/{main_folder}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
                         os.makedirs(storage_folder, exist_ok=True)
                         json_storage_file = f"{main_folder}_dict.json"
                         json_storage_path = os.path.join(storage_folder, json_storage_file)
@@ -1615,7 +1617,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 var_explained_dict = {}
                 correlation_dict = {}
                 # Get trained ridge regression models 
-                storage_folder = f"data_files/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}"  
+                storage_folder = f"data_files/{self.lock_event}/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}"  
                 storage_file = "GLM_models.pkl"
                 storage_path = os.path.join(storage_folder, storage_file)
                 with open(storage_path, 'rb') as file:
@@ -1662,7 +1664,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 correlation_dict = {"correlation": r_pearson}
 
                 for fit_measure in ["var_explained", "mse_losses", "correlation"]:
-                    storage_folder = f"data_files/{fit_measure}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}/predict_train_data_{predict_train_data}"
+                    storage_folder = f"data_files/{self.lock_event}/{fit_measure}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}/predict_train_data_{predict_train_data}"
                     os.makedirs(storage_folder, exist_ok=True)
                     json_storage_file = f"{fit_measure}_all_sessions_combined_dict.json"
                     json_storage_path = os.path.join(storage_folder, json_storage_file)
@@ -1927,7 +1929,7 @@ class VisualizationHelper(GLMHelper):
                 #plt.show()
 
                 # Save the plot to a file
-                plot_folder = f"data_files/visualizations/encoding_performance/subject_{self.subject_id}/norm_{normalization}"
+                plot_folder = f"data_files/{self.lock_event}/visualizations/encoding_performance/subject_{self.subject_id}/norm_{normalization}"
                 pred_split_addition = pred_split[0] if len(pred_splits) == 1 else "both"
                 plot_file = f"{type_of_fit_measure}_session_self_prediction_{normalization}_pred_splits_{pred_split_addition}.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
@@ -1942,7 +1944,7 @@ class VisualizationHelper(GLMHelper):
                 for pred_type in self_pred_measures:
                     predict_train_data = True if pred_type == "train" else False
                     # Read fit measure combined over all sessions
-                    storage_folder = f"data_files/{type_of_content}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}/predict_train_data_{predict_train_data}"
+                    storage_folder = f"data_files/{self.lock_event}/{type_of_content}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}/predict_train_data_{predict_train_data}"
                     json_storage_file = f"{type_of_content}_all_sessions_combined_dict.json"
                     json_storage_path = os.path.join(storage_folder, json_storage_file)
 
@@ -1970,7 +1972,7 @@ class VisualizationHelper(GLMHelper):
                 #plt.show()
 
                 # Save the plot to a file
-                plot_folder = f"data_files/visualizations/encoding_performance/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}"
+                plot_folder = f"data_files/{self.lock_event}/visualizations/encoding_performance/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}"
                 pred_split_addition = pred_split[0] if len(pred_splits) == 1 else "both"
                 plot_file = f"{type_of_fit_measure}_all_sessions_combined_self_prediction_{normalization}_pred_splits_{pred_split_addition}.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
@@ -1997,7 +1999,7 @@ class VisualizationHelper(GLMHelper):
             if fit_measure_type not in ["var_explained_timepoint", "var_explained_sensors_timepoint", "pearson_r_timepoint"]:
                 session_fit_measures = self.read_dict_from_json(type_of_content=fit_measure_type, type_of_norm=normalization)
             else:
-                storage_folder = f"data_files/{fit_measure_type}s/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                storage_folder = f"data_files/{self.lock_event}/{fit_measure_type}s/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
                 json_storage_file = f"{fit_measure_type}s_dict.json"
                 json_storage_path = os.path.join(storage_folder, json_storage_file)
 
@@ -2098,7 +2100,7 @@ class VisualizationHelper(GLMHelper):
                 #plt.show()
 
                 # Save the plot to a file
-                plot_folder = f"data_files/visualizations/only_distance/subject_{self.subject_id}/norm_{normalization}"
+                plot_folder = f"data_files/{self.lock_event}/visualizations/only_distance/subject_{self.subject_id}/norm_{normalization}"
                 plot_file = f"{type_of_fit_measure}_plot_over_distance_{normalization}.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
                 #plt.close()
@@ -2137,7 +2139,7 @@ class VisualizationHelper(GLMHelper):
                         plt.grid(True)
 
                         # Save the plot to a file
-                        plot_folder = f"data_files/visualizations/seperate_plots_{separate_plots}/subject_{self.subject_id}/norm_{normalization}"
+                        plot_folder = f"data_files/{self.lock_event}/visualizations/seperate_plots_{separate_plots}/subject_{self.subject_id}/norm_{normalization}"
                         plot_file = f"{type_of_fit_measure}_plot_session{train_session}.png"
                         self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
                 else:
@@ -2157,7 +2159,7 @@ class VisualizationHelper(GLMHelper):
                     plt.grid(True)
 
                     # Save the plot to a file
-                    plot_folder = f"data_files/visualizations/seperate_plots_{separate_plots}/subject_{self.subject_id}/norm_{normalization}"
+                    plot_folder = f"data_files/{self.lock_event}/visualizations/seperate_plots_{separate_plots}/subject_{self.subject_id}/norm_{normalization}"
                     plot_file = f"MSE_plot_all_sessions.png"
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
             elif by_timepoints:
@@ -2165,9 +2167,10 @@ class VisualizationHelper(GLMHelper):
 
                 def plot_timepoint_fit_measure(timepoint_loss_list, num_timepoints, session_id=None, sensor_name=None):
                     plt.figure(figsize=(10, 6))
-                    timepoints_in_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in list(range(num_timepoints))]
-                    #logger.custom_info(f"timepoints_in_ms: {timepoints_in_ms}")
-                    plt.bar(timepoints_in_ms, timepoint_loss_list, color='blue')
+                    #timepoints_in_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in list(range(num_timepoints))]
+                    #plt.bar(timepoints_in_ms, timepoint_loss_list, color='blue')
+                    timepoints_indices = [timepoint_idx for timepoint_idx in list(range(num_timepoints))]
+                    plt.bar(timepoints_indices, timepoint_loss_list, color='blue')
                     #plt.bar(list(range(num_timepoints)), timepoint_loss_list, color='blue')
                     #logger.custom_debug(f"list(range(num_timepoints): {list(range(num_timepoints))}")
                     session_subtitle = "Averaged across all Sessions, predicting themselves" if session_id is None else f"Session {session_id}, predicting iteself"
@@ -2178,7 +2181,7 @@ class VisualizationHelper(GLMHelper):
                     plt.grid(True)
 
                     # Save the plot to a file
-                    plot_folder = f"data_files/visualizations/timepoint_model_comparison/subject_{self.subject_id}/norm_{normalization}"
+                    plot_folder = f"data_files/{self.lock_event}/visualizations/timepoint_model_comparison/subject_{self.subject_id}/norm_{normalization}"
                     if session_id is None:
                         plot_folder += "/all_sessions_combined"  
                         session_sensor_name_addition = "" if sensor_name is None else f"_sensor_{sensor_name}"
@@ -2335,7 +2338,7 @@ class VisualizationHelper(GLMHelper):
             return fig
 
         for normalization in self.normalizations:
-            storage_folder = f"data_files/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+            storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
             json_storage_file = f"var_explained_timepoints_dict.json"
             json_storage_path = os.path.join(storage_folder, json_storage_file)
             with open(json_storage_path, 'r') as file:
@@ -2348,7 +2351,7 @@ class VisualizationHelper(GLMHelper):
                 # Also store new distance based measures
                 fit_measures_by_distances = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True)
                 
-                json_storage_folder = f"data_files/var_explained/by_distance/self_pred_normalized/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                json_storage_folder = f"data_files/{self.lock_event}/var_explained/by_distance/self_pred_normalized/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
                 json_storage_file = f"fit_measures_by_distances_self_pred_normalized_dict.json"
                 json_storage_path = os.path.join(json_storage_folder, json_storage_file)
                 os.makedirs(json_storage_folder, exist_ok=True)
@@ -2360,7 +2363,7 @@ class VisualizationHelper(GLMHelper):
             for session_id in self.session_ids_num:
                 timepoints_sessions_plot = plot_timepoint_fit_measure_3d(fit_measures_by_session_by_timepoint, session_train_id=session_id)
 
-                plot_folder = f"data_files/visualizations/3D_Plots/cross_session_preds_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                plot_folder = f"data_files/{self.lock_event}/visualizations/3D_Plots/cross_session_preds_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
                 plot_file = f"cross_session_preds_timepoints_session_{session_id}.png"
                 plot_dest = os.path.join(plot_folder, plot_file)
                 
@@ -2371,25 +2374,11 @@ class VisualizationHelper(GLMHelper):
                 #    pickle.dump(timepoints_sessions_plot, file)
 
 
-    def timepoint_window_drift(self, omitted_sessions:list, all_windows_one_plot:bool, subtract_self_pred:bool, debugging=False):
-        for normalization in self.normalizations:
-            # Load timepoint-based variance explained
-            storage_folder = f"data_files/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
-            json_storage_file = f"var_explained_timepoints_dict.json"
-            json_storage_path = os.path.join(storage_folder, json_storage_file)
-            with open(json_storage_path, 'r') as file:
-                logger.custom_debug(f"var_explained_timepoints loaded from {json_storage_path}")
-                fit_measures_by_session_by_timepoint = json.load(file)
+    def timepoint_window_drift(self, omitted_sessions:list, all_windows_one_plot:bool, subtract_self_pred:bool, sensor_level:bool, debugging=False):
 
-            if subtract_self_pred:
-                # Normalize with self-predictions
-                fit_measures_by_session_by_timepoint = self.normalize_cross_session_preds_with_self_preds(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint)
-            if omitted_sessions:
-                fit_measures_by_session_by_timepoint = self.omit_selected_sessions_from_fit_measures(fit_measures_by_session=fit_measures_by_session_by_timepoint, omitted_sessions=omitted_sessions)
-
-            def filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint: dict, timepoint_window_start_idx:int):
+        def filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint: dict, timepoint_window_start_idx:int):
                 """
-                Contains a copy of the input fit measure dict by timepoints that only contains the timepoints within the selected window
+                Returns a copy of the input fit measure dict by timepoints that only contains the timepoints within the selected window
                 """
                 fit_measures_by_session_by_chosen_timepoints = self.recursive_defaultdict()
                 for session_train_id, fit_measures_train_session in fit_measures_by_session_by_timepoint['session_mapping'].items():
@@ -2405,82 +2394,122 @@ class VisualizationHelper(GLMHelper):
                 
                 return fit_measures_by_session_by_chosen_timepoints
 
-            # Define storage folder for all plots in function
-            storage_folder = f"data_files/visualizations/only_distance/timepoint_windows/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
-            
-            # Calculate drift for various timewindows by slicing 
-            if all_windows_one_plot:
-                fit_measures_by_distance_by_time_window = {"timewindow_start": {}}
+        def plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint:dict, sensor_name:str = None) -> None:
+                sensor_filename_addition = f"sensor_{sensor_name}_" if sensor_name is not None else ""
 
-            num_timepoints = (self.timepoint_max - self.timepoint_min) + 1  # +1 because of index 0 ofc
-            timepoint_window_start_idx = 0
-            while timepoint_window_start_idx < num_timepoints:
-                # Filter timepoint values for current window
-                fit_measures_window_by_session = filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint,
-                                                                                    timepoint_window_start_idx=timepoint_window_start_idx)
-                # Only consider full windows (i.e. don't use potential smaller last timepoint window)
-                if fit_measures_window_by_session is not None:
-                    # Calculate distance based variance explained for current window
-                    fit_measures_by_distances_window = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_window_by_session, timepoint_level_input=True, average_within_distances=False)
-
-                    if not all_windows_one_plot:
-                        # Plot drift for current window
-                        drift_plot_window = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_window, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=timepoint_window_start_idx)
-
-                        # Store plot for current window
-                        window_end = timepoint_window_start_idx + self.time_window_n_indices
-                        timepoint_window_description = f"window_{timepoint_window_start_idx}-{window_end}"
-                        storage_filename = f"drift_plot_{timepoint_window_description}"
-                        self.save_plot_as_file(plt=drift_plot_window, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
-                    else:
-                        fit_measures_by_distance_by_time_window["timewindow_start"][timepoint_window_start_idx] = {"fit_measures_by_distances": fit_measures_by_distances_window}
-
-                timepoint_window_start_idx += self.time_window_n_indices
-
-            # Plot all timewindows in the same plot (with different colors)
-            if all_windows_one_plot:
-                drift_plot_all_windows = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distance_by_time_window, omitted_sessions=omitted_sessions, self_pred_normalized=subtract_self_pred, losses_averaged_within_distances=False, all_windows_one_plot=True)
-                storage_filename = f"drift_plot_all_windows_comparison"
-                self.save_plot_as_file(plt=drift_plot_all_windows, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
-
-            # For control/comparison, plot the drift for the all timepoint values combined/averaged aswell
-            logger.custom_debug(f"fit_measures_by_session_by_timepoint: {fit_measures_by_session_by_timepoint}")
-            fit_measures_by_distances_all_timepoints = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
-            drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999)  # 999 indicates that we are considering all timepoints
-
-            # Store plot for current window
-            storage_filename = f"drift_plot_all_timepoints"
-            self.save_plot_as_file(plt=drift_plot_all_timepoints, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
-            #plt.close(drift_plot_all_timepoints)
+                if subtract_self_pred:
+                    # Normalize with self-predictions
+                    fit_measures_by_session_by_timepoint = self.normalize_cross_session_preds_with_self_preds(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint)
+                if omitted_sessions:
+                    fit_measures_by_session_by_timepoint = self.omit_selected_sessions_from_fit_measures(fit_measures_by_session=fit_measures_by_session_by_timepoint, omitted_sessions=omitted_sessions, sensors_seperated=False)
 
 
-            # Debugging: average timepoint data to compare values to non-timepoint dict
-            if debugging:
-                fit_measures_by_distances_session_level = self.average_timepoint_data_per_session(fit_measures_by_session_by_timepoint)
+                # Define storage folder for all plots in function
+                sensor_folder_addition = "sensor_level/" if sensor_level else ""
+                storage_folder = f"data_files/{self.lock_event}/visualizations/only_distance/timepoint_windows/{sensor_folder_addition}{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
+                
+                # Calculate drift for various timewindows by slicing 
+                if all_windows_one_plot:
+                    fit_measures_by_distance_by_time_window = {"timewindow_start": {}}
 
-                storage_filename = f"var_explained_session_level_used_for_timepoint_plots.json"
-                os.makedirs(storage_folder, exist_ok=True)
-                json_storage_path = os.path.join(storage_folder, storage_filename)
+                num_timepoints = (self.timepoint_max - self.timepoint_min) + 1  # +1 because of index 0 ofc
+                timepoint_window_start_idx = 0
+                while timepoint_window_start_idx < num_timepoints:
+                    # Filter timepoint values for current window
+                    fit_measures_window_by_session = filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint,
+                                                                                        timepoint_window_start_idx=timepoint_window_start_idx)
+                    # Only consider full windows (i.e. don't use potential smaller last timepoint window)
+                    if fit_measures_window_by_session is not None:
+                        # Calculate distance based variance explained for current window
+                        fit_measures_by_distances_window = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_window_by_session, timepoint_level_input=True, average_within_distances=False)
 
-                with open(json_storage_path, 'w') as file:
-                    logger.custom_debug(f"Storing averaged timepoint data to {json_storage_path}")
-                    # Serialize and save the dictionary to the file
-                    json.dump(fit_measures_by_distances_session_level, file, indent=4)
+                        if not all_windows_one_plot:
+                            # Plot drift for current window
+                            drift_plot_window = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_window, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=timepoint_window_start_idx)
 
-                # And store timepoint values themselves again
-                storage_filename = f"var_explained_timepoints_used_for_timepoint_plots.json"
-                json_storage_path = os.path.join(storage_folder, storage_filename)
+                            # Store plot for current window
+                            window_end = timepoint_window_start_idx + self.time_window_n_indices
+                            timepoint_window_description = f"window_{timepoint_window_start_idx}-{window_end}"
+                            storage_filename = f"drift_plot_{sensor_filename_addition}{timepoint_window_description}"
+                            self.save_plot_as_file(plt=drift_plot_window, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+                        else:
+                            fit_measures_by_distance_by_time_window["timewindow_start"][timepoint_window_start_idx] = {"fit_measures_by_distances": fit_measures_by_distances_window}
 
-                with open(json_storage_path, 'w') as file:
-                    logger.custom_debug(f"Storing timepoint func in plot data to {json_storage_path}")
-                    # Serialize and save the dictionary to the file
-                    json.dump(fit_measures_by_session_by_timepoint, file, indent=4)
+                    timepoint_window_start_idx += self.time_window_n_indices
+
+                # Plot all timewindows in the same plot (with different colors)
+                if all_windows_one_plot:
+                    drift_plot_all_windows = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distance_by_time_window, omitted_sessions=omitted_sessions, self_pred_normalized=subtract_self_pred, losses_averaged_within_distances=False, all_windows_one_plot=True)
+                    storage_filename = f"drift_plot_{sensor_filename_addition}all_windows_comparison"
+                    self.save_plot_as_file(plt=drift_plot_all_windows, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+
+                # For control/comparison, plot the drift for the all timepoint values combined/averaged aswell
+                logger.custom_debug(f"fit_measures_by_session_by_timepoint: {fit_measures_by_session_by_timepoint}")
+                fit_measures_by_distances_all_timepoints = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
+                drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999)  # 999 indicates that we are considering all timepoints
+
+                storage_filename = f"drift_plot_{sensor_filename_addition}all_timepoints"
+                self.save_plot_as_file(plt=drift_plot_all_timepoints, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+                #plt.close(drift_plot_all_timepoints)
+
+                # Debugging: average timepoint data to compare values to non-timepoint dict
+                if debugging:
+                    fit_measures_by_distances_session_level = self.average_timepoint_data_per_session(fit_measures_by_session_by_timepoint)
+
+                    storage_filename = f"var_explained_session_level_used_for_timepoint_plots.json"
+                    os.makedirs(storage_folder, exist_ok=True)
+                    json_storage_path = os.path.join(storage_folder, storage_filename)
+
+                    with open(json_storage_path, 'w') as file:
+                        logger.custom_debug(f"Storing averaged timepoint data to {json_storage_path}")
+                        # Serialize and save the dictionary to the file
+                        json.dump(fit_measures_by_distances_session_level, file, indent=4)
+
+                    # And store timepoint values themselves again
+                    storage_filename = f"var_explained_timepoints_used_for_timepoint_plots.json"
+                    json_storage_path = os.path.join(storage_folder, storage_filename)
+
+                    with open(json_storage_path, 'w') as file:
+                        logger.custom_debug(f"Storing timepoint func in plot data to {json_storage_path}")
+                        # Serialize and save the dictionary to the file
+                        json.dump(fit_measures_by_session_by_timepoint, file, indent=4)
+
+
+        for normalization in self.normalizations:
+            if not sensor_level:
+                # Load timepoint-based variance explained
+                storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                json_storage_file = f"var_explained_timepoints_dict.json"
+                json_storage_path = os.path.join(storage_folder, json_storage_file)
+                with open(json_storage_path, 'r') as file:
+                    logger.custom_debug(f"var_explained_timepoints loaded from {json_storage_path}")
+                    fit_measures_by_session_by_timepoint = json.load(file)
+
+                plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint)
+            else:
+                # Load sensor- and timepoint-based variance explained
+                storage_folder = f"data_files/{self.lock_event}/var_explained_sensors_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                json_storage_file = f"var_explained_sensors_timepoints_dict.json"
+                json_storage_path = os.path.join(storage_folder, json_storage_file)
+                with open(json_storage_path, 'r') as file:
+                    fit_measures_by_sensor_by_session_by_timepoint = json.load(file)
+
+                sensor_index_name_dict = self.get_relevant_meg_channels(self.chosen_channels)
+                sensor_names = np.array([sensor_name for sensor_name in sensor_index_name_dict['mag']['sensor_index_within_type'].values()])
+                n_sensors_selected = len(sensor_names)
+
+                if sensor_index_name_dict['grad']:
+                    raise NotImplementedError("Plot not yet implemented for grad sensors")
+
+                for sensor_idx, sensor_name in enumerate(sensor_names):
+                    sensor_fit_measures_by_session_by_timepoint = fit_measures_by_sensor_by_session_by_timepoint["sensor"][str(sensor_idx)]
+                    plot_timepoint_window_drift_for_timepoint_fit_measures(sensor_fit_measures_by_session_by_timepoint, sensor_name=sensor_name)
 
 
     def visualize_topo_with_drift_per_sensor(self, omitted_sessions:list, all_timepoints_combined:bool):
         for normalization in self.normalizations:
             # Load sensor- and timepoint-based variance explained
-            storage_folder = f"data_files/var_explained_sensors_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+            storage_folder = f"data_files/{self.lock_event}/var_explained_sensors_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
             json_storage_file = f"var_explained_sensors_timepoints_dict.json"
             json_storage_path = os.path.join(storage_folder, json_storage_file)
             with open(json_storage_path, 'r') as file:
@@ -2494,6 +2523,7 @@ class VisualizationHelper(GLMHelper):
             if sensor_index_name_dict['grad']:
                 raise NotImplementedError("Plot not yet implemented for grad sensors")
             sensor_names = np.array([sensor_name for sensor_name in sensor_index_name_dict['mag']['sensor_index_within_type'].values()])
+            selected_sensors_indices_total = np.array([index for index in sensor_index_name_dict['mag']['sensor_index_total'].keys()])
             n_sensors_selected = len(sensor_names)
 
             timepoint_indices = np.array(list(range(1 + self.timepoint_max - self.timepoint_min)))
@@ -2507,12 +2537,6 @@ class VisualizationHelper(GLMHelper):
                 sensor_fit_measures_by_distances = self.calculate_fit_by_distances(fit_measures_by_session=sensor_fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
 
                 if all_timepoints_combined:
-                    # Plot drift for sensor
-                    drift_plot_sensor = self._plot_drift_distance_based(fit_measures_by_distances=sensor_fit_measures_by_distances, self_pred_normalized=False, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999)  # 999 indicates that we are considering all given timepoints
-                    storage_folder = f"data_files/visualizations/only_distance/sensor_level/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
-                    storage_filename = f"drift_plot_sensor_{sensor_name}_all_timepoints"
-                    self.save_plot_as_file(plt=drift_plot_sensor, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
-
                     # Calculate drift correlation (correlation between distance and fit measure)
                     x_values, y_values = self.extract_x_y_arrays(sensor_fit_measures_by_distances, losses_averaged_within_distances=False)
                     x_values_set = np.array(list(set(x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
@@ -2544,12 +2568,9 @@ class VisualizationHelper(GLMHelper):
 
             fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/saccade_evoked_{self.subject_id}_01_.fif'
         
-            processing_channels_indices = {"grad": {}, "mag": {}}
             og_evoked = mne.read_evokeds(fif_file_path)[0]
             mne_info = og_evoked.info
-            selected_channels_idx = selected_sensors_indices_total
-            #selected_channels_idx = mne.pick_types(mne_info, meg='mag')  # selects all mag sensors
-            selected_mag_info = mne.pick_info(mne_info, selected_channels_idx)
+            selected_mag_info = mne.pick_info(mne_info, selected_sensors_indices_total)
 
             # Get arr of timepoints to plot
             if all_timepoints_combined:
@@ -2562,14 +2583,14 @@ class VisualizationHelper(GLMHelper):
                 timepoints = np.array([float(self.map_timepoint_idx_to_ms(timepoint_idx)/1000) for timepoint_idx in timepoint_indices])
                 t_start = timepoints[0]
 
+            # Create new Evoked object with correct drift data and timepoint metadata
             evoked = mne.EvokedArray(drift_correlations_sensors, selected_mag_info, tmin=t_start)
-            #fig_main, axes = plt.subplots(1, len(timepoints), figsize=(65, 30))
             logger.custom_info(f"Topo plot time range: {evoked.times[0]} - {evoked.times[-1]}")
 
             fig = evoked.plot_topomap(timepoints, ch_type="mag", colorbar=False)  # , axes=axes)
             fig.suptitle(f'Drift on Sensor Level. Negative correlations (drift) are in blue, positive correlations are in red. \n Min r: {min_corr}. Max r: {max_corr}', fontsize=18)
 
-            plot_folder =  f"data_files/visualizations/topographic_plots/subject_{self.subject_id}/"
+            plot_folder =  f"data_files/{self.lock_event}/visualizations/topographic_plots/subject_{self.subject_id}/"
             plot_file = "drift_topo_plot.png"
             self.save_plot_as_file(plt=fig, plot_folder=plot_folder, plot_file=plot_file)
 
@@ -2579,7 +2600,7 @@ class VisualizationHelper(GLMHelper):
             #for text in fig.axes[0].texts:
             #    text.set_fontsize(5)  
 
-            plot_folder =  f"data_files/visualizations/topographic_plots/subject_{self.subject_id}/"
+            plot_folder =  f"data_files/{self.lock_event}/visualizations/topographic_plots/subject_{self.subject_id}/"
             plot_file = "sensor_locations.png"
             self.save_plot_as_file(plt=fig, plot_folder=plot_folder, plot_file=plot_file)
 
@@ -2606,7 +2627,7 @@ class VisualizationHelper(GLMHelper):
 
                 # Plot
                 epochs_plot = epochs.plot()
-                plot_folder = f"data_files/visualizations/meg_data/subject_{self.subject_id}/session_{session_id_num}/{sensor_type}"
+                plot_folder = f"data_files/{self.lock_event}/visualizations/meg_data/subject_{self.subject_id}/session_{session_id_num}/{sensor_type}"
                 plot_file = f"{sensor_type}_plot.png"
                 self.save_plot_as_file(plt=epochs_plot, plot_folder=plot_folder, plot_file=plot_file, plot_type="mne")
 
@@ -2656,7 +2677,7 @@ class VisualizationHelper(GLMHelper):
                 plt.legend()
 
                 # Save plot
-                plot_folder = f"data_files/visualizations/meg_data/ERP_like/{sensor_type}_combined-norms"
+                plot_folder = f"data_files/{self.lock_event}/visualizations/meg_data/ERP_like/{sensor_type}_combined-norms"
                 plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_plot.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
@@ -2738,7 +2759,7 @@ class VisualizationHelper(GLMHelper):
                         plt.legend(handles=legend_elements, title="Normalization Methods")
 
                         # Save plot
-                        plot_folder = f"data_files/visualizations/meg_data/regression_model_perspective/{norm}/{sensor_type}"
+                        plot_folder = f"data_files/{self.lock_event}/visualizations/meg_data/regression_model_perspective/{norm}/{sensor_type}"
                         plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_timepoint-overview.png"
                         self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
@@ -2753,7 +2774,7 @@ class VisualizationHelper(GLMHelper):
                     plt.legend(handles=legend_elements, title="Normalization Methods")
 
                     # Save plot
-                    plot_folder = f"data_files/visualizations/meg_data/regression_model_perspective/{sensor_type}"
+                    plot_folder = f"data_files/{self.lock_event}/visualizations/meg_data/regression_model_perspective/{sensor_type}"
                     plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_timepoint-overview.png"
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
@@ -2824,7 +2845,7 @@ class VisualizationHelper(GLMHelper):
                     plt.legend(handles=legend_elements, title="Channel")
                     
                     # Save plot
-                    plot_folder = f"data_files/visualizations/meg_data/new_regression_model_perspective/{normalization}/timepoint_{timepoint_name}"
+                    plot_folder = f"data_files/{self.lock_event}/visualizations/meg_data/new_regression_model_perspective/{normalization}/timepoint_{timepoint_name}"
                     plot_file = f"Session-{session_id_num}_timepoint-overview.png"
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
