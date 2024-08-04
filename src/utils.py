@@ -338,7 +338,7 @@ class BasicOperationsHelper:
         return fit_measures_by_session_averaged_over_timepoints
 
 
-    def calculate_fit_by_distances(self, fit_measures_by_session: dict, timepoint_level_input: bool, average_within_distances:bool):
+    def calculate_fit_by_distances(self, fit_measures_by_session: dict, timepoint_level_input: bool, average_within_distances:bool, include_0_distance:bool = False):
         """
         Aligns fit measures by distances. Input should be a dict containing all cross-session fit measures (on a timepoint level).
         """
@@ -351,8 +351,9 @@ class BasicOperationsHelper:
         fit_by_distances = {}
         for session_train_id, fit_measures_train_session in fit_measures_by_session['session_mapping'].items():
             for session_pred_id, fit_measure_pred_session in fit_measures_train_session["session_pred"].items():
-                if session_train_id != session_pred_id:
-                    distance = session_day_differences[session_train_id][session_pred_id]
+                if include_0_distance or session_train_id != session_pred_id:
+                    distance = session_day_differences[session_train_id][session_pred_id] if session_train_id != session_pred_id else 0
+
                     if average_within_distances:
                         if distance not in fit_by_distances:
                             fit_by_distances[distance] = {"fit_measure": fit_measure_pred_session, "num_measures": 1}
@@ -1801,7 +1802,7 @@ class VisualizationHelper(GLMHelper):
         return x_values, y_values
 
     
-    def _plot_drift_distance_based(self, fit_measures_by_distances:dict, omitted_sessions:list, self_pred_normalized:bool, losses_averaged_within_distances:bool, all_windows_one_plot:bool, timepoint_window_start_idx:int = None):
+    def _plot_drift_distance_based(self, fit_measures_by_distances:dict, omitted_sessions:list, self_pred_normalized:bool, losses_averaged_within_distances:bool, all_windows_one_plot:bool, timepoint_window_start_idx:int = None, include_0_distance:bool = False):
         """
         Creates drift plot based on fit measures data by distance. Expects keys of distance in days as string number, each key containing keys "fit_measure" and "num_measures"
         """
@@ -1815,9 +1816,19 @@ class VisualizationHelper(GLMHelper):
             x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances, losses_averaged_within_distances)
 
             # Calculate trend line 
-            x_values_set = np.array(list(set(x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
-            slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
-            trend_line = slope * x_values_set + intercept
+            if include_0_distance:
+                # Don't include the self predictions in the trend line calculation (i.e. filter x and y values where x = 0)
+                filtered_tuple_values = [x_y_pair for x_y_pair in zip(x_values, y_values) if x_y_pair[0] != 0]
+                filtered_x_values, filtered_y_values = zip(*filtered_tuple_values)
+                filtered_x_values = list(filtered_x_values)
+                filtered_y_values = list(filtered_y_values)
+            else:
+                filtered_x_values = x_values
+                filtered_y_values = y_values
+                
+            filtered_x_values_set = np.array(list(set(filtered_x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
+            slope, intercept, r_value, p_value, std_err = linregress(x=filtered_x_values, y=filtered_y_values)
+            trend_line = slope * filtered_x_values_set + intercept
             r_value = "{:.3f}".format(r_value)  # limit to three decimals
 
             if timepoint_window_start_idx not in [None, 999]:
@@ -1834,7 +1845,7 @@ class VisualizationHelper(GLMHelper):
                 label = None
             ax1.plot(x_values, y_values, label=label, color=color, marker='o', linestyle='none')
             trend_color = color if not isinstance(color,str) else 'green'  # If only a single window is plotted, we want different colors for scatter points and trend. If all windows are plotted this gets too confusing. In this 'color' will be an array
-            ax1.plot(x_values_set, trend_line, color=trend_color, linestyle='-', linewidth=3)
+            ax1.plot(filtered_x_values_set, trend_line, color=trend_color, linestyle='-', linewidth=3)
 
         # Insert scatter values based on distance into plot
         if not all_windows_one_plot:
@@ -2167,10 +2178,10 @@ class VisualizationHelper(GLMHelper):
 
                 def plot_timepoint_fit_measure(timepoint_loss_list, num_timepoints, session_id=None, sensor_name=None):
                     plt.figure(figsize=(10, 6))
-                    #timepoints_in_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in list(range(num_timepoints))]
-                    #plt.bar(timepoints_in_ms, timepoint_loss_list, color='blue')
-                    timepoints_indices = [timepoint_idx for timepoint_idx in list(range(num_timepoints))]
-                    plt.bar(timepoints_indices, timepoint_loss_list, color='blue')
+                    timepoints_in_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in list(range(num_timepoints))]
+                    plt.bar(timepoints_in_ms, timepoint_loss_list, color='blue')
+                    #timepoints_indices = [timepoint_idx for timepoint_idx in list(range(num_timepoints))]
+                    #plt.bar(timepoints_indices, timepoint_loss_list, color='blue')
                     #plt.bar(list(range(num_timepoints)), timepoint_loss_list, color='blue')
                     #logger.custom_debug(f"list(range(num_timepoints): {list(range(num_timepoints))}")
                     session_subtitle = "Averaged across all Sessions, predicting themselves" if session_id is None else f"Session {session_id}, predicting iteself"
@@ -2181,10 +2192,11 @@ class VisualizationHelper(GLMHelper):
                     plt.grid(True)
 
                     # Save the plot to a file
-                    plot_folder = f"data_files/{self.lock_event}/visualizations/timepoint_model_comparison/subject_{self.subject_id}/norm_{normalization}"
+                    session_folder_addition = f"/sensor_level/{sensor_name}" if sensor_name is not None else ""
+                    plot_folder = f"data_files/{self.lock_event}/visualizations/timepoint_model_comparison{session_folder_addition}/subject_{self.subject_id}/norm_{normalization}"
                     if session_id is None:
                         plot_folder += "/all_sessions_combined"  
-                        session_sensor_name_addition = "" if sensor_name is None else f"_sensor_{sensor_name}"
+                        session_name_addition = "" if sensor_name is None else f"_sensor_{sensor_name}"
                     else:
                         plot_folder += f""
                         session_name_addition = f"_session{session_id}" if sensor_name is None else f"_sensor_{sensor_name}_session{session_id}"
@@ -2374,105 +2386,104 @@ class VisualizationHelper(GLMHelper):
                 #    pickle.dump(timepoints_sessions_plot, file)
 
 
-    def timepoint_window_drift(self, omitted_sessions:list, all_windows_one_plot:bool, subtract_self_pred:bool, sensor_level:bool, debugging=False):
+    def timepoint_window_drift(self, omitted_sessions:list, all_windows_one_plot:bool, subtract_self_pred:bool, sensor_level:bool, include_0_distance:bool, debugging=False):
 
         def filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint: dict, timepoint_window_start_idx:int):
-                """
-                Returns a copy of the input fit measure dict by timepoints that only contains the timepoints within the selected window
-                """
-                fit_measures_by_session_by_chosen_timepoints = self.recursive_defaultdict()
-                for session_train_id, fit_measures_train_session in fit_measures_by_session_by_timepoint['session_mapping'].items():
-                    for session_pred_id, fit_measures_pred_session in fit_measures_train_session["session_pred"].items():
-                        for timepoint_idx, timepoint_value in fit_measures_pred_session["timepoint"].items():
-                            if int(timepoint_idx) >= timepoint_window_start_idx and int(timepoint_idx) < (timepoint_window_start_idx + self.time_window_n_indices):
-                                fit_measures_by_session_by_chosen_timepoints['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"][timepoint_idx] = timepoint_value
-                        # Only consider full windows (i.e. cut off potential smaller last timepoint window)
-                        current_window_size = len(fit_measures_by_session_by_chosen_timepoints['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"])
-                        if current_window_size < self.time_window_n_indices:
-                            return None
-                        assert current_window_size == self.time_window_n_indices, f"Time window size is incorrect. current_window_size: {current_window_size}, time_window_n_indices: {self.time_window_n_indices}"
-                
-                return fit_measures_by_session_by_chosen_timepoints
+            """
+            Returns a copy of the input fit measure dict by timepoints that only contains the timepoints within the selected window
+            """
+            fit_measures_by_session_by_chosen_timepoints = self.recursive_defaultdict()
+            for session_train_id, fit_measures_train_session in fit_measures_by_session_by_timepoint['session_mapping'].items():
+                for session_pred_id, fit_measures_pred_session in fit_measures_train_session["session_pred"].items():
+                    for timepoint_idx, timepoint_value in fit_measures_pred_session["timepoint"].items():
+                        if int(timepoint_idx) >= timepoint_window_start_idx and int(timepoint_idx) < (timepoint_window_start_idx + self.time_window_n_indices):
+                            fit_measures_by_session_by_chosen_timepoints['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"][timepoint_idx] = timepoint_value
+                    # Only consider full windows (i.e. cut off potential smaller last timepoint window)
+                    current_window_size = len(fit_measures_by_session_by_chosen_timepoints['session_mapping'][session_train_id]["session_pred"][session_pred_id]["timepoint"])
+                    if current_window_size < self.time_window_n_indices:
+                        return None
+                    assert current_window_size == self.time_window_n_indices, f"Time window size is incorrect. current_window_size: {current_window_size}, time_window_n_indices: {self.time_window_n_indices}"
+            
+            return fit_measures_by_session_by_chosen_timepoints
 
         def plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint:dict, sensor_name:str = None) -> None:
-                sensor_filename_addition = f"sensor_{sensor_name}_" if sensor_name is not None else ""
+            sensor_filename_addition = f"sensor_{sensor_name}_" if sensor_name is not None else ""
 
-                if subtract_self_pred:
-                    # Normalize with self-predictions
-                    fit_measures_by_session_by_timepoint = self.normalize_cross_session_preds_with_self_preds(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint)
-                if omitted_sessions:
-                    fit_measures_by_session_by_timepoint = self.omit_selected_sessions_from_fit_measures(fit_measures_by_session=fit_measures_by_session_by_timepoint, omitted_sessions=omitted_sessions, sensors_seperated=False)
+            if subtract_self_pred:
+                # Normalize with self-predictions
+                fit_measures_by_session_by_timepoint = self.normalize_cross_session_preds_with_self_preds(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint)
+            if omitted_sessions:
+                fit_measures_by_session_by_timepoint = self.omit_selected_sessions_from_fit_measures(fit_measures_by_session=fit_measures_by_session_by_timepoint, omitted_sessions=omitted_sessions, sensors_seperated=False)
 
+            # Define storage folder for all plots in function
+            sensor_folder_addition = "sensor_level/" if sensor_level else ""
+            storage_folder = f"data_files/{self.lock_event}/visualizations/only_distance/timepoint_windows/{sensor_folder_addition}{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
+            
+            # Calculate drift for various timewindows by slicing 
+            if all_windows_one_plot:
+                fit_measures_by_distance_by_time_window = {"timewindow_start": {}}
 
-                # Define storage folder for all plots in function
-                sensor_folder_addition = "sensor_level/" if sensor_level else ""
-                storage_folder = f"data_files/{self.lock_event}/visualizations/only_distance/timepoint_windows/{sensor_folder_addition}{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
-                
-                # Calculate drift for various timewindows by slicing 
-                if all_windows_one_plot:
-                    fit_measures_by_distance_by_time_window = {"timewindow_start": {}}
+            num_timepoints = (self.timepoint_max - self.timepoint_min) + 1  # +1 because of index 0 ofc
+            timepoint_window_start_idx = 0
+            while timepoint_window_start_idx < num_timepoints:
+                # Filter timepoint values for current window
+                fit_measures_window_by_session = filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint,
+                                                                                    timepoint_window_start_idx=timepoint_window_start_idx)
+                # Only consider full windows (i.e. don't use potential smaller last timepoint window)
+                if fit_measures_window_by_session is not None:
+                    # Calculate distance based variance explained for current window
+                    fit_measures_by_distances_window = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_window_by_session, timepoint_level_input=True, average_within_distances=False, include_0_distance=include_0_distance)
 
-                num_timepoints = (self.timepoint_max - self.timepoint_min) + 1  # +1 because of index 0 ofc
-                timepoint_window_start_idx = 0
-                while timepoint_window_start_idx < num_timepoints:
-                    # Filter timepoint values for current window
-                    fit_measures_window_by_session = filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint,
-                                                                                        timepoint_window_start_idx=timepoint_window_start_idx)
-                    # Only consider full windows (i.e. don't use potential smaller last timepoint window)
-                    if fit_measures_window_by_session is not None:
-                        # Calculate distance based variance explained for current window
-                        fit_measures_by_distances_window = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_window_by_session, timepoint_level_input=True, average_within_distances=False)
+                    if not all_windows_one_plot:
+                        # Plot drift for current window
+                        drift_plot_window = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_window, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=timepoint_window_start_idx, include_0_distance=include_0_distance)
 
-                        if not all_windows_one_plot:
-                            # Plot drift for current window
-                            drift_plot_window = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_window, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=timepoint_window_start_idx)
+                        # Store plot for current window
+                        window_end = timepoint_window_start_idx + self.time_window_n_indices
+                        timepoint_window_description = f"window_{timepoint_window_start_idx}-{window_end}"
+                        storage_filename = f"drift_plot_{sensor_filename_addition}{timepoint_window_description}"
+                        self.save_plot_as_file(plt=drift_plot_window, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+                    else:
+                        fit_measures_by_distance_by_time_window["timewindow_start"][timepoint_window_start_idx] = {"fit_measures_by_distances": fit_measures_by_distances_window}
 
-                            # Store plot for current window
-                            window_end = timepoint_window_start_idx + self.time_window_n_indices
-                            timepoint_window_description = f"window_{timepoint_window_start_idx}-{window_end}"
-                            storage_filename = f"drift_plot_{sensor_filename_addition}{timepoint_window_description}"
-                            self.save_plot_as_file(plt=drift_plot_window, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
-                        else:
-                            fit_measures_by_distance_by_time_window["timewindow_start"][timepoint_window_start_idx] = {"fit_measures_by_distances": fit_measures_by_distances_window}
+                timepoint_window_start_idx += self.time_window_n_indices
 
-                    timepoint_window_start_idx += self.time_window_n_indices
+            # Plot all timewindows in the same plot (with different colors)
+            if all_windows_one_plot:
+                drift_plot_all_windows = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distance_by_time_window, omitted_sessions=omitted_sessions, self_pred_normalized=subtract_self_pred, losses_averaged_within_distances=False, all_windows_one_plot=True, include_0_distance=include_0_distance)
+                storage_filename = f"drift_plot_{sensor_filename_addition}all_windows_comparison"
+                self.save_plot_as_file(plt=drift_plot_all_windows, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
 
-                # Plot all timewindows in the same plot (with different colors)
-                if all_windows_one_plot:
-                    drift_plot_all_windows = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distance_by_time_window, omitted_sessions=omitted_sessions, self_pred_normalized=subtract_self_pred, losses_averaged_within_distances=False, all_windows_one_plot=True)
-                    storage_filename = f"drift_plot_{sensor_filename_addition}all_windows_comparison"
-                    self.save_plot_as_file(plt=drift_plot_all_windows, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+            # For control/comparison, plot the drift for the all timepoint values combined/averaged aswell
+            logger.custom_debug(f"fit_measures_by_session_by_timepoint: {fit_measures_by_session_by_timepoint}")
+            fit_measures_by_distances_all_timepoints = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False, include_0_distance=include_0_distance)
+            drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999, include_0_distance=include_0_distance)  # 999 indicates that we are considering all timepoints
 
-                # For control/comparison, plot the drift for the all timepoint values combined/averaged aswell
-                logger.custom_debug(f"fit_measures_by_session_by_timepoint: {fit_measures_by_session_by_timepoint}")
-                fit_measures_by_distances_all_timepoints = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
-                drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999)  # 999 indicates that we are considering all timepoints
+            storage_filename = f"drift_plot_{sensor_filename_addition}all_timepoints"
+            self.save_plot_as_file(plt=drift_plot_all_timepoints, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+            #plt.close(drift_plot_all_timepoints)
 
-                storage_filename = f"drift_plot_{sensor_filename_addition}all_timepoints"
-                self.save_plot_as_file(plt=drift_plot_all_timepoints, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
-                #plt.close(drift_plot_all_timepoints)
+            # Debugging: average timepoint data to compare values to non-timepoint dict
+            if debugging:
+                fit_measures_by_distances_session_level = self.average_timepoint_data_per_session(fit_measures_by_session_by_timepoint)
 
-                # Debugging: average timepoint data to compare values to non-timepoint dict
-                if debugging:
-                    fit_measures_by_distances_session_level = self.average_timepoint_data_per_session(fit_measures_by_session_by_timepoint)
+                storage_filename = f"var_explained_session_level_used_for_timepoint_plots.json"
+                os.makedirs(storage_folder, exist_ok=True)
+                json_storage_path = os.path.join(storage_folder, storage_filename)
 
-                    storage_filename = f"var_explained_session_level_used_for_timepoint_plots.json"
-                    os.makedirs(storage_folder, exist_ok=True)
-                    json_storage_path = os.path.join(storage_folder, storage_filename)
+                with open(json_storage_path, 'w') as file:
+                    logger.custom_debug(f"Storing averaged timepoint data to {json_storage_path}")
+                    # Serialize and save the dictionary to the file
+                    json.dump(fit_measures_by_distances_session_level, file, indent=4)
 
-                    with open(json_storage_path, 'w') as file:
-                        logger.custom_debug(f"Storing averaged timepoint data to {json_storage_path}")
-                        # Serialize and save the dictionary to the file
-                        json.dump(fit_measures_by_distances_session_level, file, indent=4)
+                # And store timepoint values themselves again
+                storage_filename = f"var_explained_timepoints_used_for_timepoint_plots.json"
+                json_storage_path = os.path.join(storage_folder, storage_filename)
 
-                    # And store timepoint values themselves again
-                    storage_filename = f"var_explained_timepoints_used_for_timepoint_plots.json"
-                    json_storage_path = os.path.join(storage_folder, storage_filename)
-
-                    with open(json_storage_path, 'w') as file:
-                        logger.custom_debug(f"Storing timepoint func in plot data to {json_storage_path}")
-                        # Serialize and save the dictionary to the file
-                        json.dump(fit_measures_by_session_by_timepoint, file, indent=4)
+                with open(json_storage_path, 'w') as file:
+                    logger.custom_debug(f"Storing timepoint func in plot data to {json_storage_path}")
+                    # Serialize and save the dictionary to the file
+                    json.dump(fit_measures_by_session_by_timepoint, file, indent=4)
 
 
         for normalization in self.normalizations:
@@ -2506,7 +2517,10 @@ class VisualizationHelper(GLMHelper):
                     plot_timepoint_window_drift_for_timepoint_fit_measures(sensor_fit_measures_by_session_by_timepoint, sensor_name=sensor_name)
 
 
-    def visualize_topo_with_drift_per_sensor(self, omitted_sessions:list, all_timepoints_combined:bool):
+    def mne_topo_plot_per_sensor(self, data_type:str, omitted_sessions:list, all_timepoints_combined:bool):
+        if data_type not in ["self-pred", "drift"]:
+            raise ValueError(f"visualize_topo_with_drift_per_sensor called with invalid argument for data_type {data_type}")
+
         for normalization in self.normalizations:
             # Load sensor- and timepoint-based variance explained
             storage_folder = f"data_files/{self.lock_event}/var_explained_sensors_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
@@ -2528,70 +2542,100 @@ class VisualizationHelper(GLMHelper):
 
             timepoint_indices = np.array(list(range(1 + self.timepoint_max - self.timepoint_min)))
             
-            # Calculate drift for each sensor seperate (over all timepoints)
-            drift_correlations_sensors = []
-            for sensor_idx, sensor_name in enumerate(sensor_names):
-                sensor_fit_measures_by_session_by_timepoint = fit_measures_by_sensor_by_session_by_timepoint["sensor"][str(sensor_idx)]
-                logger.custom_info(f"Processing sensor {sensor_name}")
-                
-                sensor_fit_measures_by_distances = self.calculate_fit_by_distances(fit_measures_by_session=sensor_fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
+            if data_type == "drift":
+                # Calculate drift for each sensor seperate (over all timepoints)
+                drift_correlations_sensors = []
+                for sensor_idx, sensor_name in enumerate(sensor_names):
+                    sensor_fit_measures_by_session_by_timepoint = fit_measures_by_sensor_by_session_by_timepoint["sensor"][str(sensor_idx)]
+                    logger.custom_info(f"Processing sensor {sensor_name}")
+                    
+                    sensor_fit_measures_by_distances = self.calculate_fit_by_distances(fit_measures_by_session=sensor_fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
 
+                    if all_timepoints_combined:
+                        # Calculate drift correlation (correlation between distance and fit measure)
+                        x_values, y_values = self.extract_x_y_arrays(sensor_fit_measures_by_distances, losses_averaged_within_distances=False)
+                        x_values_set = np.array(list(set(x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
+                        slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
+                        r_value = "{:.3f}".format(r_value)  # limit to three decimals
+
+                        drift_correlations_sensors.append(float(r_value))
+                    else:
+                        sensor_drift_correlations_timepoints = []
+                        for timepoint_idx in timepoint_indices:
+                            # Filter dict for current timepoint
+                            sensor_timepoint_fit_measures_by_session = self.recursive_defaultdict()
+                            for session_train_id, fit_measures_train_session in sensor_fit_measures_by_session_by_timepoint['session_mapping'].items():
+                                for session_pred_id, fit_measures_pred_session in fit_measures_train_session["session_pred"].items():
+                                    sensor_timepoint_fit_measures_by_session["session_mapping"][session_train_id]["session_pred"][session_pred_id] = fit_measures_pred_session["timepoint"][str(timepoint_idx)]
+
+                            sensor_fit_measures_by_distances = self.calculate_fit_by_distances(fit_measures_by_session=sensor_timepoint_fit_measures_by_session, timepoint_level_input=False, average_within_distances=False)
+                            r_value = float(self.calc_drift_corr_with_fit_measures_by_distances(sensor_fit_measures_by_distances))
+
+                            sensor_drift_correlations_timepoints.append(r_value)
+                        drift_correlations_sensors.append(np.array(sensor_drift_correlations_timepoints))
+
+                drift_correlations_sensors = np.array(drift_correlations_sensors)
+                min_corr = np.min(drift_correlations_sensors)
+                max_corr = np.max(drift_correlations_sensors)
+
+                # plot_topomap always expects shape (n_sensors, n_timepoints)
                 if all_timepoints_combined:
-                    # Calculate drift correlation (correlation between distance and fit measure)
-                    x_values, y_values = self.extract_x_y_arrays(sensor_fit_measures_by_distances, losses_averaged_within_distances=False)
-                    x_values_set = np.array(list(set(x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
-                    slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
-                    r_value = "{:.3f}".format(r_value)  # limit to three decimals
-
-                    drift_correlations_sensors.append(float(r_value))
-                else:
-                    sensor_drift_correlations_timepoints = []
+                    drift_correlations_sensors = drift_correlations_sensors.reshape(n_sensors_selected, 1)
+            else:
+                # Aggregate self-pred values on sensor (and timepoint) level, averaged over sessions. I need one value per sensor, per timepoint
+                self_pred_values_sensors = []
+                n_considered_sessions = len(list(fit_measures_by_sensor_by_session_by_timepoint["sensor"]["0"]["session_mapping"].keys()))
+                for sensor_idx, sensor_name in enumerate(sensor_names):
+                    sensor_fit_measures_by_session_by_timepoint = fit_measures_by_sensor_by_session_by_timepoint["sensor"][str(sensor_idx)]
+                    sensor_self_preds_timepoints = []
+                    # Average self-preds for each timepoint over all considered sessions
                     for timepoint_idx in timepoint_indices:
-                        # Filter dict for current timepoint
-                        sensor_timepoint_fit_measures_by_session = self.recursive_defaultdict()
-                        for session_train_id, fit_measures_train_session in sensor_fit_measures_by_session_by_timepoint['session_mapping'].items():
-                            for session_pred_id, fit_measures_pred_session in fit_measures_train_session["session_pred"].items():
-                                sensor_timepoint_fit_measures_by_session["session_mapping"][session_train_id]["session_pred"][session_pred_id] = fit_measures_pred_session["timepoint"][str(timepoint_idx)]
+                        sensor_timepoint_sum_over_sessions = 0
+                        for session_id in sensor_fit_measures_by_session_by_timepoint["session_mapping"]:
+                            sensor_timepoint_sum_over_sessions += sensor_fit_measures_by_session_by_timepoint["session_mapping"][str(session_id)]["session_pred"][str(session_id)]["timepoint"][str(timepoint_idx)]
 
-                        sensor_fit_measures_by_distances = self.calculate_fit_by_distances(fit_measures_by_session=sensor_timepoint_fit_measures_by_session, timepoint_level_input=False, average_within_distances=False)
-                        r_value = float(self.calc_drift_corr_with_fit_measures_by_distances(sensor_fit_measures_by_distances))
+                        sensor_timepoint_self_pred = sensor_timepoint_sum_over_sessions / n_considered_sessions
+                        sensor_self_preds_timepoints.append(sensor_timepoint_self_pred)
+                    self_pred_values_sensors.append(np.array(sensor_self_preds_timepoints))
+                self_pred_values_sensors = np.array(self_pred_values_sensors)
+                    
+                min_var_explained = np.min(self_pred_values_sensors)
+                max_var_explained = np.max(self_pred_values_sensors)
 
-                        sensor_drift_correlations_timepoints.append(r_value)
-                    drift_correlations_sensors.append(np.array(sensor_drift_correlations_timepoints))
-
-            drift_correlations_sensors = np.array(drift_correlations_sensors)
-            min_corr = np.min(drift_correlations_sensors)
-            max_corr = np.max(drift_correlations_sensors)
-            # plot_topomap always expects shape (n_sensors, n_timepoints)
-            if all_timepoints_combined:
-                drift_correlations_sensors = drift_correlations_sensors.reshape(n_sensors_selected, 1)
-
+            # Create mne info object
             fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/saccade_evoked_{self.subject_id}_01_.fif'
-        
             og_evoked = mne.read_evokeds(fif_file_path)[0]
             mne_info = og_evoked.info
             selected_mag_info = mne.pick_info(mne_info, selected_sensors_indices_total)
 
             # Get arr of timepoints to plot
             if all_timepoints_combined:
-                # Select random timepoint, we only plot one but plot_topomap() expects a value
-                t_start = 0.05
-                t_end = 0.058
+                # These are dummy values, we average across all timepoints but mne requires a timepoint value
+                t_start = self.map_timepoint_idx_to_ms(self.timepoint_min) / 1000  # 0.05
+                t_end = self.map_timepoint_idx_to_ms(self.timepoint_max) / 1000  # 0.058
                 timepoints = np.linspace(t_start, t_end, 1)  
             else:
                 # Timepoints need to be converted from indices to seconds. map_timepoint_idx_to_ms maps only maps to ms, /1000 converts to seconds
                 timepoints = np.array([float(self.map_timepoint_idx_to_ms(timepoint_idx)/1000) for timepoint_idx in timepoint_indices])
                 t_start = timepoints[0]
 
+            if data_type == "drift":
+                data_array_to_plot = drift_correlations_sensors
+            else:
+                data_array_to_plot = self_pred_values_sensors
+
             # Create new Evoked object with correct drift data and timepoint metadata
-            evoked = mne.EvokedArray(drift_correlations_sensors, selected_mag_info, tmin=t_start)
+            evoked = mne.EvokedArray(data_array_to_plot, selected_mag_info, tmin=t_start)
             logger.custom_info(f"Topo plot time range: {evoked.times[0]} - {evoked.times[-1]}")
 
             fig = evoked.plot_topomap(timepoints, ch_type="mag", colorbar=False)  # , axes=axes)
-            fig.suptitle(f'Drift on Sensor Level. Negative correlations (drift) are in blue, positive correlations are in red. \n Min r: {min_corr}. Max r: {max_corr}', fontsize=18)
+            if data_type == "drift":
+                fig.suptitle(f'Drift on Sensor Level. Negative correlations (drift) are in blue, positive correlations are in red. \n Min r: {min_corr}. Max r: {max_corr}', fontsize=18)
+            else:
+                fig.suptitle(f'Self-Pred Variance Explained on Sensor Level. Negative values (drift) are in blue, positive values are in red. \n Min var_explained: {min_var_explained}. Max var_explained: {max_var_explained}', fontsize=18)
 
-            plot_folder =  f"data_files/{self.lock_event}/visualizations/topographic_plots/subject_{self.subject_id}/"
-            plot_file = "drift_topo_plot.png"
+            plot_folder =  f"data_files/{self.lock_event}/visualizations/topographic_plots/{data_type}/subject_{self.subject_id}/"
+            plot_file = f"{data_type}_topo_plot.png"
             self.save_plot_as_file(plt=fig, plot_folder=plot_folder, plot_file=plot_file)
 
             # Plot channel locations
@@ -2600,9 +2644,9 @@ class VisualizationHelper(GLMHelper):
             #for text in fig.axes[0].texts:
             #    text.set_fontsize(5)  
 
-            plot_folder =  f"data_files/{self.lock_event}/visualizations/topographic_plots/subject_{self.subject_id}/"
-            plot_file = "sensor_locations.png"
-            self.save_plot_as_file(plt=fig, plot_folder=plot_folder, plot_file=plot_file)
+            #plot_folder =  f"data_files/{self.lock_event}/visualizations/topographic_plots/subject_{self.subject_id}/"
+            #plot_file = "sensor_locations.png"
+            #self.save_plot_as_file(plt=fig, plot_folder=plot_folder, plot_file=plot_file)
 
 
     def visualize_meg_epochs_mne(self):
