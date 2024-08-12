@@ -33,7 +33,7 @@ best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 999, "timepo
                                             "03": {"timepoint_min": 999, "timepoint_max": 999},
                                             "05": {"timepoint_min": 999, "timepoint_max": 999},},
                               "saccade":   {"01": {"timepoint_min": 425, "timepoint_max": 530}, 
-                                            "02": {"timepoint_min": 425, "timepoint_max": 525},  # ! Currently testing smaller windows due to sensor-level encoding differences. Best: 450 to 500 Old range: "02": {"timepoint_min": 425, "timepoint_max": 525}
+                                            "02": {"timepoint_min": 445, "timepoint_max": 505},  # ! Currently testing smaller windows due to sensor-level encoding differences. Best: 450 to 500 Old range: "02": {"timepoint_min": 425, "timepoint_max": 525}
                                             "03": {"timepoint_min": 400, "timepoint_max": 485},
                                             "04": {"timepoint_min": 430, "timepoint_max": 515},
                                             "05": {"timepoint_min": 420, "timepoint_max": 510},}
@@ -41,14 +41,13 @@ best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 999, "timepo
 timepoint_min = 0  # fixation: 170, saccade: 275
 timepoint_max = 650  # fixation: 250, saccade: 375
 
-normalizations = ["mean_centered_ch_then_global_robust_scaling"] # , "no_norm", "mean_centered_ch_t"]  #, "no_norm", "mean_centered_ch_t", "robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
+normalizations = ["mean_centered_ch_then_global_robust_scaling"]  # , "no_norm", "mean_centered_ch_t", "robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
 
-#fractional_grid = np.array([0.000_000_000_000_000_1, 0.000_000_000_000_001, 0.000_000_000_000_01, 0.000_000_000_000_1, 0.000_000_000_001, 0.000_000_000_01, 0.000_000_000_1, 0.000_000_001, 0.000_000_01, 0.000_000_1, 0.000_001, 0.000_01, 0.000_1, 0.001, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.])
 fractional_grid = np.array([fraction/100 for fraction in range(1, 100, 3)]) # range from 0.01 to 1 in steps or 0.03
 alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
 
 omit_sessions_by_subject = {"01": ["1"],
-                            "02": ["4"],  # ["4"]
+                            "02": ["4"],  # ["1", "4", "5"]
                             "03": [],
                             "04": [],
                             "05": ["9"],
@@ -59,7 +58,7 @@ debugging = True if logger_level <= 23 else False  # TODO: Use this as class att
 
 # Choose Calculations to be performed
 create_metadata = False
-create_train_test_split = False  # Careful! Everytime this is set to true, all following steps will be misalligned
+create_train_test_split = False  # Careful! Everytime this is set to true, all subsequently stored data will be misalligned with previous data
 create_crop_datset_numpy = False
 create_meg_dataset = False
 extract_features = False
@@ -93,11 +92,11 @@ if use_all_mag_sensors:
 else:
     # Mag 'rows' bottom to top
     mag_channels = ["1731", "1921", "2111", "2341", "2511"]  # selected occipital sensors: ["1731", "1921", "2111", "2341", "2511"] ["2341"]
-    mag_channels += ["1711", "1931", "2331", "2531", "2121", "1741", "2541", "2141", "2131"]
-    mag_channels += ["1531", "1721", "1941", "2041", "2031", "2321", "2521", "2631"]
-    mag_channels += ["1911", "2311", "1641", "2431", "2011", "2021", "1631", "2241"]
-    mag_channels += ["1521", "1841", "2231", "2641", "1541", "1611", "1831", "2241", "2421", "2621"]
-    mag_channels += ["1621", "1811", "1821", "0741", "0731", "2211", "2221", "2411"]
+    #mag_channels += ["1711", "1931", "2331", "2531", "2121", "1741", "2541", "2141", "2131"]
+    #mag_channels += ["1531", "1721", "1941", "2041", "2031", "2321", "2521", "2631"]
+    #mag_channels += ["1911", "2311", "1641", "2431", "2011", "2021", "1631", "2241"]
+    #mag_channels += ["1521", "1841", "2231", "2641", "1541", "1611", "1831", "2241", "2421", "2621"]
+    #mag_channels += ["1621", "1811", "1821", "0741", "0731", "2211", "2221", "2411"]
 grad_channels = []
 
 n_mag = len(mag_channels)
@@ -170,10 +169,12 @@ for run in range(run_pipeline_n_times):
             extraction_helper = ExtractionHelper(subject_id=subject_id, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, lock_event=lock_event)
 
             if extract_features:
+                # Extract ANN features of images
                 extraction_helper.extract_features()
                 logger.custom_info("Features extracted. \n \n")
 
             if perform_pca:
+                # Apply PCA, keeping ~60% of explained variance
                 extraction_helper.reduce_feature_dimensionality(z_score_features_before_pca=z_score_features_before_pca, all_sessions_combined=all_sessions_combined)
                 logger.custom_info("PCA applied to features. \n \n")
             
@@ -183,6 +184,7 @@ for run in range(run_pipeline_n_times):
             glm_helper = GLMHelper(fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, lock_event=lock_event, ann_model=ann_model, module_name=module_name, batch_size=batch_size, crop_size=crop_size)
 
             if train_GLM:
+                # Train ridge regression mapping
                 glm_helper.train_mapping(all_sessions_combined=all_sessions_combined, shuffle_train_labels=shuffle_train_labels, downscale_features=downscale_features)
 
                 logger.custom_info("GLMs trained. \n \n")
@@ -216,17 +218,17 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
-            ####visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
-            ####visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
+            visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
+            #visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
             # Visuzalize distance based predictions at timepoint scale
             ##visualization_helper.three_dim_timepoint_predictions(subtract_self_pred=subtract_self_pred) 
-            ####visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True)  
+            visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=True, include_0_distance=True)  
             ####visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=True, include_0_distance=True)  
             
             # Visualize drift topographically with mne based on sensor level data 
-            visualization_helper.mne_topo_plot_per_sensor(data_type="drift", omitted_sessions=sessions_to_omit, all_timepoints_combined=False)  # data_type="self-pred" or "drift"
+            #visualization_helper.mne_topo_plot_per_sensor(data_type="drift", omitted_sessions=sessions_to_omit, all_timepoints_combined=False)  # data_type="self-pred" or "drift"
 
             # Visualize model perspective (values by timepoint)
             ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"

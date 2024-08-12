@@ -48,6 +48,19 @@ class BasicOperationsHelper:
         with open(f"data_files/session_metadata/session_datetimes/session_datetimes_dict.pkl", 'rb') as file:
             self.session_datetimes = pickle.load(file)
 
+        # Create linspace of available ms values in selected meg data type for mapping from indices. Based on ICA cleaned avs data time format!
+        if lock_event == "saccade":
+            # AVS ICA-claned: Saccade: 651 timepoints, -800 to 500.  Old, Andrej: Saccade: 401 timepoints, -500 to 300
+            min_ms = -800
+            max_ms = 500
+        else:
+            # AVS ICA-claned: Fixation: 651 timepoints, -500 to 800.  Old, Andrej: Fixation: 401 timepoints, -300 to 500
+            min_ms = -800
+            max_ms = 500
+
+        self.all_ms_values = np.linspace(min_ms, max_ms, num=651)  # space containing the ms values for all 651 timepoints
+        #logger.custom_debug(f"all_ms_values linspace: {self.all_ms_values}")
+
 
     def omit_selected_sessions_from_fit_measures(self, fit_measures_by_session:dict, omitted_sessions:list, sensors_seperated:bool) -> dict:
         """
@@ -79,24 +92,10 @@ class BasicOperationsHelper:
         """
         Maps the index of a timepoint to it's latency in ms relative to lock event (saccade/fixation) onset.
 
-        !!! Based on ICA-cleaned metadata from f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/erf/filter_0.2_200/ica" !!!
+        Based on ICA-cleaned metadata from f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/erf/filter_0.2_200/ica" 
         """
-        num_timepoints = 651
-        if self.lock_event == "saccade":
-            # Old, Andrej: Saccade: 401 timepoints, -500 to 300
-            # AVS ICA-claned: Saccade: 651 timepoints, -800 to 500
-            min_ms = -800
-            max_ms = 500
-        else:
-            # Old, Andrej: Fixation: 401 timepoints, -300 to 500
-            # AVS ICA-claned: Fixation: 651 timepoints, -500 to 800
-            min_ms = -800
-            max_ms = 500
-
-        ms_values = np.linspace(min_ms, max_ms, num=num_timepoints)  # space containing the ms values for all timepoints
-        #logger.custom_debug(f"ms_values linspace: {ms_values}")
         ms_index = timepoint_idx + self.timepoint_min  # The index for the linspace results from the chosen idx and the beginning of the selected timepoint window (i.e. self.timepoint_min)
-        timepoint_ms = int(ms_values[ms_index])
+        timepoint_ms = int(self.all_ms_values[ms_index])
 
         return timepoint_ms
 
@@ -106,7 +105,6 @@ class BasicOperationsHelper:
         Returns names of the chosen channels and their index in the meg dataset.
 
         Example in: [1731, 1921, 2111, 2341, 2511]
-        Example out: {'grad': {}, 'mag': {}
         Example out: {'grad': {}, 'mag': {'sensor_index_within_type': {64: 'MEG1731', 71: 'MEG1921', 78: 'MEG2111', 89: 'MEG2341', 94: 'MEG2511'},
                                             'sensor_index_total': {194: 'MEG1731', 215: 'MEG1921', 236: 'MEG2111', 269: 'MEG2341', 284: 'MEG2511'}}
         """
@@ -169,11 +167,8 @@ class BasicOperationsHelper:
         Helper function to map the character id from a session to its number id.
         For example: Input "a" will return "1".
         """
-        # Create mapping
-        session_mapping = {}
-        for num in range(1,11):
-            letter = self.session_ids_char[num-1]
-            session_mapping[letter] = str(num)
+        # Create mapping from letters 'a'-'j' to '1'-'11'
+        session_mapping = {self.session_ids_char[num-1]: str(num) for num in range(1,11)}
         # Map letter to num
         session_id_num = session_mapping[session_id_letter]
 
@@ -182,21 +177,24 @@ class BasicOperationsHelper:
 
     def read_dict_from_json(self, type_of_content: str, type_of_norm: str = None, predict_train_data:bool = False) -> dict:
         """
-        Helper function to read json files of various content types into dicts.
+        Helper function to read json files of various content types into dicts. Not used for later data types because of exploding parameterization.
         """
         valid_types = ["combined_metadata", "meg_metadata", "crop_metadata", "mse_losses", "mse_losses_timepoint", "var_explained"]
         if type_of_content not in valid_types:
             raise ValueError(f"Function read_dict_from_json called with unrecognized type {type_of_content}.")
 
-        if type_of_content == "mse_losses":
-            file_path = f"data_files/{self.lock_event}/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/mse_losses_{type_of_norm}_dict.json"
-        elif type_of_content == "mse_losses_timepoint":
-            file_path = f"data_files/{self.lock_event}/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/timepoints/norm_{type_of_norm}/mse_losses_timepoint_{type_of_norm}_dict.json"
+        if type_of_content in ["mse_losses", "mse_losses_timepoint"]:
+            file_path_beginning = f"data_files/{self.lock_event}/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}"
+            if type_of_content == "mse_losses":
+                file_path_ending = f"/norm_{type_of_norm}/mse_losses_{type_of_norm}_dict.json"
+            else:  # mse_losses_timepoint
+                file_path_ending = f"/timepoints/norm_{type_of_norm}/mse_losses_timepoint_{type_of_norm}_dict.json"
+            file_path = os.path.join(file_path_beginning, file_path_ending)
         elif type_of_content == "var_explained":
             file_path = f"data_files/{self.lock_event}/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/predict_train_data_{predict_train_data}/var_explained_{type_of_norm}_dict.json"
         else:
             file_path = f"data_files/{self.lock_event}/metadata/{type_of_content}/subject_{self.subject_id}/{type_of_content}_dict.json"
-        
+            
         try:
             with open(file_path, 'r') as data_file:
                 logger.custom_debug(f"Loading dict from {file_path}")
@@ -218,7 +216,6 @@ class BasicOperationsHelper:
 
         # losses and variance explained
         if type_of_content in ["mse_losses", "mse_losses_timepoint", "var_explained"]:
-            # losses
             if type_of_content.startswith('mse'):
                 if type_of_content == "mse_losses_timepoint":
                     timepoint_folder = "timepoints/"
@@ -322,6 +319,7 @@ class BasicOperationsHelper:
 
         return fit_measures_by_session_by_timepoint
 
+
     def average_timepoint_data_per_session(self, fit_measures_by_session_by_timepoints:dict):
         """
         Converts cross-session fit measures at timepoint level to session level by simply averaging timepoints for each predicted session (and for each train session ofc).
@@ -392,43 +390,33 @@ class BasicOperationsHelper:
         # Add additional folder for norm and for model type and extraction layer for ann_features
         additional_model_folders = f"/{ann_model}/{module}/" if type_of_content.startswith("ann_features") else "/"
         # Add a folder for norm for meg data and folder that indicates an intermediate step in normalisation: Additional steps will later be performed across all sessions combined
+        additional_norm_folder, intermediate_norm_folder = "", ""
         if type_of_content == "meg_data":
             additional_norm_folder = f"norm_{type_of_norm}/" 
             if type_of_norm.endswith("_intermediate"):
                 intermediate_norm_folder = "/intermediate_norm_True"  
                 type_of_norm = type_of_norm[:-len("_intermediate")]
-            else:
-                intermediate_norm_folder = ""
-        else:
-            additional_norm_folder = "" 
-            intermediate_norm_folder = ""
 
+        all_sessions_combined_folder, session_folder = "", ""
         if type_of_content.endswith("_all_sessions_combined"):
             all_sessions_combined_folder = "/all_sessions_combined" 
             type_of_content = type_of_content.replace("_all_sessions_combined", "")
-            session_folder = ""
         else:
             session_folder = f"/session_{session_id_num}"
-            all_sessions_combined_folder = ""
 
         split_dict = {}
         for split in ["train", "test"]:
             # Load split trial array
             split_path = f"data_files/{self.lock_event}/{type_of_content}{all_sessions_combined_folder}{additional_model_folders}{additional_norm_folder}subject_{self.subject_id}{session_folder}/{split}/{type_of_content}{file_type}"  
-            if file_type == ".npy":
-                split_data = np.load(split_path)
-                #logger.custom_debug(f"Loaded array of shape {split_data.shape} from {split_path}")
-            else:
-                split_data = torch.load(split_path)
+            split_data = np.load(split_path) if file_type == ".npy" else torch.load(split_path)
             split_dict[split] = split_data
 
             logger.custom_debug(f"Loading split data {type_of_content} from {split_path}")
-            if split == "train" and (type_of_content == "crop_data" or type_of_content.startswith("ann_features")):
-                #data_shape = split_data.shape if type_of_content != "type_of_content" else tf.  # or type_of_content == "torch_dataset" 
-                logger.custom_debug(f"[Session {session_id_num}][Content {type_of_content}]: Train: Loaded array of shape {split_data.shape} from {split_path}")
-            
-            if split == "train" and type_of_content == "torch_dataset":
-                logger.custom_debug(f"[Session {session_id_num}][Content TorchDataset]: Train: Loading dataset from {split_path}")
+            if split == "train":
+                if type_of_content == "crop_data" or type_of_content.startswith("ann_features"):
+                    logger.custom_debug(f"[Session {session_id_num}][Content {type_of_content}]: Train: Loaded array of shape {split_data.shape} from {split_path}")
+                elif type_of_content == "torch_dataset":
+                    logger.custom_debug(f"[Session {session_id_num}][Content TorchDataset]: Train: Loading dataset from {split_path}")
                 
         return split_dict
 
@@ -440,9 +428,12 @@ class BasicOperationsHelper:
         os.makedirs(plot_folder, exist_ok=True)
         plot_path = os.path.join(plot_folder, plot_file)
         plt.savefig(plot_path)
-        # Mne plots cannot be closed
-        #if plot_type not in ["mne", "figure"]:
-        #    plt.close()
+        # Mne plots and some figures cannot be closed explicity, close all others to avoid memory leak
+        try:
+            plt.close()
+        except Exception as e:
+            raise ValueError(f"Check type of exception and update try except with specific error, then pass here: {e}")
+            pass
 
 
     def normalize_array(self, data: np.ndarray, normalization:str, n_channels:int = None, session_id:str = None):
@@ -455,7 +446,6 @@ class BasicOperationsHelper:
             logger.custom_debug(f"[session {session_id}] data.shape: {data.shape}.")  
 
         match normalization: 
-
             case "range_-1_to_1":
                 min_val = -1
                 max_val = 1
@@ -466,7 +456,7 @@ class BasicOperationsHelper:
                     assert normalized_value >= -1 and normalized_value <= 1, f"normalization {normalization} did not work correctly"
 
             case "mean_centered_ch":
-                # 0 centered by mean for each over all epochs and timepoints
+                # 0 centered by mean for each channel over all epochs and timepoints
                 means_per_sensor = np.mean(data, axis=(0,2)).reshape(1,n_channels,1)
                 normalized_data = data - means_per_sensor
 
@@ -546,9 +536,8 @@ class MetadataHelper(BasicOperationsHelper):
         Creates the combined metadata dict with timepoints that can be found in both meg and crop metadata for the respective session and trial.
         """
 
-        # Read crop metadata from json
+        # Read crop and meg metadata from json
         crop_metadata = self.read_dict_from_json(type_of_content="crop_metadata")
-        # Read meg metadata from json
         meg_metadata = self.read_dict_from_json(type_of_content="meg_metadata")
 
         # Store information about timepoints that are present in both meg and crop data
@@ -592,8 +581,8 @@ class MetadataHelper(BasicOperationsHelper):
             # Do the same from the perspective of the crop_metadata to find datapoints that only exist in the crop-, but not the meg-metadata
             for session_id in crop_metadata["sessions"]:
                 for trial_id in crop_metadata["sessions"][session_id]["trials"]:
+                    # For each timepoint in the crop metadata: Check if this timepoint is in the meg metadata and if not store the trial
                     for timepoint_id in crop_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
-                        # For each timepoint in the crop metadata: Check if this timepoint is in the meg metadata and if not store the trial
                         try:
                             meg_true = meg_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["meg"]
                         except Exception:
@@ -616,19 +605,14 @@ class MetadataHelper(BasicOperationsHelper):
         data_dict = {"sessions": {}}
         # Read metadata for each session from csv
         for session_id_letter in self.session_ids_char:
-            # Build path to session metadata file
+            session_id_num = self.map_session_letter_id_to_num(session_id_letter)
+
             meg_metadata_file = f"as{self.subject_id}{session_id_letter}_et_epochs_metadata_{self.lock_event}.csv"
             meg_metadata_path = os.path.join(self.meg_metadata_folder, meg_metadata_file)
 
-            session_id_num = self.map_session_letter_id_to_num(session_id_letter)
-
-            data_dict["sessions"][session_id_num] = {}
-
             # Read metadata from csv 
             df = pd.read_csv(meg_metadata_path, delimiter=";")
-
-            # Create ordered dict
-            data_dict["sessions"][session_id_num]["trials"] = {}
+            data_dict["sessions"][session_id_num] = {"trials": {}}
 
             for counter, (index, row) in enumerate(df.iterrows(), start=1):
                 trial_id = int(row["trial"])
@@ -643,7 +627,7 @@ class MetadataHelper(BasicOperationsHelper):
                         assert data_dict["sessions"][session_id_num]["trials"][trial_id]["timepoints"].get(timepoint, None) == None
                     except AssertionError as err:
                         logger.error(f"Found multiple datapoints with the same time_column in session {session_id_num}, trial {trial_id}")
-                        raise err
+                        raise AssertionError
 
                 # Store availability of current timepoint in trial
                 data_dict["sessions"][session_id_num]["trials"][trial_id]["timepoints"][timepoint] = {"meg":True}
@@ -660,19 +644,12 @@ class MetadataHelper(BasicOperationsHelper):
         # Define which column holds the relevant data to match crops and meg epochs
         time_column = "start_time" if self.lock_event == "saccade" else "time_in_trial"
 
-        # Read data from csv and set index to crop filename (crop_identifier before .png)
-        df = pd.read_csv(self.crop_metadata_path, index_col = 'crop_filename')
+        df = pd.read_csv(self.crop_metadata_path, index_col = 'crop_filename')  # Read data from csv and set index to crop filename (crop_identifier before .png)
+        df = df[df.index.notnull()]  # Remove rows/fixations without crop identifiers
+        num_sessions = df["session"].max() #10 sessions 
 
-        # Remove rows/fixations without crop identifiers
-        df = df[df.index.notnull()]
-
-        num_sessions = df["session"].max() #10 sessions for subj 2
-
-        # Create ordered dict
         data_dict = {"sessions": {}}
-
         for nr_session in range(1,num_sessions+1):
-            # Create dict for this session
             data_dict["sessions"][nr_session] = {}
 
             # Filter dataframe by session 
@@ -683,23 +660,16 @@ class MetadataHelper(BasicOperationsHelper):
             # Get list of all trials in this session
             trial_numbers = list(map(int, set(session_df["trial"].tolist())))
 
-            # Create dict for trials in this session
             data_dict["sessions"][nr_session]["trials"] = {}
-
             # For each trial in the session
             for nr_trial in trial_numbers:
                 # Filter session dataframe by trial
                 trial_df = session_df[session_df["trial"] == nr_trial]
 
-                # Create dict for this trial
-                data_dict["sessions"][nr_session]["trials"][nr_trial] = {}
-
                 # Get list of all timepoints in this trial
                 timepoints = trial_df[f"{time_column}"].tolist()
 
-                # Create dict for timepoints in this trial
-                data_dict["sessions"][nr_session]["trials"][nr_trial]["timepoints"] = {}
-
+                data_dict["sessions"][nr_session]["trials"][nr_trial] = {"timepoints": {}}
                 # For each timepoint in this trial
                 for timepoint in timepoints:
                     # Filter trial dataframe by timepoint
@@ -709,16 +679,12 @@ class MetadataHelper(BasicOperationsHelper):
                         assert len(timepoint_df) == 1
                     except AssertionError as err:
                         logger.error(f"Found multiple datapoints with the same time_column in session {nr_session}, trial {nr_trial}")
-                        raise err
+                        raise AssertionError
 
                     # get sceneID for this timepoint
                     sceneID = timepoint_df['sceneID'].iloc[0]
 
-                    # Create dicts for this timepoint
                     data_dict["sessions"][nr_session]["trials"][nr_trial]["timepoints"][timepoint] = {}
-
-                    # Fill in crop identifier value (here the index without ".png") in main data dict for this timepoint, as well as scene id and space for meg data
-                    # metadata
                     data_dict["sessions"][nr_session]["trials"][nr_trial]["timepoints"][timepoint]["crop_identifier"] = timepoint_df.index.tolist()[0][:-4]  # slice with [0] to get single element instead of list, then slice off ".png" at the end
                     data_dict["sessions"][nr_session]["trials"][nr_trial]["timepoints"][timepoint]["sceneID"] = sceneID
         
@@ -740,39 +706,32 @@ class DatasetHelper(MetadataHelper):
         """
         Creates the crop dataset with all crops in the combined_metadata (crops for which meg data exists)
         """
-
-        # Read combined metadata from json
         combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
-
-        # Define path to read crops from
         crop_folder_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{self.crop_size}/crops/as{self.subject_id}"
 
         datapoints_by_session_and_split = {"sessions": {}}
         # For each session: create crop datasets based on respective splits
         for session_id in self.session_ids_num:
-            # Get train/test split based on trials (based on scenes)
-            trials_split_dict = self.load_split_data_from_file(session_id_num=session_id, type_of_content="trial_splits")
+            trials_split_dict = self.load_split_data_from_file(session_id_num=session_id, type_of_content="trial_splits")  # Get train/test split based on trials (based on scenes)
 
             crop_split = {"train": [], "test": []}
             datapoints_by_session_and_split["sessions"][session_id] = {"splits": {"train": 0, "test": 0}}
             for split in crop_split:
                 crop_split_index = 0
-                # Iterate over train/test split by trials (not over combined_metadata as before)
+                # Iterate over split by trials (not over combined_metadata as before)
                 # In this fashion, the first element in the crop and meg dataset of each split type will surely be the first element in the array of trials for that split
                 for nr_trial, trial_id in enumerate(trials_split_dict[split]):
                     if debugging:
                         timepoints_in_trial = list(combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"].keys())
                         if len(timepoints_in_trial) > 10:
-                            #logger.custom_debug(f"[Session {session_id}][{split} split][Trial {trial_id}/Index {nr_trial}]: Timepoints found in metadata: {timepoints_in_trial}")
+                            logger.custom_debug(f"[Session {session_id}][{split} split][Trial {trial_id}/Index {nr_trial}]: Timepoints found in metadata: {timepoints_in_trial}")
                             pass
 
-                    # Get timepoints from combined_metadata
+                    # Get timepoints and corresponding crops from combined_metadata
                     for timepoint_id in combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
-                        # Get crop path
                         crop_filename = ''.join([combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["crop_identifier"], ".png"])
                         crop_path = os.path.join(crop_folder_path, crop_filename)
 
-                        # Read crop as array and concat
                         crop = imageio.imread(crop_path)
                         crop_split[split].append(crop)
 
@@ -790,7 +749,6 @@ class DatasetHelper(MetadataHelper):
             for split in crop_split:
                 crop_split[split] = np.stack(crop_split[split], axis=0)
                 logger.custom_debug(f"[Session {session_id}][{split} split]: Crop Numpy dataset is array of shape {crop_split[split].shape}")
-            
 
             # Export numpy array to .npz
             self.export_split_data_as_file(session_id=session_id, 
@@ -818,13 +776,14 @@ class DatasetHelper(MetadataHelper):
         combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
         meg_metadata = self.read_dict_from_json(type_of_content="meg_metadata")
 
+        meg_data_folder_beginning = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor"
         if use_ica_cleaned_data:
-            meg_data_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/erf/filter_0.2_200/ica"
+            meg_data_folder_ending = "/erf/filter_0.2_200/ica"
         else:
-            meg_data_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
-        # Select relevant channels
-        selected_channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
+            meg_data_folder_ending = "/filter_0.2_200"
+        meg_data_folder = os.path.join(meg_data_folder_beginning, meg_data_folder_ending)
 
+        selected_channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)  # Get selected sensors to filter from meg file
         logger.custom_debug(f"selected_channel_indices: {selected_channel_indices}")
 
         # Debugging:
@@ -849,20 +808,19 @@ class DatasetHelper(MetadataHelper):
                 logger.custom_info(f"[Session {session_id_num}]: Pre filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
                 logger.custom_info(f"[Session {session_id_num}]: Pre filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
 
+                # Filter considered meg data based on sensor type
                 for sensor_type in selected_channel_indices:
-                    # Check if this type of sensor is part of the selected channels
-                    if selected_channel_indices[sensor_type]:
+                    if selected_channel_indices[sensor_type]:  # Checks if sensor type has been selected
                         channel_indices = list(selected_channel_indices[sensor_type]["sensor_index_within_type"].keys())
-                        # Filter meg data by selected channels
                         meg_data[sensor_type] = meg_data[sensor_type][:,channel_indices,:]
+                    else:
+                        del meg_data[sensor_type]
+                if not meg_data["grad"] and not meg_data["mag"]:
+                    raise ValueError("Neither mag or grad channels selected.")
 
-                # Cut relevant timepoints. Range is -0.5 – 0.3 s. We want 50-250ms (timepoints 200-300)
-                if self.timepoint_min is not None and self.timepoint_max is not None:
-                    for sensor_type in selected_channel_indices:
-                        if selected_channel_indices[sensor_type]:
-                            meg_data[sensor_type] = meg_data[sensor_type][:,:,self.timepoint_min:self.timepoint_max+1]
-                    if not selected_channel_indices["grad"] and not selected_channel_indices["mag"]:
-                        raise ValueError("Neither mag or grad channels selected.")
+                # Filter considered meg data based relevant timepoints
+                for sensor_type in meg_data:
+                    meg_data[sensor_type] = meg_data[sensor_type][:,:,self.timepoint_min:self.timepoint_max+1]
 
                 # Create datasets based on specified normalizations
                 for normalization in self.normalizations:
@@ -875,20 +833,19 @@ class DatasetHelper(MetadataHelper):
 
                     meg_data_norm = {}
                     # Normalize grad and mag independently
-                    for sensor_type in selected_channel_indices:
-                        if selected_channel_indices[sensor_type]:
-                            n_channels = meg_data[sensor_type].shape[1]
-                            meg_data_norm[sensor_type] = self.normalize_array(np.array(meg_data[sensor_type]), normalization=normalization_stage, session_id=session_id_num, n_channels=n_channels)
+                    for sensor_type in meg_data:
+                        n_channels = meg_data[sensor_type].shape[1]
+                        meg_data_norm[sensor_type] = self.normalize_array(np.array(meg_data[sensor_type]), normalization=normalization_stage, session_id=session_id_num, n_channels=n_channels)
 
                     # Combine grad and mag data
-                    if selected_channel_indices["grad"] and selected_channel_indices["mag"]:
+                    if meg_data["grad"] and meg_data["mag"]:
                         logger.custom_info("Using both grad and mag data.")
                         combined_meg = np.concatenate([meg_data_norm["grad"], meg_data_norm["mag"]], axis=1) #(2874, 306, 601)
-                    elif selected_channel_indices["grad"]:
+                    elif meg_data["grad"]:
                         raise NotImplementedError("Not yet implemented for grad channels aswell (need to adjust normalize_array() at the least.)")
                         logger.custom_info("Using only grad data.")
                         combined_meg = meg_data_norm["grad"]
-                    elif selected_channel_indices["mag"]:
+                    elif meg_data["mag"]:
                         logger.custom_info("Using only mag data.")
                         combined_meg = meg_data_norm["mag"]
 
@@ -909,9 +866,8 @@ class DatasetHelper(MetadataHelper):
                             num_combined_metadata_timepoints += 1
                     #logger.custom_debug(f"[Session {session_id_num}]: Timepoints in combined metadata: {num_combined_metadata_timepoints}")
 
-                    # Split meg data 
-                    # Get train/test split based on trials (based on scenes)
-                    trials_split_dict = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="trial_splits")
+                    ### Split meg data ###
+                    trials_split_dict = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="trial_splits")  # Get train/test split based on trials (based on scenes)
 
                     # Iterate over train/test split by trials (not over meg_metadata as before)
                     # In this fashion, the first element in the crop and meg dataset of each split type will surely be the first element in the array of trials for that split
@@ -920,7 +876,6 @@ class DatasetHelper(MetadataHelper):
                         for trial_id in trials_split_dict[split]:
                             # Get timepoints from combined_metadata
                             for timepoint_id in combined_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"]:
-                                # Get meg data by index 
                                 meg_index = combined_metadata["sessions"][session_id_num]["trials"][trial_id]["timepoints"][timepoint_id]["meg_index"]
                                 meg_datapoint = combined_meg[meg_index]
 
@@ -982,16 +937,13 @@ class DatasetHelper(MetadataHelper):
                 # TODO: Seperate sensor types if required
 
                 # Concatenate over sessions
-                if meg_mean_centered_all_sessions is None:
-                    meg_mean_centered_all_sessions = meg_data_session
-                else:
-                    meg_mean_centered_all_sessions = np.concatenate((meg_mean_centered_all_sessions, meg_data_session))
+                meg_mean_centered_all_sessions = meg_data_session if meg_mean_centered_all_sessions is None else np.concatenate((meg_mean_centered_all_sessions, meg_data_session))
+
             # Apply robust scaling across complete dataset (all sessions)
             meg_data_normalized = self.normalize_array(meg_mean_centered_all_sessions, normalization="z_score") # "robust_scaling"
 
             if clip_outliers: # 0.3 and 99.7 percentile is equal to 3 standard deviations
                 # Get indices from z-scored robust scaled data
-                #meg_data_z_scored = self.normalize_array(meg_data_normalized, normalization="z_score")
                 logger.custom_debug(f"Clipping outliers.")
                 q0_3, q99_7 = np.percentile(meg_data_normalized, [0.3, 99.7], axis=None)
                 meg_data_normalized = np.clip(meg_data_normalized, a_min=q0_3, a_max=q99_7) # q0_3, q99_7
@@ -1006,12 +958,11 @@ class DatasetHelper(MetadataHelper):
                 n_train_epochs = metadata_by_session["session_id_num"][session_id]["n_train_epochs"]
                 n_test_epochs = metadata_by_session["session_id_num"][session_id]["n_test_epochs"]
 
-                #logger.custom_debug(f"n_train_epochs: {n_train_epochs}")
-                #logger.custom_debug(f"n_test_epochs: {n_test_epochs}")
-
                 end_train_index = epoch_start_index + n_train_epochs
                 end_test_index = end_train_index + n_test_epochs
 
+                #logger.custom_debug(f"n_train_epochs: {n_train_epochs}")
+                #logger.custom_debug(f"n_test_epochs: {n_test_epochs}")
                 #logger.custom_debug(f"end_train_index: {end_train_index}")
                 #logger.custom_debug(f"end_test_index: {end_test_index}")
 
@@ -1024,7 +975,7 @@ class DatasetHelper(MetadataHelper):
                 logger.custom_debug(f"[Session {session_id}]: meg_data_normalized['train'].shape: {meg_data_normalized_by_session[session_id]['train'].shape}")
                 logger.custom_debug(f"[Session {session_id}]: meg_data_normalized['test'].shape: {meg_data_normalized_by_session[session_id]['test'].shape}")
 
-                # If selected, interpolate all outliers (defined as +- 3 std)
+                # Deprecated. Interpolates all outliers on session level (defined as +- 3 std)
                 #if clip_outliers:
                 #    logger.custom_debug(f"\n \n Clipping outliers for session {session_id}")
                 #    meg_data_combined = np.concatenate((meg_data_normalized_by_session[session_id]["train"], meg_data_normalized_by_session[session_id]["test"]))
@@ -1044,9 +995,7 @@ class DatasetHelper(MetadataHelper):
                     logger.custom_debug(f"shapes before interpolation: Train: {meg_data_normalized_by_session[session_id]['train'].shape}, Test: {meg_data_normalized_by_session[session_id]['test'].shape}")
                     meg_data_combined = np.concatenate((meg_data_normalized_by_session[session_id]["train"], meg_data_normalized_by_session[session_id]["test"]))
                     n_outliers_in_session = 0
-                    # Iterate over sensors
                     for sensor in range(meg_data_combined.shape[1]):
-                        # Iterate over timepoint
                         for timepoint in range(meg_data_combined.shape[2]):
                             # Interpolate over all epochs for a given sensor, timepoint combination
                             meg_data_ch_t = meg_data_combined[:,sensor,timepoint] # n values where n = num epochs
@@ -1063,7 +1012,6 @@ class DatasetHelper(MetadataHelper):
                                 #logger.custom_info(f"len(indices): {len(indices)}")
                                 #logger.custom_info(f"len(list(meg_data_ch_t_non_outliers.keys())): {len(list(meg_data_ch_t_non_outliers.keys()))}")
                                 #logger.custom_info(f"len(idx_to_be_interpolated): {len(idx_to_be_interpolated)}")
-
                                 #logger.custom_info(f"meg_data_ch_t_interpolated.shape: {meg_data_ch_t_interpolated.shape}")
 
                                 meg_data_combined[idx_to_be_interpolated,sensor,timepoint] = meg_data_ch_t_interpolated
@@ -1090,18 +1038,20 @@ class DatasetHelper(MetadataHelper):
             logger.custom_debug(f"end_test_index: {end_test_index}")
         
 
-
     def create_train_test_split(self, debugging=False):
         """
         Creates train/test split of trials based on scene_ids.
         """
-        # Read combined metadata from json
         combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
 
         # Prepare splits for all sessions: count scenes
-        scene_ids = {session_id: {} for session_id in combined_metadata["sessions"]}
-        trial_ids = {session_id: [] for session_id in combined_metadata["sessions"]}
-        num_datapoints_dict = {session_id: 0 for session_id in combined_metadata["sessions"]}
+        scene_ids = {}
+        trial_ids = {}
+        num_datapoints_dict = {}
+        for session_id in combined_metadata["sessions"]:
+            scene_ids[session_id] = {}
+            trial_ids[session_id] = []
+            num_datapoints_dict[session_id] = 0
         for session_id in combined_metadata["sessions"]:
             for trial_id in combined_metadata["sessions"][session_id]["trials"]:
                 # Store trials in session for comparison with scenes
@@ -1125,7 +1075,6 @@ class DatasetHelper(MetadataHelper):
             for session_id in num_datapoints_dict:
                 total_num_datapoints += num_datapoints_dict[session_id]
             logger.custom_debug(f"Total number of datapoints: {total_num_datapoints}")
-
 
         # Create splits for each session
         for session_id in combined_metadata["sessions"]:
@@ -1157,10 +1106,14 @@ class DatasetHelper(MetadataHelper):
                         test_split_trials.append(trial_id)
                     index += 1
 
-            # TODO, maybe (most likely not): Make sure that scenes only double in the same split
-
             # Export trial_split arrays to .npz
             split_dict = {"train": train_split_trials, "test": test_split_trials}
+
+            self.export_split_data_as_file(session_id=session_id, 
+                                        type_of_content="trial_splits",
+                                        array_dict=split_dict)
+
+            # TODO, maybe (most likely not): Make sure that scenes only double in the same split
 
             assert num_trials_train == len(train_split_trials), "Lost trials in train split"
             assert num_trials_test == len(test_split_trials), "Lost trials in train split"
@@ -1171,10 +1124,6 @@ class DatasetHelper(MetadataHelper):
                     assert trial_id not in split_dict[other_split], f"Session {session_id}: Trial {trial_id} occurs in both train and test split."
 
             logger.custom_debug(f"[Session {session_id}]: len train_split: {len(train_split_trials)}, len test_split: {len(test_split_trials)}, combined size: {len(train_split_trials) + len(test_split_trials)} \n")
-
-            self.export_split_data_as_file(session_id=session_id, 
-                                        type_of_content="trial_splits",
-                                        array_dict=split_dict)
 
 
     def create_pytorch_dataset(self, debugging=False):
