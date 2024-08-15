@@ -1,5 +1,6 @@
 data_files/*
 logs/*
+backup/*
 
 # Exclude uniquely extracted session metadata
 !data_files/session_metadata/

@@ -17,7 +17,7 @@ sys.path.append(str(__location__))
 os.chdir(__location__)
 
 # Choose params
-subject_ids = ["02"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
+subject_ids = ["01", "02", "03", "04"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
 lock_event = "saccade" # "saccade" "fixation"
 
 crop_size = 112  # 224 112
@@ -32,11 +32,12 @@ best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 999, "timepo
                                             "02": {"timepoint_min": 310, "timepoint_max": 315},  # "02": {"timepoint_min": 290, "timepoint_max": 330},
                                             "03": {"timepoint_min": 999, "timepoint_max": 999},
                                             "05": {"timepoint_min": 999, "timepoint_max": 999},},
-                              "saccade":   {"01": {"timepoint_min": 425, "timepoint_max": 530}, 
-                                            "02": {"timepoint_min": 445, "timepoint_max": 505},  # ! Currently testing smaller windows due to sensor-level encoding differences. Best: 450 to 500 Old range: "02": {"timepoint_min": 425, "timepoint_max": 525}
-                                            "03": {"timepoint_min": 400, "timepoint_max": 485},
-                                            "04": {"timepoint_min": 430, "timepoint_max": 515},
-                                            "05": {"timepoint_min": 420, "timepoint_max": 510},}
+                            # ! Saccade: Currently testing smaller windows due to sensor-level encoding differences.
+                              "saccade":   {"01": {"timepoint_min": 470, "timepoint_max": 480},  # Best: 465 to 495; Old range: "01": {"timepoint_min": 425, "timepoint_max": 530}
+                                            "02": {"timepoint_min": 470, "timepoint_max": 480},  # Best: 445 to 505; Old range: "02": {"timepoint_min": 425, "timepoint_max": 525}
+                                            "03": {"timepoint_min": 470, "timepoint_max": 480},  # Best: 455 to 490; Old range: "03": {"timepoint_min": 400, "timepoint_max": 600}
+                                            "04": {"timepoint_min": 470, "timepoint_max": 480},  # Best: 460 to 490; Old range: "04": {"timepoint_min": 430, "timepoint_max": 515}
+                                            "05": {"timepoint_min": 470, "timepoint_max": 480},} # Best: 460 to 480; Old range: "05": {"timepoint_min": 420, "timepoint_max": 510}
                             }
 timepoint_min = 0  # fixation: 170, saccade: 275
 timepoint_max = 650  # fixation: 250, saccade: 375
@@ -46,11 +47,11 @@ normalizations = ["mean_centered_ch_then_global_robust_scaling"]  # , "no_norm",
 fractional_grid = np.array([fraction/100 for fraction in range(1, 100, 3)]) # range from 0.01 to 1 in steps or 0.03
 alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
 
-omit_sessions_by_subject = {"01": ["1"],
-                            "02": ["4"],  # ["1", "4", "5"]
-                            "03": [],
-                            "04": [],
-                            "05": ["9"],
+omit_sessions_by_subject = {"01": ["1", "7", "8"],  # ["1"]
+                            "02": ["4"],  # ["4", "6", ]  # "4"
+                            "03": ["1", "2", "5", "7", "10"],  # []
+                            "04": ["6"],  # []
+                            "05": ["4", "7"], # ["9"]
                             }
 
 logger_level = 25
@@ -65,7 +66,8 @@ extract_features = False
 perform_pca = False
 train_GLM = False
 generate_predictions_with_GLM = False
-visualization = True
+visualization = False
+plot_distance_drift_all_subjects = True
 
 z_score_features_before_pca = True
 use_pca_features = True
@@ -218,13 +220,14 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
-            visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
-            #visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
+            ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
+            visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
+            ###visualization_helper.visualize_GLM_results(fit_measure_type="pearson_r_timepoint", by_timepoints=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
             # Visuzalize distance based predictions at timepoint scale
             ##visualization_helper.three_dim_timepoint_predictions(subtract_self_pred=subtract_self_pred) 
-            visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=True, include_0_distance=True)  
+            ####visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=True, include_0_distance=True)  
             ####visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=True, include_0_distance=True)  
             
             # Visualize drift topographically with mne based on sensor level data 
@@ -234,7 +237,13 @@ for run in range(run_pipeline_n_times):
             ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"
 
             logger.custom_info("Visualization completed. \n \n")
-            
+
+if plot_distance_drift_all_subjects:
+    global_visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
+
+    # Plots distance based different for all subjects in one plot, as well as an average over the subjects. !!! How is this interpretable with different selected timepoints for each subject ?!
+    global_visualization_helper.drift_distance_all_subjects(subject_ids=subject_ids, fit_measure="pearson_r", omit_sessions_by_subject=omit_sessions_by_subject, include_0_distance=False)  
+    # pearson_r, var_explained
 
 logger.custom_info("Pipeline completed.")
 
@@ -242,4 +251,3 @@ logger.custom_info("Pipeline completed.")
 logger.warning("Using saccade for .fif file regardless of used lock_event for session date differences because files does not exist for fixations.")
 if use_ica_cleaned_data:
     logger.warning("idx to ms timepoints mapping in plots is currently based on ica cleaned metadata. Validation is required before generalizing to other data files.")
-

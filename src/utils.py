@@ -45,9 +45,6 @@ class BasicOperationsHelper:
         self.session_ids_char = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
         self.session_ids_num = [str(session_id) for session_id in range(1,11)]
 
-        with open(f"data_files/session_metadata/session_datetimes/session_datetimes_dict.pkl", 'rb') as file:
-            self.session_datetimes = pickle.load(file)
-
         # Create linspace of available ms values in selected meg data type for mapping from indices. Based on ICA cleaned avs data time format!
         if lock_event == "saccade":
             # AVS ICA-claned: Saccade: 651 timepoints, -800 to 500.  Old, Andrej: Saccade: 401 timepoints, -500 to 300
@@ -130,19 +127,21 @@ class BasicOperationsHelper:
         return processing_channels_indices
 
     
-    def get_session_date_differences(self):
+    def get_session_date_differences(self, subject_id=None):
         """
         Calculates the rounded differences in days between all sessions.
         """
-        fif_folder = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/erf/filter_0.2_200/'
+        subject_id = self.subject_id if subject_id is None else subject_id  # If we are on single subject level, this will be none and the class attribute will be used. In later processing stages where subjects are compared, the subject_id argument will be given.
+        with open(f"data_files/session_metadata/session_datetimes/session_datetimes_subject_{subject_id}_dict.pkl", 'rb') as file:
+            session_datetimes = pickle.load(file)
  
         # Get difference in days (as float) between sessions
         session_day_differences = self.recursive_defaultdict()
         for session_id_num in self.session_ids_num:
-            og_session_date = self.session_datetimes[session_id_num]
+            og_session_date = session_datetimes[session_id_num]
             for session_comp_id_num in self.session_ids_num:
                 if session_id_num != session_comp_id_num:
-                    comp_session_date = self.session_datetimes[session_comp_id_num]
+                    comp_session_date = session_datetimes[session_comp_id_num]
 
                     diff_hours =  round(abs((comp_session_date - og_session_date).total_seconds()) / 3600)
                     diff_days = round(diff_hours / 24)
@@ -186,9 +185,9 @@ class BasicOperationsHelper:
         if type_of_content in ["mse_losses", "mse_losses_timepoint"]:
             file_path_beginning = f"data_files/{self.lock_event}/mse_losses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}"
             if type_of_content == "mse_losses":
-                file_path_ending = f"/norm_{type_of_norm}/mse_losses_{type_of_norm}_dict.json"
+                file_path_ending = f"norm_{type_of_norm}/mse_losses_{type_of_norm}_dict.json"
             else:  # mse_losses_timepoint
-                file_path_ending = f"/timepoints/norm_{type_of_norm}/mse_losses_timepoint_{type_of_norm}_dict.json"
+                file_path_ending = f"timepoints/norm_{type_of_norm}/mse_losses_timepoint_{type_of_norm}_dict.json"
             file_path = os.path.join(file_path_beginning, file_path_ending)
         elif type_of_content == "var_explained":
             file_path = f"data_files/{self.lock_event}/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/predict_train_data_{predict_train_data}/var_explained_{type_of_norm}_dict.json"
@@ -336,11 +335,13 @@ class BasicOperationsHelper:
         return fit_measures_by_session_averaged_over_timepoints
 
 
-    def calculate_fit_by_distances(self, fit_measures_by_session: dict, timepoint_level_input: bool, average_within_distances:bool, include_0_distance:bool = False):
+    def calculate_fit_by_distances(self, fit_measures_by_session: dict, timepoint_level_input: bool, average_within_distances:bool, include_0_distance:bool = False, subject_id:str = None):
         """
         Aligns fit measures by distances. Input should be a dict containing all cross-session fit measures (on a timepoint level).
+
+        subject_id (str): needs to be specified if we are currently operating over all subjects and self.subject is not accurate
         """
-        session_day_differences = self.get_session_date_differences()
+        session_day_differences = self.get_session_date_differences(subject_id=subject_id)
 
         if timepoint_level_input:
             fit_measures_by_session = self.average_timepoint_data_per_session(fit_measures_by_session)
@@ -431,8 +432,7 @@ class BasicOperationsHelper:
         # Mne plots and some figures cannot be closed explicity, close all others to avoid memory leak
         try:
             plt.close()
-        except Exception as e:
-            raise ValueError(f"Check type of exception and update try except with specific error, then pass here: {e}")
+        except AttributeError as e:  # Caught if type of plot cannot be closed
             pass
 
 
@@ -778,9 +778,9 @@ class DatasetHelper(MetadataHelper):
 
         meg_data_folder_beginning = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor"
         if use_ica_cleaned_data:
-            meg_data_folder_ending = "/erf/filter_0.2_200/ica"
+            meg_data_folder_ending = "erf/filter_0.2_200/ica"
         else:
-            meg_data_folder_ending = "/filter_0.2_200"
+            meg_data_folder_ending = "filter_0.2_200"
         meg_data_folder = os.path.join(meg_data_folder_beginning, meg_data_folder_ending)
 
         selected_channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)  # Get selected sensors to filter from meg file
@@ -815,7 +815,7 @@ class DatasetHelper(MetadataHelper):
                         meg_data[sensor_type] = meg_data[sensor_type][:,channel_indices,:]
                     else:
                         del meg_data[sensor_type]
-                if not meg_data["grad"] and not meg_data["mag"]:
+                if not selected_channel_indices["grad"] and not selected_channel_indices["mag"]:
                     raise ValueError("Neither mag or grad channels selected.")
 
                 # Filter considered meg data based relevant timepoints
@@ -838,14 +838,14 @@ class DatasetHelper(MetadataHelper):
                         meg_data_norm[sensor_type] = self.normalize_array(np.array(meg_data[sensor_type]), normalization=normalization_stage, session_id=session_id_num, n_channels=n_channels)
 
                     # Combine grad and mag data
-                    if meg_data["grad"] and meg_data["mag"]:
+                    if selected_channel_indices["grad"] and selected_channel_indices["mag"]:
                         logger.custom_info("Using both grad and mag data.")
                         combined_meg = np.concatenate([meg_data_norm["grad"], meg_data_norm["mag"]], axis=1) #(2874, 306, 601)
-                    elif meg_data["grad"]:
+                    elif selected_channel_indices["grad"]:
                         raise NotImplementedError("Not yet implemented for grad channels aswell (need to adjust normalize_array() at the least.)")
                         logger.custom_info("Using only grad data.")
                         combined_meg = meg_data_norm["grad"]
-                    elif meg_data["mag"]:
+                    elif selected_channel_indices["mag"]:
                         logger.custom_info("Using only mag data.")
                         combined_meg = meg_data_norm["mag"]
 
@@ -1751,6 +1751,51 @@ class VisualizationHelper(GLMHelper):
         return x_values, y_values
 
     
+    def _plot_scattered_fit_measures_by_distance_with_trend(self, fit_measures_by_distances:dict, ax1, color:str, include_0_distance:bool, timepoint_window_start_idx:str = None, subject_id:str = None):
+        """
+        Helper function that insert scattered fit measures (mostly variance explained) over distances into a given plot
+        """
+        x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances, losses_averaged_within_distances=False)
+
+        # Calculate trend line 
+        if include_0_distance:
+            # Don't include the self predictions in the trend line calculation (i.e. filter x and y values where x = 0)
+            filtered_tuple_values = [x_y_pair for x_y_pair in zip(x_values, y_values) if x_y_pair[0] != 0]
+            filtered_x_values, filtered_y_values = zip(*filtered_tuple_values)
+            filtered_x_values = list(filtered_x_values)
+            filtered_y_values = list(filtered_y_values)
+        else:
+            filtered_x_values = x_values
+            filtered_y_values = y_values
+            
+        filtered_x_values_set = np.array(list(set(filtered_x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
+        slope, intercept, r_value, p_value, std_err = linregress(x=filtered_x_values, y=filtered_y_values)
+        trend_line = slope * filtered_x_values_set + intercept
+        r_value = "{:.3f}".format(r_value)  # limit to three decimals
+
+        if timepoint_window_start_idx not in [None, 999]:
+            timepoint_start_ms = self.map_timepoint_idx_to_ms(timepoint_window_start_idx)
+            timepoint_end_ms = timepoint_start_ms + (self.time_window_n_indices * 2)  # each timepoint is equivalent to 2ms (i.e. )
+            label = f"{timepoint_start_ms} to {timepoint_end_ms}ms, (r={r_value})" 
+        elif timepoint_window_start_idx == 999:
+            # In this case we are plotting all timepoints
+            min_index = 0  # 0 because timepoint_min is added in the mapping
+            max_index = self.timepoint_max - self.timepoint_min
+            #logger.custom_info(f"max_index: {max_index}")
+            label = f"{self.map_timepoint_idx_to_ms(min_index)} to {self.map_timepoint_idx_to_ms(max_index)}ms, (r={r_value})"   
+        elif subject_id != None:
+            label = f"Subject {subject_id}: r={r_value}"
+        else:
+            label = None
+
+        if subject_id != "All Subjects":
+            ax1.plot(x_values, y_values, color=color, marker='o', linestyle='none', markersize=4)
+
+        # If only a single window is plotted, we want different colors for scatter points and trend. If all windows or all subjects are plotted this gets too confusing. In this the first case, 'color' will be an array
+        trend_color = color if not isinstance(color,str) or subject_id == "All Subjects" else 'green' 
+        ax1.plot(filtered_x_values_set, trend_line, color=trend_color, label=label, linestyle='-', linewidth=3)
+
+    
     def _plot_drift_distance_based(self, fit_measures_by_distances:dict, omitted_sessions:list, self_pred_normalized:bool, losses_averaged_within_distances:bool, all_windows_one_plot:bool, timepoint_window_start_idx:int = None, include_0_distance:bool = False):
         """
         Creates drift plot based on fit measures data by distance. Expects keys of distance in days as string number, each key containing keys "fit_measure" and "num_measures"
@@ -1758,47 +1803,9 @@ class VisualizationHelper(GLMHelper):
         # Plot loss as a function of distance of predicted session from "training" session
         fig, ax1 = plt.subplots(figsize=(12, 8))
 
-        def plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances:dict, ax1, color:str, timepoint_window_start_idx:str = None):
-            """
-            Helper function that insert scattered fit measures (mostly variance explained) over distances into a given plot
-            """
-            x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances, losses_averaged_within_distances)
-
-            # Calculate trend line 
-            if include_0_distance:
-                # Don't include the self predictions in the trend line calculation (i.e. filter x and y values where x = 0)
-                filtered_tuple_values = [x_y_pair for x_y_pair in zip(x_values, y_values) if x_y_pair[0] != 0]
-                filtered_x_values, filtered_y_values = zip(*filtered_tuple_values)
-                filtered_x_values = list(filtered_x_values)
-                filtered_y_values = list(filtered_y_values)
-            else:
-                filtered_x_values = x_values
-                filtered_y_values = y_values
-                
-            filtered_x_values_set = np.array(list(set(filtered_x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
-            slope, intercept, r_value, p_value, std_err = linregress(x=filtered_x_values, y=filtered_y_values)
-            trend_line = slope * filtered_x_values_set + intercept
-            r_value = "{:.3f}".format(r_value)  # limit to three decimals
-
-            if timepoint_window_start_idx not in [None, 999]:
-                timepoint_start_ms = self.map_timepoint_idx_to_ms(timepoint_window_start_idx)
-                timepoint_end_ms = timepoint_start_ms + (self.time_window_n_indices * 2)  # each timepoint is equivalent to 2ms (i.e. )
-                label = f"{timepoint_start_ms} to {timepoint_end_ms}ms, (r={r_value})" 
-            elif timepoint_window_start_idx == 999:
-                # In this case we are plotting all timepoints
-                min_index = 0  # 0 because timepoint_min is added in the mapping
-                max_index = self.timepoint_max - self.timepoint_min
-                #logger.custom_info(f"max_index: {max_index}")
-                label = f"{self.map_timepoint_idx_to_ms(min_index)} to {self.map_timepoint_idx_to_ms(max_index)}ms, (r={r_value})"   
-            else:
-                label = None
-            ax1.plot(x_values, y_values, label=label, color=color, marker='o', linestyle='none')
-            trend_color = color if not isinstance(color,str) else 'green'  # If only a single window is plotted, we want different colors for scatter points and trend. If all windows are plotted this gets too confusing. In this 'color' will be an array
-            ax1.plot(filtered_x_values_set, trend_line, color=trend_color, linestyle='-', linewidth=3)
-
         # Insert scatter values based on distance into plot
         if not all_windows_one_plot:
-            plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances, ax1, color='C0', timepoint_window_start_idx=timepoint_window_start_idx)  # using default blue color
+            self._plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances, ax1, color='C0', include_0_distance=include_0_distance, timepoint_window_start_idx=timepoint_window_start_idx)  # using default blue color
         else:
             # Create colormap to differentiate time-windows
             n_windows = len(fit_measures_by_distances["timewindow_start"].keys())
@@ -1808,7 +1815,7 @@ class VisualizationHelper(GLMHelper):
             for timepoint_idx, timepoint_window_start_idx in enumerate(fit_measures_by_distances["timewindow_start"]):
                 fit_measures_by_distances_window = fit_measures_by_distances["timewindow_start"][timepoint_window_start_idx]["fit_measures_by_distances"]
                 color = colors[timepoint_idx]
-                plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances_window, ax1, color=color, timepoint_window_start_idx=timepoint_window_start_idx) 
+                self._plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances_window, ax1, color=color, include_0_distance=include_0_distance, timepoint_window_start_idx=timepoint_window_start_idx) 
 
         ax1.set_xlabel(f'Distance in days between "train" and "test" Session')
         ax1.set_ylabel(f'Variance Explained')
@@ -2127,10 +2134,10 @@ class VisualizationHelper(GLMHelper):
 
                 def plot_timepoint_fit_measure(timepoint_loss_list, num_timepoints, session_id=None, sensor_name=None):
                     plt.figure(figsize=(10, 6))
-                    timepoints_in_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in list(range(num_timepoints))]
-                    plt.bar(timepoints_in_ms, timepoint_loss_list, color='blue')
-                    #timepoints_indices = [timepoint_idx for timepoint_idx in list(range(num_timepoints))]
-                    #plt.bar(timepoints_indices, timepoint_loss_list, color='blue')
+                    #timepoints_in_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in list(range(num_timepoints))]
+                    #plt.bar(timepoints_in_ms, timepoint_loss_list, color='blue')
+                    timepoints_indices = [timepoint_idx for timepoint_idx in list(range(num_timepoints))]
+                    plt.bar(timepoints_indices, timepoint_loss_list, color='blue')
                     #plt.bar(list(range(num_timepoints)), timepoint_loss_list, color='blue')
                     #logger.custom_debug(f"list(range(num_timepoints): {list(range(num_timepoints))}")
                     session_subtitle = "Averaged across all Sessions, predicting themselves" if session_id is None else f"Session {session_id}, predicting iteself"
@@ -2334,6 +2341,59 @@ class VisualizationHelper(GLMHelper):
                 #with open(plot_dest, 'wb') as file: 
                 #    pickle.dump(timepoints_sessions_plot, file)
 
+
+    def drift_distance_all_subjects(self, subject_ids:list, fit_measure:str, omit_sessions_by_subject:dict, include_0_distance:bool):
+        """Visualizes drift graph based on encoding performance by distance for all subjects, As well as average over all subjects."""
+        assert fit_measure in ["var_explained", "pearson_r"]
+
+        for normalization in self.normalizations:
+            fit_measures_by_distances_all_subjects = {}
+            fig, ax1 = plt.subplots(figsize=(12, 8))
+            ax1.set_xlabel('Distance in days between "train" and "test" Session')
+            figure_title = 'Variance Explained' if fit_measure == "var_explained" else 'Pearson Correlation'
+            ax1.set_ylabel('Variance Explained')
+            ax1.tick_params(axis='y', labelcolor='b')
+            ax1.grid(True)
+            colormap_subjects = cm.viridis  
+            colors = colormap_subjects(np.linspace(0, 1, num=len(subject_ids)))
+            # Collect timepoint cross session fit measures for all considered subjects
+            for subject_nr, subject_id in enumerate(subject_ids):
+                color_subject = colors[subject_nr]
+                if fit_measure == "var_explained":
+                    # Load timepoint-based variance explained
+                    storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{subject_id}/norm_{normalization}/"
+                    json_storage_file = f"var_explained_timepoints_dict.json"
+                else:
+                    # Load timepoint-based pearson r
+                    storage_folder = f"data_files/{self.lock_event}/pearson_r_timepoints/{self.ann_model}/{self.module_name}/subject_{subject_id}/norm_{normalization}/"
+                    json_storage_file = f"pearson_r_timepoints_dict.json"
+                json_storage_path = os.path.join(storage_folder, json_storage_file)
+                with open(json_storage_path, 'r') as file:
+                    fit_measures_by_session_by_timepoint = json.load(file)
+                
+                # Filter data from sessions that are to be omitted and convert to fit by distances
+                fit_measures_by_filtered_session_by_timepoint = self.omit_selected_sessions_from_fit_measures(fit_measures_by_session=fit_measures_by_session_by_timepoint, omitted_sessions=omit_sessions_by_subject[subject_id], sensors_seperated=False)
+                fit_measures_by_distances_subject = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_filtered_session_by_timepoint, timepoint_level_input=True, average_within_distances=False, include_0_distance=include_0_distance, subject_id=subject_id)
+
+                # Add a colored line for the subject with their drift data
+                self._plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances=fit_measures_by_distances_subject, ax1=ax1, color=color_subject, include_0_distance=include_0_distance, subject_id=subject_id)
+
+                # Add subject data to distance/drift data for all subjects combined
+                for distance in fit_measures_by_distances_subject:
+                    if distance not in fit_measures_by_distances_all_subjects.keys():
+                        fit_measures_by_distances_all_subjects[distance] = fit_measures_by_distances_subject[distance]
+                    else:
+                        fit_measures_by_distances_all_subjects[distance].extend(fit_measures_by_distances_subject[distance])
+
+            # Calculate and plot average drift over all considered subjects (based on combined distance scatter values)
+            self._plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances=fit_measures_by_distances_all_subjects, ax1=ax1, color='black', include_0_distance=include_0_distance, subject_id='All Subjects')
+
+            lines, labels = ax1.get_legend_handles_labels()
+            ax1.legend(lines, labels, loc='upper right')
+
+            plot_folder = f"data_files/{self.lock_event}/visualizations/distance_drift/all_subjects"
+            plot_file = f"distance_drift_all_subjects_{fit_measure}.png"
+            self.save_plot_as_file(fig, plot_folder=plot_folder, plot_file=plot_file)
 
     def timepoint_window_drift(self, omitted_sessions:list, all_windows_one_plot:bool, subtract_self_pred:bool, sensor_level:bool, include_0_distance:bool, debugging=False):
 
