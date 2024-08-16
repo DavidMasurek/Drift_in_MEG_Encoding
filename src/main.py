@@ -17,7 +17,7 @@ sys.path.append(str(__location__))
 os.chdir(__location__)
 
 # Choose params
-subject_ids = ["01", "02", "03", "04"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
+subject_ids = ["01", "02", "03", "04", "05"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
 lock_event = "saccade" # "saccade" "fixation"
 
 crop_size = 112  # 224 112
@@ -33,11 +33,11 @@ best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 999, "timepo
                                             "03": {"timepoint_min": 999, "timepoint_max": 999},
                                             "05": {"timepoint_min": 999, "timepoint_max": 999},},
                             # ! Saccade: Currently testing smaller windows due to sensor-level encoding differences.
-                              "saccade":   {"01": {"timepoint_min": 470, "timepoint_max": 480},  # Best: 465 to 495; Old range: "01": {"timepoint_min": 425, "timepoint_max": 530}
-                                            "02": {"timepoint_min": 470, "timepoint_max": 480},  # Best: 445 to 505; Old range: "02": {"timepoint_min": 425, "timepoint_max": 525}
-                                            "03": {"timepoint_min": 470, "timepoint_max": 480},  # Best: 455 to 490; Old range: "03": {"timepoint_min": 400, "timepoint_max": 600}
-                                            "04": {"timepoint_min": 470, "timepoint_max": 480},  # Best: 460 to 490; Old range: "04": {"timepoint_min": 430, "timepoint_max": 515}
-                                            "05": {"timepoint_min": 470, "timepoint_max": 480},} # Best: 460 to 480; Old range: "05": {"timepoint_min": 420, "timepoint_max": 510}
+                              "saccade":   {"01": {"timepoint_min": 460, "timepoint_max": 490},  # Best: 465 to 495; Old range: "01": {"timepoint_min": 425, "timepoint_max": 530}
+                                            "02": {"timepoint_min": 460, "timepoint_max": 490},  # Best: 445 to 505; Old range: "02": {"timepoint_min": 425, "timepoint_max": 525}
+                                            "03": {"timepoint_min": 460, "timepoint_max": 490},  # Best: 455 to 490; Old range: "03": {"timepoint_min": 400, "timepoint_max": 600}
+                                            "04": {"timepoint_min": 460, "timepoint_max": 490},  # Best: 460 to 490; Old range: "04": {"timepoint_min": 430, "timepoint_max": 515}
+                                            "05": {"timepoint_min": 460, "timepoint_max": 490},} # Best: 460 to 480; Old range: "05": {"timepoint_min": 420, "timepoint_max": 510}
                             }
 timepoint_min = 0  # fixation: 170, saccade: 275
 timepoint_max = 650  # fixation: 250, saccade: 375
@@ -48,10 +48,10 @@ fractional_grid = np.array([fraction/100 for fraction in range(1, 100, 3)]) # ra
 alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
 
 omit_sessions_by_subject = {"01": ["1", "7", "8"],  # ["1"]
-                            "02": ["4"],  # ["4", "6", ]  # "4"
-                            "03": ["1", "2", "5", "7", "10"],  # []
+                            "02": [],  # ["4"]  
+                            "03": ["1", "2", "5", "7", "10"],  # 
                             "04": ["6"],  # []
-                            "05": ["4", "7"], # ["9"]
+                            "05": ["4", "7", "9"], # ["9"]
                             }
 
 logger_level = 25
@@ -242,7 +242,7 @@ if plot_distance_drift_all_subjects:
     global_visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
 
     # Plots distance based different for all subjects in one plot, as well as an average over the subjects. !!! How is this interpretable with different selected timepoints for each subject ?!
-    global_visualization_helper.drift_distance_all_subjects(subject_ids=subject_ids, fit_measure="pearson_r", omit_sessions_by_subject=omit_sessions_by_subject, include_0_distance=False)  
+    global_visualization_helper.drift_distance_all_subjects(subject_ids=subject_ids, fit_measure="var_explained", omit_sessions_by_subject=omit_sessions_by_subject, include_0_distance=False)  
     # pearson_r, var_explained
 
 logger.custom_info("Pipeline completed.")

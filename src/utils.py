@@ -31,7 +31,7 @@ import fracridge
 from fracridge import FracRidgeRegressorCV
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import r2_score
-from scipy.stats import linregress, pearsonr
+from scipy.stats import linregress, pearsonr, permutation_test
 
 # Logging related
 logger = logging.getLogger(__name__)
@@ -57,6 +57,46 @@ class BasicOperationsHelper:
 
         self.all_ms_values = np.linspace(min_ms, max_ms, num=651)  # space containing the ms values for all 651 timepoints
         #logger.custom_debug(f"all_ms_values linspace: {self.all_ms_values}")
+
+
+    def perform_permutation_test(self, x_array, y_array, n_permutations=1000):
+        def correlation_statistic(x,y):
+            return pearsonr(x,y)[0]
+
+        empirical_corr = correlation_statistic(x_array, y_array)
+
+        # Generate null distribution by shuffling distances n times
+        x_array_permutate = np.copy(x_array)
+        null_distribution_corrs = []
+        for i in range(n_permutations):
+            np.random.shuffle(x_array_permutate)
+            null_distribution_corrs.append(correlation_statistic(x_array_permutate, y_array))
+        null_distribution_corrs = np.array(null_distribution_corrs)
+
+        # Compute (directed) p-value: proportion of permutations yielding a correlation lower than the empirical correlation
+        num_corrs_lower_empirical = np.sum(null_distribution_corrs < empirical_corr)
+        p_value = num_corrs_lower_empirical / n_permutations
+
+        # Create figure illustration permutation test result: Empirical correlation in comparison to null distribution
+        permutation_fig, permutation_ax = plt.subplots()
+
+        # Null distribution of correlations
+        permutation_ax.hist(null_distribution_corrs, bins=30, color='lightgray', density=True)
+
+        # Vertical line for the empirical correlation, zero correlation and dashed line for p 0.05 correlation
+        permutation_ax.axvline(empirical_corr, color='black', linewidth=2)
+        permutation_ax.axvline(0, color='black', linewidth=1)
+        p_0_05_corr = np.percentile(null_distribution_corrs, 5)
+        permutation_ax.axvline(p_0_05_corr, color='red', linestyle='--', linewidth=2, label=f'P=0.05 (r={p_0_05_corr:.2f})')
+
+        permutation_ax.set_xlabel('correlation (r)')
+        permutation_ax.set_ylabel('permutations prob.')
+
+        # DEPRECATED: Perform scipy the permutation test for comparison; none of the permutation type options seem appropriate
+        #p_scipy = permutation_test((x_array, y_array), correlation_statistic, permutation_type='pairings', alternative='less', n_resamples=10000)
+        #print(f"p_scipy: {p_scipy}")
+
+        return p_value, permutation_fig, permutation_ax
 
 
     def omit_selected_sessions_from_fit_measures(self, fit_measures_by_session:dict, omitted_sessions:list, sensors_seperated:bool) -> dict:
@@ -1757,6 +1797,22 @@ class VisualizationHelper(GLMHelper):
         """
         x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances, losses_averaged_within_distances=False)
 
+        permutation_p_value, _, _ = self.perform_permutation_test(x_values, y_values, n_permutations=10000)
+        """
+        if subject_id is not None:  # Called from drift_distance_all_subjects
+
+            observed_corr = "{:.3f}".format(pearsonr(x_values,y_values)[0])
+            permutation_p_value, _, _ = self.perform_permutation_test(x_values, y_values, n_permutations=10000)
+            permutation_ax.set_title(f'Permutation Test for Subject {subject_id} \n r={observed_corr}, p={permutation_p_value}')
+
+            plot_folder = f"data_files/{self.lock_event}/visualizations/distance_drift/permutation_test"
+            plot_file = f"permutation_test_results_{subject_id}.png"
+            self.save_plot_as_file(plt=permutation_plot, plot_folder=plot_folder, plot_file=plot_file)
+            
+            print(f"subject_id {subject_id} p value: {permutation_p_value}")
+            print(f"subject_id {subject_id} observed_corr: {observed_corr}")
+        """
+
         # Calculate trend line 
         if include_0_distance:
             # Don't include the self predictions in the trend line calculation (i.e. filter x and y values where x = 0)
@@ -1767,7 +1823,7 @@ class VisualizationHelper(GLMHelper):
         else:
             filtered_x_values = x_values
             filtered_y_values = y_values
-            
+        
         filtered_x_values_set = np.array(list(set(filtered_x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
         slope, intercept, r_value, p_value, std_err = linregress(x=filtered_x_values, y=filtered_y_values)
         trend_line = slope * filtered_x_values_set + intercept
@@ -1784,7 +1840,7 @@ class VisualizationHelper(GLMHelper):
             #logger.custom_info(f"max_index: {max_index}")
             label = f"{self.map_timepoint_idx_to_ms(min_index)} to {self.map_timepoint_idx_to_ms(max_index)}ms, (r={r_value})"   
         elif subject_id != None:
-            label = f"Subject {subject_id}: r={r_value}"
+            label = f"Subject {subject_id}: r={r_value}, p={permutation_p_value}"
         else:
             label = None
 
@@ -2350,8 +2406,8 @@ class VisualizationHelper(GLMHelper):
             fit_measures_by_distances_all_subjects = {}
             fig, ax1 = plt.subplots(figsize=(12, 8))
             ax1.set_xlabel('Distance in days between "train" and "test" Session')
-            figure_title = 'Variance Explained' if fit_measure == "var_explained" else 'Pearson Correlation'
-            ax1.set_ylabel('Variance Explained')
+            ylabel = 'Variance Explained' if fit_measure == "var_explained" else 'Pearson Correlation'
+            ax1.set_ylabel(ylabel)
             ax1.tick_params(axis='y', labelcolor='b')
             ax1.grid(True)
             colormap_subjects = cm.viridis  
@@ -2377,6 +2433,17 @@ class VisualizationHelper(GLMHelper):
 
                 # Add a colored line for the subject with their drift data
                 self._plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances=fit_measures_by_distances_subject, ax1=ax1, color=color_subject, include_0_distance=include_0_distance, subject_id=subject_id)
+
+                # Plot a histogram capturing the results of the permutation test
+                x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances_subject, losses_averaged_within_distances=False)
+
+                observed_corr = "{:.3f}".format(pearsonr(x_values,y_values)[0])
+                permutation_p_value, permutation_plot, permutation_ax = self.perform_permutation_test(x_values, y_values, n_permutations=10000)
+                permutation_ax.set_title(f'Permutation Test for Subject {subject_id} \n r={observed_corr}, p={permutation_p_value}')
+
+                plot_folder = f"data_files/{self.lock_event}/visualizations/distance_drift/permutation_test/{fit_measure}"
+                plot_file = f"permutation_test_results_{subject_id}.png"
+                self.save_plot_as_file(plt=permutation_plot, plot_folder=plot_folder, plot_file=plot_file)
 
                 # Add subject data to distance/drift data for all subjects combined
                 for distance in fit_measures_by_distances_subject:
