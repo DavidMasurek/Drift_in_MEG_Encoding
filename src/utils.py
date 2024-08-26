@@ -2982,7 +2982,57 @@ class VisualizationHelper(GLMHelper):
                     filtered_epoch_meg = meg_norm_sensor[plot_epochs, :]
                     """ 
 
-                 
+
+    def visualize_meg_means_stds(self, normalization:str):
+        """
+        Visualizes mean (and if selected std) of meg data for 3 exemplary timepoints comparing all sessions, as requested by Carmen.
+        """
+        # Collect means and stds of sessions
+        mean_and_std_dict_by_timepoints = self.recursive_defaultdict()
+        for session_id in self.session_ids_num:
+            # Get session meg data (train and test split combined)
+            session_meg_data = []
+            for split in ["train", "test"]:
+                split_path = f"data_files/{self.lock_event}/meg_data/norm_{normalization}/subject_{self.subject_id}/session_{session_id}/{split}/meg_data.npy"  
+                split_data = np.load(split_path)
+                session_meg_data.extend(split_data)
+            session_meg_data = np.array(session_meg_data)
+
+            # Select exemplary timepoints and store their mean and std
+            n_timepoints = session_meg_data.shape[2]  # epochs, sensors, timepoints
+            selected_timepoint_idx = [timepoint_idx for timepoint_idx in range(0, n_timepoints, int(n_timepoints/4))]  # choose  timepoints: in beginning, middle and end
+            
+            for timepoint_idx in selected_timepoint_idx:
+                timepoint_mean = np.mean(session_meg_data[:,:,timepoint_idx])
+                timepoint_std = np.std(session_meg_data[:,:,timepoint_idx])
+
+                if session_id == "1":
+                    mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["means"] = [timepoint_mean]
+                    mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["stds"] = [timepoint_std]
+                else:
+                    mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["means"].append(timepoint_mean)
+                    mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["stds"].append(timepoint_std)
+                
+        # Plot means and stds
+        for plot_type in ["means", "stds"]:
+            measure_name = "Mean Value" if plot_type == "means" else "Standard Deviation Value"
+            timepoints_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in mean_and_std_dict_by_timepoints["timepoint"].keys()]
+            plt.figure(figsize=(10, 6))
+            for timepoint_number, timepoint_idx in enumerate(mean_and_std_dict_by_timepoints["timepoint"]):
+                sessions_list = [session_id for session_id in self.session_ids_num]
+                plt.plot(sessions_list, mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx][plot_type], label=f'{timepoints_ms[timepoint_number]} ms')
+
+            plt.xlabel('Session')
+            plt.ylabel(measure_name)
+            plt.title(f'{measure_name} for each Session. \n Subject: {self.subject_id}, Norm: {normalization}')
+            plt.legend(title="Timepoints (ms)")  
+
+            # Save plot
+            plot_folder = f"data_files/{self.lock_event}/visualizations/meg_data/session_comparison/{plot_type}/subject_{self.subject_id}/{normalization}/"
+            plot_file = f"Session_Comparison_{measure_name}.png"
+            self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+
+    
 
 class DebuggingHelper(VisualizationHelper):
     def __init__(self, norms:list, subject_id: str = "02"):

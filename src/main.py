@@ -66,8 +66,8 @@ extract_features = False
 perform_pca = False
 train_GLM = False
 generate_predictions_with_GLM = False
-visualization = False
-plot_distance_drift_all_subjects = True
+visualization = True
+plot_distance_drift_all_subjects = False
 
 z_score_features_before_pca = True
 use_pca_features = True
@@ -221,7 +221,7 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
-            visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
+            ####visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="pearson_r_timepoint", by_timepoints=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
@@ -235,6 +235,9 @@ for run in range(run_pipeline_n_times):
 
             # Visualize model perspective (values by timepoint)
             ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"
+
+            # Visualize session means and stds
+            visualization_helper.visualize_meg_means_stds(normalization="mean_centered_ch_then_global_robust_scaling")
 
             logger.custom_info("Visualization completed. \n \n")
 
