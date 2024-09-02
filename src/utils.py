@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import cv2
 import h5py
 import pickle
 import pandas as pd
@@ -58,7 +59,7 @@ class BasicOperationsHelper:
         self.all_ms_values = np.linspace(min_ms, max_ms, num=651)  # space containing the ms values for all 651 timepoints
         #logger.custom_debug(f"all_ms_values linspace: {self.all_ms_values}")
 
-
+       
     def perform_permutation_test(self, x_array, y_array, n_permutations=1000):
         def correlation_statistic(x,y):
             return pearsonr(x,y)[0]
@@ -570,7 +571,16 @@ class MetadataHelper(BasicOperationsHelper):
         self.crop_size = crop_size
         self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{crop_size}/metadata/as{self.subject_id}_crops_metadata.csv"
         self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/erf/filter_0.2_200/ica"  # f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
-    
+
+
+    def extract_arousal_values(self):
+        """
+        Extracts arousal values for all sessions for the current subject. Awaiting response from Philipp detailing where this data can be found.
+        """
+        #crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{crop_size}/metadata/as{self.subject_id}_crops_metadata.csv"
+        pass
+
+
     def create_combined_metadata_dict(self, investigate_missing_metadata=False) -> None:
         """
         Creates the combined metadata dict with timepoints that can be found in both meg and crop metadata for the respective session and trial.
@@ -742,12 +752,169 @@ class DatasetHelper(MetadataHelper):
         self.timepoint_min = timepoint_min
         self.timepoint_max = timepoint_max
 
+        self.crop_folder_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{self.crop_size}/crops/as{self.subject_id}"
+        self.coco_scenes_path = "/share/klab/psulewski/psulewski/active-visual-semantics/input/mscoco_scenes"
+
+    
+    def aggregate_test_splits_into_semantic_clusters(self):
+        """
+        DEPRECATED:
+        Creates a dict where for the test split of each session, the crops are within their semantic cluster group
+        60 Clusters: 0 to 59
+        """
+        combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
+        semantic_clusters_path = "/share/klab/datasets/avs/input/scene_sampling_MEG/scenes-per-sub-active-visual-semantics-MEG.csv"
+        semantic_clusters_df = pd.read_csv(semantic_clusters_path, delimiter='|', on_bad_lines='warn')
+
+        def extract_cluster_from_scene_id(scene_id:float):
+            df_scene_id_idx = semantic_clusters_df.index[semantic_clusters_df['cocoID'] == int(scene_id)].tolist()[0]  # Takes one df index out of all occurances of the scene_id in the dataset, based on which corresponding cluster and other info can be extracted 
+            cluster_id = semantic_clusters_df['cluster'][df_scene_id_idx]  # int between 0 and 59
+
+            return cluster_id
+
+        test_split_crops_by_session_by_cluster = self.recursive_defaultdict()
+        for session_id in self.session_ids_num:
+            trials_test_split_dict = self.load_split_data_from_file(session_id_num=session_id, type_of_content="trial_splits")['test']
+            for nr_trial, trial_id in enumerate(trials_test_split_dict):
+                for timepoint_nr, (timepoint_id, timepoint_dict) in enumerate(combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"].items()):
+                    if timepoint_nr == 0:
+                        # Once per trial: Extract corresponding scene id and semantic cluster. Create key for cluster in session dict if not existent already
+                        scene_id_trial = timepoint_dict["sceneID"]  
+                        cluster_id_trial = extract_cluster_from_scene_id(scene_id_trial)
+                        if cluster_id_trial not in test_split_crops_by_session_by_cluster["session"][session_id]["cluster"]:
+                            test_split_crops_by_session_by_cluster["session"][session_id]["cluster"][cluster_id_trial] = []
+                    # Store crop identifier in correct cluster
+                    test_split_crops_by_session_by_cluster["session"][session_id]["cluster"][cluster_id_trial].append(timepoint_dict["crop_identifier"])
+
+        # Check if I have at least 5 images for each semantic cluster in each sessions test split
+        #for session_id, session_dict in test_split_crops_by_session_by_cluster["session"].items():
+        #    for cluster_id, crop_id_list in session_dict["cluster"].items():
+        #        if len(crop_id_list) < 5:
+        #            print(f"Sesssion {session_id}, Cluster {cluster_id} contains only {len(crop_id_list)} images.")
+        # No I do not, minimum is 1. May want to redo the splits with the clusters in mind, for the moment use 1 image from each cluster per session -> 600 images
+
+        # Collect even distribution of images over clusters and session. The (10) images in each cluster will be ordered by session
+        simulation_crops_by_cluster = self.recursive_defaultdict()  
+        for session_id, session_dict in test_split_crops_by_session_by_cluster["session"].items():
+            for cluster_id, crop_id_list in session_dict["cluster"].items():
+                # Select random element from this session and cluster
+                selected_crop_id = np.random.choice(crop_id_list)
+                if cluster_id not in simulation_crops_by_cluster["cluster"]:
+                    simulation_crops_by_cluster["cluster"][cluster_id] = []
+
+                if cluster_id == 40:
+                    print(f"selected_crop_id: {selected_crop_id}")
+
+                # Retrieve and store image (potentially replace with complete image instead of crop)
+                crop_filename = ''.join([selected_crop_id, ".png"])
+                crop_path = os.path.join(self.crop_folder_path, crop_filename)
+                crop = imageio.imread(crop_path)
+
+                simulation_crops_by_cluster["cluster"][cluster_id].append(crop)
+            
+        print(f"len(list(simulation_crops_by_cluster['cluster'].keys())): {len(list(simulation_crops_by_cluster['cluster'].keys()))}")
+                    
+        for cluster_id, cluster_arr in simulation_crops_by_cluster["cluster"].items():
+            assert len(cluster_arr) == 10, f"Wrong length for cluster {cluster_id}. Len: {len(cluster_arr)}"
+
+        ### Not all test splits of all session contain atleast one crop belonging to each cluster! Deprecated until splits adjusted (if crops deemed sensible for simulation of MEG responses) ###
+        sys.exit("Completed aggregate_test_splits_into_semantic_clusters.")
+
+
+    def create_simulation_crop_dataset(self):
+        """
+        Chooses 50 scenes from each cluster that are not contained in any sessions train set.
+        """
+        combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
+        semantic_clusters_path = "/share/klab/datasets/avs/input/scene_sampling_MEG/scenes-per-sub-active-visual-semantics-MEG.csv"
+        semantic_clusters_df = pd.read_csv(semantic_clusters_path, delimiter='|', on_bad_lines='warn')
+
+        def extract_cluster_from_scene_id(scene_id:float):
+            df_scene_id_idx = semantic_clusters_df.index[semantic_clusters_df['cocoID'] == int(scene_id)].tolist()[0]  # Takes one df index out of all occurances of the scene_id in the dataset, based on which corresponding cluster and other info can be extracted 
+            cluster_id = semantic_clusters_df['cluster'][df_scene_id_idx]  # int between 0 and 59
+
+            return cluster_id
+
+        def collect_scene_ids_by_cluster():
+            test_split_scene_ids_by_cluster = self.recursive_defaultdict()
+            for session_id in self.session_ids_num:
+                trials_test_split_dict = self.load_split_data_from_file(session_id_num=session_id, type_of_content="trial_splits")['test']
+                for nr_trial, trial_id in enumerate(trials_test_split_dict):
+                    # We don't care about the timepoints since the scene_id is the same for all. Select the first timepoint
+                    first_timepoint = next(iter(combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]))
+                    scene_id_trial = str(int(combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][first_timepoint]["sceneID"])) # convert xxxx.x to "xxxx"
+                    cluster_id_trial = extract_cluster_from_scene_id(scene_id_trial)
+                    if cluster_id_trial not in test_split_scene_ids_by_cluster["cluster"]:
+                        test_split_scene_ids_by_cluster["cluster"][cluster_id_trial] = []
+                    # Select 10 scenes for each cluster total
+                    elif len(test_split_scene_ids_by_cluster["cluster"][cluster_id_trial]) < 5:
+                        test_split_scene_ids_by_cluster["cluster"][cluster_id_trial].append(scene_id_trial)
+                
+                # Stop as soon as we have 5 scenes for each cluster
+                full_clusters = 0
+                for cluster_id, cluster_arr in test_split_scene_ids_by_cluster["cluster"].items():
+                    if len(cluster_arr) == 5:
+                        full_clusters += 1
+                
+                if full_clusters == 60:
+                    return test_split_scene_ids_by_cluster
+            return test_split_scene_ids_by_cluster
+
+        test_split_scene_ids_by_cluster = collect_scene_ids_by_cluster()
+
+        for cluster_id, cluster_arr in test_split_scene_ids_by_cluster["cluster"].items():
+            assert len(cluster_arr) == 5, f"Cluster {cluster_id} has contains {len(cluster_arr)} scenes."
+
+        def extract_scene_image_from_coco_folder(scene_id_jpg_name:str):
+            """
+            Returns array of image if scene exists in any of the split folders. Throws error otherwise.
+            """
+            for split_folder in ["train2017", "test2017", "val2017"]:
+                split_path = os.path.join(self.coco_scenes_path, split_folder)
+                potential_image_path = os.path.join(split_path, scene_id_jpg_name)
+                if os.path.isfile(potential_image_path):
+                    scene_array = imageio.imread(potential_image_path)
+                    return scene_array
+            raise ValueError(f"Could not find {scene_id_jpg_name}")
+
+        # Sort dict by clusters, 0 to 59
+        sorted_test_split_scene_ids_by_cluster = {"cluster": dict(sorted(test_split_scene_ids_by_cluster["cluster"].items(), key=lambda item: int(item[0])))}
+
+        # Collect coco images from jpg
+        numpy_images_by_cluster = []
+        for cluster_id, cluster_arr in sorted_test_split_scene_ids_by_cluster["cluster"].items():
+            scenes_in_cluster = []
+            for scene_id in cluster_arr:
+                # Pad scene id with 0s to fit jpg names. Examples: 000000000139.jpg, 000000023392.jpg
+                scene_id_jpg_name = "".join([scene_id.zfill(12), ".jpg"])
+                # Extract array from coco folder
+                scene_array = extract_scene_image_from_coco_folder(scene_id_jpg_name)
+                # Resize; coco images don't have uniform shape by default. Alexnet originally designed for 224x224
+                scene_array_resized = cv2.resize(scene_array, (224, 224), interpolation=cv2.INTER_LINEAR)
+
+                scenes_in_cluster.append(scene_array_resized)
+            if len(scenes_in_cluster) != 5:
+                raise ValueError(f"cluster_id has {len(scenes_in_cluster)} scenes")
+            numpy_images_by_cluster.append(np.array(scenes_in_cluster))
+        numpy_images_by_cluster = np.array(numpy_images_by_cluster)
+
+        #print(f"numpy_images_by_cluster.shape: {numpy_images_by_cluster.shape}")  # (60, 5, 224, 224, 3)
+        
+        # Store simulation dataset
+        save_folder = f"data_files/{self.lock_event}/simulation_scenes/subject_{self.subject_id}"  
+        save_file = f"simulation_scenes_by_clusters.npy"
+        os.makedirs(save_folder, exist_ok=True)
+        save_path = os.path.join(save_folder, save_file)
+        np.save(save_path, numpy_images_by_cluster)
+
+        sys.exit("Completed create_simulation_crop_dataset.")
+
+
     def create_crop_dataset(self, debugging=False) -> None:
         """
         Creates the crop dataset with all crops in the combined_metadata (crops for which meg data exists)
         """
         combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
-        crop_folder_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{self.crop_size}/crops/as{self.subject_id}"
 
         datapoints_by_session_and_split = {"sessions": {}}
         # For each session: create crop datasets based on respective splits
@@ -770,7 +937,7 @@ class DatasetHelper(MetadataHelper):
                     # Get timepoints and corresponding crops from combined_metadata
                     for timepoint_id in combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
                         crop_filename = ''.join([combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["crop_identifier"], ".png"])
-                        crop_path = os.path.join(crop_folder_path, crop_filename)
+                        crop_path = os.path.join(self.crop_folder_path, crop_filename)
 
                         crop = imageio.imread(crop_path)
                         crop_split[split].append(crop)
@@ -855,7 +1022,7 @@ class DatasetHelper(MetadataHelper):
                         meg_data[sensor_type] = meg_data[sensor_type][:,channel_indices,:]
                     else:
                         del meg_data[sensor_type]
-                if not selected_channel_indices["grad"] and not selected_channel_indices["mag"]:
+                if "grad" not in selected_channel_indices and "mag" not in selected_channel_indices:
                     raise ValueError("Neither mag or grad channels selected.")
 
                 # Filter considered meg data based relevant timepoints
@@ -864,7 +1031,13 @@ class DatasetHelper(MetadataHelper):
 
                 # Create datasets based on specified normalizations
                 for normalization in self.normalizations:
-                    normalization_stage = normalization if normalization != "mean_centered_ch_then_global_robust_scaling" else "mean_centered_ch"
+                    # Set normalization that is to be performed per session; some normalizations require additional global computations across all sessions
+                    if normalization == "mean_centered_ch_then_global_robust_scaling":
+                        normalization_stage = "mean_centered_ch"
+                    elif normalization == "global_robust_scaling":
+                        normalization_stage = "no_norm"
+                    else:
+                        normalization_stage = normalization
                     # Debugging
                     if session_id_num == "1":
                         for sensor_type in selected_channel_indices:
@@ -951,15 +1124,17 @@ class DatasetHelper(MetadataHelper):
         logger.custom_debug(f"meg_timepoints_in_dataset after per-session normalization: {n_epochs_two_step_norm}")
         logger.custom_debug(f"combined train+test: {n_epochs_two_step_norm['train'] + n_epochs_two_step_norm['test']}")
 
-        if "mean_centered_ch_then_global_robust_scaling" in self.normalizations:
+        def apply_global_robust_scaling_across_all_sessions(current_norm:str):
+            assert current_norm in ["mean_centered_ch_then_global_robust_scaling", "global_robust_scaling"], "Function currently limited to the two normalization methods."
             #n_grad = len(selected_channel_indices["grad"])  # Needed when seperating sensor types
             #n_mag = len(selected_channel_indices["mag"])  # Needed when seperating sensor types
             # Load data for all sessions with mean_centering_ch already applied
             meg_mean_centered_all_sessions = None
             metadata_by_session = self.recursive_defaultdict()
             for session_id_num in self.session_ids_num:
-                # Get mean centered data for session
-                meg_data_session = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm="mean_centered_ch")
+                # Get data after per-session normalization steps (may no normalization if only global normalization is performed)
+                previous_norm_step = "mean_centered_ch" if current_norm == "mean_centered_ch_then_global_robust_scaling" else "no_norm"
+                meg_data_session = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=previous_norm_step)
                 # Combine train and test
                 # Store num of epochs for later concatenation
                 metadata_by_session["session_id_num"][session_id_num]["n_train_epochs"] = np.shape(meg_data_session["train"])[0] 
@@ -980,7 +1155,7 @@ class DatasetHelper(MetadataHelper):
                 meg_mean_centered_all_sessions = meg_data_session if meg_mean_centered_all_sessions is None else np.concatenate((meg_mean_centered_all_sessions, meg_data_session))
 
             # Apply robust scaling across complete dataset (all sessions)
-            meg_data_normalized = self.normalize_array(meg_mean_centered_all_sessions, normalization="z_score") # "robust_scaling"
+            meg_data_normalized = self.normalize_array(meg_mean_centered_all_sessions, normalization="robust_scaling") # "robust_scaling, z_score"
 
             if clip_outliers: # 0.3 and 99.7 percentile is equal to 3 standard deviations
                 # Get indices from z-scored robust scaled data
@@ -1069,13 +1244,19 @@ class DatasetHelper(MetadataHelper):
                 self.export_split_data_as_file(session_id=session_id, 
                                                 type_of_content="meg_data",
                                                 array_dict=meg_data_normalized_by_session[session_id],
-                                                type_of_norm="mean_centered_ch_then_global_robust_scaling")
+                                                type_of_norm=current_norm)
 
                 epoch_start_index = end_test_index
-          
+        
                 # TODO: Combine grad and mag if both selected
             
             logger.custom_debug(f"end_test_index: {end_test_index}")
+           
+        for global_robust_scaling_norm in ["mean_centered_ch_then_global_robust_scaling", "global_robust_scaling"]:
+            if global_robust_scaling_norm in self.normalizations:
+                apply_global_robust_scaling_across_all_sessions(current_norm=global_robust_scaling_norm)
+
+            
         
 
     def create_train_test_split(self, debugging=False):

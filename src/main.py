@@ -17,7 +17,7 @@ sys.path.append(str(__location__))
 os.chdir(__location__)
 
 # Choose params
-subject_ids = ["01", "02", "03", "04", "05"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
+subject_ids = ["02"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
 lock_event = "saccade" # "saccade" "fixation"
 
 crop_size = 112  # 224 112
@@ -42,16 +42,17 @@ best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 999, "timepo
 timepoint_min = 0  # fixation: 170, saccade: 275
 timepoint_max = 650  # fixation: 250, saccade: 375
 
-normalizations = ["mean_centered_ch_then_global_robust_scaling"]  # , "no_norm", "mean_centered_ch_t", "robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
+normalizations = ["global_robust_scaling"]  #  ["mean_centered_ch_then_global_robust_scaling"] # , "no_norm", "mean_centered_ch_t", "robust_scaling", "global_robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
 
 fractional_grid = np.array([fraction/100 for fraction in range(1, 100, 3)]) # range from 0.01 to 1 in steps or 0.03
 alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
 
-omit_sessions_by_subject = {"01": ["1", "7", "8"],  # ["1"]
-                            "02": [],  # ["4"]  
-                            "03": ["1", "2", "5", "7", "10"],  # 
-                            "04": ["6"],  # []
-                            "05": ["4", "7", "9"], # ["9"]
+                                                    # originally discarded sessions # newest with mean_centered_ch_then_global_robust_scaling # no_norm
+omit_sessions_by_subject = {"01": ["1", "7"],  # ["1"] # ["1", "7", "8"] # ["1", "7"] (6 and 8 are close)
+                            "02": ["4"],  # ["4"]  # [] # []
+                            "03": ["1", "2", "5", "7", "10"],  # ["1", "2", "5", "7", "10"] # ["1", "2", "5", "7", "10"]
+                            "04": ["6"],  # [] # ["6"] # ["6"]
+                            "05": ["4", "7", "9"], # ["9"] # ["4", "7", "9"] # ["4", "7", "9"]
                             }
 
 logger_level = 25
@@ -82,8 +83,8 @@ fractional_ridge = False
 
 fit_measure_storage_distinction = "session_level"
 
+time_window_n_indices = 5
 subtract_self_pred = False
-time_window_n_indices = 10
 all_windows_one_plot = True
 omit_non_generalizing_sessions = True
 
@@ -92,8 +93,8 @@ if use_all_mag_sensors:
     sample_evoked = mne.read_evokeds('/share/klab/datasets/avs/population_codes/as02/sensor/filter_0.2_200/saccade_evoked_02_01_.fif')[0]
     mag_channels = [str(sensor_name[3:]) for sensor_name, sensor_type in zip(sample_evoked.info['ch_names'], sample_evoked.get_channel_types()) if sensor_type == "mag"]
 else:
+    mag_channels = ["0121", "0541", "0811", "0931", "1411"]  # selected occipital sensors: ["1731", "1921", "2111", "2341", "2511"] selected frontal sensors: ["0121", "0541", "0811", "0931", "1411"] 
     # Mag 'rows' bottom to top
-    mag_channels = ["1731", "1921", "2111", "2341", "2511"]  # selected occipital sensors: ["1731", "1921", "2111", "2341", "2511"] ["2341"]
     #mag_channels += ["1711", "1931", "2331", "2531", "2121", "1741", "2541", "2141", "2131"]
     #mag_channels += ["1531", "1721", "1941", "2041", "2031", "2321", "2521", "2631"]
     #mag_channels += ["1911", "2311", "1641", "2431", "2011", "2021", "1631", "2241"]
@@ -227,8 +228,7 @@ for run in range(run_pipeline_n_times):
 
             # Visuzalize distance based predictions at timepoint scale
             ##visualization_helper.three_dim_timepoint_predictions(subtract_self_pred=subtract_self_pred) 
-            ####visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=True, include_0_distance=True)  
-            ####visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=True, include_0_distance=True)  
+            ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True)  
             
             # Visualize drift topographically with mne based on sensor level data 
             #visualization_helper.mne_topo_plot_per_sensor(data_type="drift", omitted_sessions=sessions_to_omit, all_timepoints_combined=False)  # data_type="self-pred" or "drift"
@@ -237,7 +237,7 @@ for run in range(run_pipeline_n_times):
             ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"
 
             # Visualize session means and stds
-            visualization_helper.visualize_meg_means_stds(normalization="mean_centered_ch_then_global_robust_scaling")
+            #visualization_helper.visualize_meg_means_stds(normalization="mean_centered_ch_then_global_robust_scaling")
 
             logger.custom_info("Visualization completed. \n \n")
 
