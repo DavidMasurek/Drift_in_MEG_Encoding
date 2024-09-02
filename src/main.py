@@ -173,12 +173,12 @@ for run in range(run_pipeline_n_times):
 
             if extract_features:
                 # Extract ANN features of images
-                extraction_helper.extract_features()
+                extraction_helper.extract_features_from_all_crops()
                 logger.custom_info("Features extracted. \n \n")
 
             if perform_pca:
                 # Apply PCA, keeping ~60% of explained variance
-                extraction_helper.reduce_feature_dimensionality(z_score_features_before_pca=z_score_features_before_pca, all_sessions_combined=all_sessions_combined)
+                extraction_helper.reduce_feature_dimensionality_all_crops(z_score_features_before_pca=z_score_features_before_pca, all_sessions_combined=all_sessions_combined)
                 logger.custom_info("PCA applied to features. \n \n")
             
 

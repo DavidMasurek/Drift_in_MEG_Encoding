@@ -821,9 +821,9 @@ class DatasetHelper(MetadataHelper):
         sys.exit("Completed aggregate_test_splits_into_semantic_clusters.")
 
 
-    def create_simulation_crop_dataset(self):
+    def create_simulation_scene_dataset(self):
         """
-        Chooses 50 scenes from each cluster that are not contained in any sessions train set.
+        Chooses 5 scenes from each cluster that are not contained in any sessions train set.
         """
         combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
         semantic_clusters_path = "/share/klab/datasets/avs/input/scene_sampling_MEG/scenes-per-sub-active-visual-semantics-MEG.csv"
@@ -901,7 +901,7 @@ class DatasetHelper(MetadataHelper):
         #print(f"numpy_images_by_cluster.shape: {numpy_images_by_cluster.shape}")  # (60, 5, 224, 224, 3)
         
         # Store simulation dataset
-        save_folder = f"data_files/{self.lock_event}/simulation_scenes/subject_{self.subject_id}"  
+        save_folder = f"data_files/{self.lock_event}/simulation_scenes/scenes_numpy/subject_{self.subject_id}"  
         save_file = f"simulation_scenes_by_clusters.npy"
         os.makedirs(save_folder, exist_ok=True)
         save_path = os.path.join(save_folder, save_file)
@@ -1419,8 +1419,97 @@ class ExtractionHelper(BasicOperationsHelper):
         self.batch_size = batch_size
         self.pca_components = pca_components
 
-    
-    def extract_features(self):
+
+    def extract_features_simulation_scene_dataset(self):
+        """
+        Extracts features from the scenes selected for the generation of simulated responses.
+        """
+
+        # Load simulation scene dataset
+        simulation_scenes_folder = f"data_files/{self.lock_event}/simulation_scenes/scenes_numpy/subject_{self.subject_id}"  
+        simulation_scenes_file = f"simulation_scenes_by_clusters.npy"
+        simulation_scenes_path = os.path.join(simulation_scenes_folder, simulation_scenes_file)
+        simulation_scenes_arr = np.load(simulation_scenes_path)  # shape: (60, 5, 224, 224, 3)
+
+        # Load CNN model
+        model_name = f'{self.ann_model}_ecoset'
+        source = 'custom'
+        device = 'cuda'
+        extractor = get_extractor(
+            model_name=model_name,
+            source=source,
+            device=device,
+            pretrained=True
+        )
+
+        simulation_scenes_tensors = torch.tensor(simulation_scenes_arr, dtype=torch.float32)
+
+        # Transpose dimensions to match (clusters, scenes_per_cluster, channels, height, width) instead of (clusters, scenes_per_cluster, height, width, channels) as before
+        simulation_scenes_tensors = simulation_scenes_tensors.permute(0, 1, 4, 2, 3)
+        simulation_scenes_tensors_shape = simulation_scenes_tensors.shape  # (60, 5, 3, 224, 224)
+
+        # Extract features cluster-wise
+        simulation_scenes_features = []
+        for cluster_idx in range(simulation_scenes_tensors_shape[0]):
+            # Create a DataLoader to handle batching
+            cluster_input_tensors = DataLoader(simulation_scenes_tensors[cluster_idx], batch_size=self.batch_size, shuffle=False)
+
+            cluster_features = extractor.extract_features(
+                batches=cluster_input_tensors,
+                module_name=self.module_name,
+                flatten_acts=True  # flatten 2D feature maps from convolutional layer
+            )
+
+            simulation_scenes_features.append(cluster_features)
+        simulation_scenes_features = np.array(simulation_scenes_features)  # shape: (60, 5, 9216)
+
+        save_folder = f"data_files/{self.lock_event}/simulation_scenes/scenes_features/subject_{self.subject_id}"  
+        save_file = f"simulation_scenes_features_by_clusters.npy"
+        save_path = os.path.join(save_folder, save_file)
+        os.makedirs(save_folder, exist_ok=True)
+        np.save(save_path, simulation_scenes_features)
+
+        sys.exit("Done extract_features_simulation_scene_dataset.")
+
+
+    def reduce_feature_dimensionality_simulation_scene_dataset(self, z_score_features_before_pca:bool):
+        """
+        Reduces dimensionality of features extracted from the scenes selected for the generation of simulated responses.
+        """
+        # Load features of simulated scene dataset
+        simulation_features_folder = f"data_files/{self.lock_event}/simulation_scenes/scenes_features/subject_{self.subject_id}"  
+        simulation_features_file = f"simulation_scenes_features_by_clusters.npy"
+        simulation_features_path = os.path.join(simulation_features_folder, simulation_features_file)
+        simulation_features = np.load(simulation_features_path)  # shape: (60, 5, 9216)
+
+        n_clusters, n_scenes_per_cluster, n_cnn_dims = simulation_features.shape
+
+        # Fit PCA on and apply PCA to all features of all clusters combined (reevaluate method!)
+        simulation_features_clusters_combined = simulation_features.reshape(-1, simulation_features.shape[2])  # shape (60*clusters_per_image, ann_feature_dims)
+
+        if z_score_features_before_pca:
+            simulation_features_clusters_combined = self.normalize_array(data=simulation_features_clusters_combined, normalization="z_score")
+
+        pca = PCA(n_components=self.pca_components)
+        pca.fit(simulation_features_clusters_combined)
+        simulation_features_clusters_combined_reduced_dim = pca.transform(simulation_features_clusters_combined)
+
+        simulation_features_reduced_dim = simulation_features_clusters_combined_reduced_dim.reshape(n_clusters, n_scenes_per_cluster, self.pca_components)  # shape: (n_clusters, n_scenes_per_cluster, self.pca_components)
+
+        print(f"simulation_features_reduced_dim.shape: {simulation_features_reduced_dim.shape}")
+
+        # Store features with reduced dim
+        save_folder = f"data_files/{self.lock_event}/simulation_scenes/scenes_features_pca/subject_{self.subject_id}"  
+        save_file = f"simulation_scenes_features_pca_by_clusters.npy"
+        save_path = os.path.join(save_folder, save_file)
+        os.makedirs(save_folder, exist_ok=True)
+        np.save(save_path, simulation_features_reduced_dim) 
+
+
+        sys.exit("Done reduce_feature_dimensionality_simulation_scene_dataset.")
+
+
+    def extract_features_from_all_crops(self):
         """
         Extracts features from crop datasets over all sessions for a subject.
         """
@@ -1471,7 +1560,7 @@ class ExtractionHelper(BasicOperationsHelper):
             # Export numpy array to .npz
             self.export_split_data_as_file(session_id=session_id, type_of_content="ann_features", array_dict=features_split, ann_model=self.ann_model, module=self.module_name)
 
-    def reduce_feature_dimensionality(self, z_score_features_before_pca:bool = True, all_sessions_combined:bool = False):
+    def reduce_feature_dimensionality_all_crops(self, z_score_features_before_pca:bool = True, all_sessions_combined:bool = False):
         """
         Reduces dimensionality of extracted features using PCA. This seems to be necessary to avoid overfit in the ridge Regression.
         """
