@@ -1729,12 +1729,12 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
 
         
-    def predict_from_mapping(self, fit_measure_storage_distinction:str="session_level", predict_train_data:bool=False, all_sessions_combined:bool=False, shuffle_test_labels:bool=False, downscale_features:bool=False):
+    def predict_from_mapping_all_sessions(self, fit_measure_storage_distinction:str="session_level", predict_train_data:bool=False, all_sessions_combined:bool=False, shuffle_test_labels:bool=False, downscale_features:bool=False):
         """
         Based on the trained mapping for each session, predicts MEG data over all sessions from their respective test features.
         If predict_train_data is True, predicts the train data of each session as a sanity check of the complete pipeline. Expect strong overfit.
         """
-        assert fit_measure_storage_distinction in ["session_level", "timepoint_level", "timepoint_sensor_level"], "[predict_from_mapping] Invalid argument for parameter fit_measure_storage_distinction"
+        assert fit_measure_storage_distinction in ["session_level", "timepoint_level", "timepoint_sensor_level"], "[predict_from_mapping_all_sessions] Invalid argument for parameter fit_measure_storage_distinction"
 
         if not all_sessions_combined:
             for normalization in self.normalizations:
@@ -1766,8 +1766,8 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         else:
                             X_test, Y_test = ann_features['test'], meg_data['test']
 
-                        #logger.custom_debug(f"Predict_from_mapping: X_test.shape: {X_test.shape}")
-                        #logger.custom_debug(f"Predict_from_mapping: Y_test.shape: {Y_test.shape}")
+                        #logger.custom_debug(f"predict_from_mapping_all_sessions: X_test.shape: {X_test.shape}")
+                        #logger.custom_debug(f"predict_from_mapping_all_sessions: Y_test.shape: {Y_test.shape}")
 
                         if shuffle_test_labels:
                             np.random.shuffle(Y_test)
@@ -1902,8 +1902,8 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                 X_test, Y_test = ann_features_pred_combined, meg_data_pred_combined
 
-                logger.custom_debug(f"Predict_from_mapping: X_test.shape: {X_test.shape}")
-                logger.custom_debug(f"Predict_from_mapping: Y_test.shape: {Y_test.shape}")
+                logger.custom_debug(f"predict_from_mapping_all_sessions: X_test.shape: {X_test.shape}")
+                logger.custom_debug(f"predict_from_mapping_all_sessions: Y_test.shape: {Y_test.shape}")
 
                 if shuffle_test_labels:
                     np.random.shuffle(Y_test)
@@ -1934,6 +1934,43 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         logger.custom_debug(f"Storing dict {fit_measure} to {json_storage_path}")
                         # Serialize and save the dictionary to the file
                         json.dump(dict_to_store, file, indent=4)
+
+
+    def predict_from_mapping_simulation_scene_dataset(self):
+        """
+        Predicts MEG activity from PCA reduced features extracted from the scenes selected for the generation of simulated responses.
+        """
+        # Load features with reduced dim
+        scene_pca_features_folder = f"data_files/{self.lock_event}/simulation_scenes/scenes_features_pca/subject_{self.subject_id}"  
+        scene_pca_features_file = f"simulation_scenes_features_pca_by_clusters.npy"
+        scene_pca_features_path = os.path.join(scene_pca_features_folder, scene_pca_features_file)
+        scene_pca_features = np.load(scene_pca_features_path)  # shape: (n_clusters, n_scenes_per_cluster, self.pca_components)
+
+        # For each session (and each selected norm): Predict/simulate MEG responses for all features/scenes (and thus all clusters)
+        for normalization in self.normalizations:
+            for session_id in self.session_ids_num:
+                # Load and initialize ridge model
+                storage_folder = f"data_files/{self.lock_event}/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/session_{session_id}"  
+                storage_file = "GLM_models.pkl"
+                storage_path = os.path.join(storage_folder, storage_file)
+                with open(storage_path, 'rb') as file:
+                    ridge_models = pickle.load(file)
+
+                ridge_model = GLMHelper.MultiDimensionalRegression(self, models=ridge_models)
+
+                # Generate predictions for all clusters
+                predictions_all_clusters = []
+                for cluster_idx in range(scene_pca_features.shape[0]):
+                    predictions_cluster = ridge_model.predict(scene_pca_features[cluster_idx], downscale_features=False)
+                    predictions_all_clusters.append(predictions_cluster)
+                predictions_all_clusters = np.array(predictions_all_clusters)  # shape: (n_clusters, n_scenes_per_cluster, n_sensors, n_timepoints)
+
+                # Store simulated responses
+                save_folder = f"data_files/{self.lock_event}/simulation_scenes/simulated_meg_responses/subject_{self.subject_id}/{normalization}"  
+                save_file = f"session_{session_id}_simulated_meg_responses_by_clusters.npy"
+                save_path = os.path.join(save_folder, save_file)
+                os.makedirs(save_folder, exist_ok=True)
+                np.save(save_path, predictions_all_clusters)  
 
 
     class MultiDimensionalRegression:
@@ -2021,6 +2058,81 @@ class VisualizationHelper(GLMHelper):
         self.time_window_n_indices = time_window_n_indices
         self.n_grad = n_grad
         self.n_mag = n_mag
+
+        self.calculate_and_visualize_RSMs_simulated_responses()
+
+
+    def calculate_and_visualize_RSMs_simulated_responses(self):
+        """
+        Calculates response simlarity matrices for the simulated responses for the 60 semantic clusters; for each session.
+        """
+        for normalization in self.normalizations:
+            session_1_upper_tri_rsm = None
+            rsm_corrs_with_session_1 = []  # Placeholder to store correlation of RSM matrices of other sessions with RSM matrix of session 1
+
+            for session_id in self.session_ids_num:
+                # Load simulated responses of session's model
+                simulated_responses_folder = f"data_files/{self.lock_event}/simulation_scenes/simulated_meg_responses/subject_{self.subject_id}/{normalization}"  
+                simulated_responses_file = f"session_{session_id}_simulated_meg_responses_by_clusters.npy"
+                simulated_responses_path = os.path.join(simulated_responses_folder, simulated_responses_file)
+                simulated_responses = np.load(simulated_responses_path)  # shape: (n_clusters, n_scenes_per_cluster, n_sensors, n_timepoints) f.e. (60, 5, 5, 31)
+
+                # Correlate the simulated responses for all clusters
+                n_clusters, _, n_sensors, n_timepoints = simulated_responses.shape
+                rsm_matrix_session = np.zeros(shape=(n_clusters, n_clusters))
+                for cluster1_idx in range(n_clusters):
+                    for cluster2_idx in range(cluster1_idx, n_clusters):
+                        # ! Flattening is only valid without consideration for correlation, not variance explained etc. !
+                        cluster_corr = pearsonr(simulated_responses[cluster1_idx].flatten(),simulated_responses[cluster2_idx].flatten())[0]
+                        rsm_matrix_session[cluster1_idx][cluster2_idx] = cluster_corr
+
+                        if cluster1_idx != cluster2_idx:  # Fill in lower triangular part of matrix
+                            rsm_matrix_session[cluster2_idx, cluster1_idx] = cluster_corr
+
+                # Extract upper triangular part for correlation between sessions (exluding doubled values and diagonal)
+                upper_tri_rsm_session = rsm_matrix_session[np.triu_indices_from(rsm_matrix_session, k=1)]
+
+                if session_id == "1":
+                    session_1_upper_tri_rsm = upper_tri_rsm_session
+                else:
+                    rsm_corr_with_session_1 = pearsonr(session_1_upper_tri_rsm, upper_tri_rsm_session)[0]
+                    rsm_corrs_with_session_1.append(rsm_corr_with_session_1)
+
+                # Store RSM
+                save_folder = f"data_files/{self.lock_event}/simulation_scenes/RSMs/subject_{self.subject_id}/{normalization}"  
+                save_file = f"session_{session_id}_RSM.npy"
+                save_path = os.path.join(save_folder, save_file)
+                os.makedirs(save_folder, exist_ok=True)
+                np.save(save_path, rsm_matrix_session)  # shape: (n_clusters, n_clusters)
+
+                # Visualize RSM
+                plt.figure(figsize=(10, 8))
+                plt.imshow(rsm_matrix_session, cmap='viridis', aspect='auto')
+                plt.colorbar(label='Pearson Correlation')
+                plt.title(f'RSM for Subject {self.subject_id}, Session {session_id}')
+                plt.xlabel('Cluster Index')
+                plt.ylabel('Cluster Index')
+
+                save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/RSMs/subject_{self.subject_id}/{normalization}"  
+                save_file = f"session_{session_id}_RSM.png"
+                self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
+
+            # Plot correlations of session RSMs with RSM of session 1
+            plt.figure(figsize=(8, 6))
+            x_values = np.arange(2, 11) # Sessions 1-10 will be correlated with session 1
+            plt.plot(x_values, rsm_corrs_with_session_1, marker='o', linestyle='-')
+            plt.title('Correlations of (upper triangular) RSMs of Sessions 2-19 with RSM of Session 1.')
+            plt.xlabel('Comparison Session')
+            plt.ylabel('Pearson Correlation')
+            plt.xticks(x_values) 
+            plt.grid(True)
+
+            save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/RSM_between_session_corrs/subject_{self.subject_id}/{normalization}"  
+            save_file = f"Between_session_RSM_corrs.png"
+            self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
+
+        sys.exit("Done calculate_RSMs_simulated_responses.")
+    
 
 
     def calc_drift_corr_with_fit_measures_by_distances(self, fit_measures_by_distances:dict):
@@ -2273,7 +2385,7 @@ class VisualizationHelper(GLMHelper):
 
     def visualize_GLM_results(self, fit_measure_type:str, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True, average_distance_vals:bool = False):
         """
-        Visualizes results from GLMHelper.predict_from_mapping
+        Visualizes results from GLMHelper.predict_from_mapping_all_sessions
         """
         session_day_differences = self.get_session_date_differences()
 
