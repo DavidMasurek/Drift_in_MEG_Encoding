@@ -17,7 +17,11 @@ sys.path.append(str(__location__))
 os.chdir(__location__)
 
 # Choose params
-subject_ids = ["02"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
+subject_ids = ["01", "02", "03", "04", "05"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
+# Subject 03 only contains 3 scenes for cluster 46 in all sessions test sets
+# Subject 05 only contains 4 scenes for cluster 28 in all sessions test sets
+# --> Switched to 3 scenes per cluster for subject 03 and 05
+
 lock_event = "saccade" # "saccade" "fixation"
 
 crop_size = 112  # 224 112
@@ -42,7 +46,7 @@ best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 999, "timepo
 timepoint_min = 0  # fixation: 170, saccade: 275
 timepoint_max = 650  # fixation: 250, saccade: 375
 
-normalizations = ["global_robust_scaling"]  #  ["mean_centered_ch_then_global_robust_scaling"] # , "no_norm", "mean_centered_ch_t", "robust_scaling", "global_robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
+normalizations = ["global_robust_scaling", "mean_centered_ch_then_global_robust_scaling"]  #  ["mean_centered_ch_then_global_robust_scaling"] # , "no_norm", "mean_centered_ch_t", "robust_scaling", "global_robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
 
 fractional_grid = np.array([fraction/100 for fraction in range(1, 100, 3)]) # range from 0.01 to 1 in steps or 0.03
 alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
@@ -64,11 +68,12 @@ create_train_test_split = False  # Careful! Everytime this is set to true, all s
 create_crop_datset_numpy = False
 create_meg_dataset = False
 extract_features = False
-perform_pca = False
-train_GLM = False
-generate_predictions_with_GLM = False
+perform_pca = True
+train_GLM = True
+generate_predictions_with_GLM = True
 visualization = True
-plot_distance_drift_all_subjects = False
+plot_distance_drift_all_subjects = True
+simulate_scene_responses = True
 
 z_score_features_before_pca = True
 use_pca_features = True
@@ -88,12 +93,14 @@ subtract_self_pred = False
 all_windows_one_plot = True
 omit_non_generalizing_sessions = True
 
+n_scenes_per_cluster = 3
+
 if use_all_mag_sensors:
     # Load all available mag_channels from evoked file
     sample_evoked = mne.read_evokeds('/share/klab/datasets/avs/population_codes/as02/sensor/filter_0.2_200/saccade_evoked_02_01_.fif')[0]
     mag_channels = [str(sensor_name[3:]) for sensor_name, sensor_type in zip(sample_evoked.info['ch_names'], sample_evoked.get_channel_types()) if sensor_type == "mag"]
 else:
-    mag_channels = ["0121", "0541", "0811", "0931", "1411"]  # selected occipital sensors: ["1731", "1921", "2111", "2341", "2511"] selected frontal sensors: ["0121", "0541", "0811", "0931", "1411"] 
+    mag_channels = ["1731", "1921", "2111", "2341", "2511"]  # selected occipital sensors: ["1731", "1921", "2111", "2341", "2511"] selected frontal sensors: ["0121", "0541", "0811", "0931", "1411"] 
     # Mag 'rows' bottom to top
     #mag_channels += ["1711", "1931", "2331", "2531", "2121", "1741", "2541", "2141", "2131"]
     #mag_channels += ["1531", "1721", "1941", "2041", "2031", "2321", "2521", "2631"]
@@ -222,13 +229,13 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
-            ####visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
+            visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="pearson_r_timepoint", by_timepoints=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
             # Visuzalize distance based predictions at timepoint scale
             ##visualization_helper.three_dim_timepoint_predictions(subtract_self_pred=subtract_self_pred) 
-            ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True)  
+            visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True)  
             
             # Visualize drift topographically with mne based on sensor level data 
             #visualization_helper.mne_topo_plot_per_sensor(data_type="drift", omitted_sessions=sessions_to_omit, all_timepoints_combined=False)  # data_type="self-pred" or "drift"
@@ -240,6 +247,33 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_meg_means_stds(normalization="mean_centered_ch_then_global_robust_scaling")
 
             logger.custom_info("Visualization completed. \n \n")
+
+        # Simulate reponses to scenes; calculate and visualize cluster RSMs
+        # TODO: fit into class hierarchy above instead?
+        if simulate_scene_responses:
+            dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations, chosen_channels=meg_channels, lock_event=lock_event, timepoint_min=timepoint_min, timepoint_max=timepoint_max, crop_size=crop_size)
+            extraction_helper = ExtractionHelper(subject_id=subject_id, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, lock_event=lock_event)
+            glm_helper = GLMHelper(fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, lock_event=lock_event, ann_model=ann_model, module_name=module_name, batch_size=batch_size, crop_size=crop_size)
+            visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
+
+            # Collect scenes from session test splits, evenly distributed between clusters
+            dataset_helper.create_simulation_scene_dataset(n_scenes_per_cluster=n_scenes_per_cluster)
+
+            # Extract CNN features for selected scenes
+            extraction_helper.extract_features_simulation_scene_dataset()
+
+            # Apply PCA
+            extraction_helper.reduce_feature_dimensionality_simulation_scene_dataset(z_score_features_before_pca=z_score_features_before_pca)
+
+            # Generate predictions for all clusters with each session's model
+            glm_helper.predict_from_mapping_simulation_scene_dataset()
+
+            # Calculate and visualize cluster geometry RSMs and their distance correlation plot
+            visualization_helper.calculate_and_visualize_cluster_geometry_RSMs_simulated_responses(omit_sessions_from_corr=sessions_to_omit)
+
+            # Calculate and session similarity RSMs for each cluster, their average and their distance correlation plot
+            visualization_helper.calculate_and_visualize_between_sessions_RSMs_simulated_responses(omit_sessions_from_corr=sessions_to_omit)
+
 
 if plot_distance_drift_all_subjects:
     global_visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)

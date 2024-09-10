@@ -756,7 +756,27 @@ class DatasetHelper(MetadataHelper):
         self.crop_folder_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{self.crop_size}/crops/as{self.subject_id}"
         self.coco_scenes_path = "/share/klab/psulewski/psulewski/active-visual-semantics/input/mscoco_scenes"
 
-    
+
+    def test_scene_repetition(self):
+        """
+        Tests if any scene is repeated in multiple trials for the subject over all sessions.
+        """
+        combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
+        all_scenes_n = self.recursive_defaultdict()  # Count occurances of all scenes over all sessions
+        for session_id in combined_metadata["sessions"]:
+            for trial_id in combined_metadata["sessions"][session_id]["trials"]:
+                # Get sceneID of trial based on first timepoint
+                first_timepoint = list(combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"].keys())[0]
+                scene_id = combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][first_timepoint]["sceneID"]
+                # Add count for scene id
+                if scene_id not in all_scenes_n.keys():
+                    all_scenes_n[scene_id] = 1
+                else:
+                    print(f"[Subject {self.subject_id}]: Scene {scene_id} occurs more than once!")
+                    all_scenes_n[scene_id] += 1
+
+        print(f"Num scenes {self.subject_id}: {len(all_scenes_n.keys())}")
+
     def aggregate_test_splits_into_semantic_clusters(self):
         """
         DEPRECATED:
@@ -822,7 +842,7 @@ class DatasetHelper(MetadataHelper):
         sys.exit("Completed aggregate_test_splits_into_semantic_clusters.")
 
 
-    def create_simulation_scene_dataset(self):
+    def create_simulation_scene_dataset(self, n_scenes_per_cluster:int):
         """
         Chooses 5 scenes from each cluster that are not contained in any sessions train set.
         """
@@ -846,15 +866,15 @@ class DatasetHelper(MetadataHelper):
                     scene_id_trial = str(int(combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][first_timepoint]["sceneID"])) # convert xxxx.x to "xxxx"
                     cluster_id_trial = extract_cluster_from_scene_id(scene_id_trial)
                     if cluster_id_trial not in test_split_scene_ids_by_cluster["cluster"]:
-                        test_split_scene_ids_by_cluster["cluster"][cluster_id_trial] = []
-                    # Select 10 scenes for each cluster total
-                    elif len(test_split_scene_ids_by_cluster["cluster"][cluster_id_trial]) < 5:
+                        test_split_scene_ids_by_cluster["cluster"][cluster_id_trial] = [scene_id_trial]
+                    # Select n scenes for each cluster total
+                    elif len(test_split_scene_ids_by_cluster["cluster"][cluster_id_trial]) < n_scenes_per_cluster:
                         test_split_scene_ids_by_cluster["cluster"][cluster_id_trial].append(scene_id_trial)
                 
-                # Stop as soon as we have 5 scenes for each cluster
+                # Stop as soon as we have n scenes for each cluster
                 full_clusters = 0
                 for cluster_id, cluster_arr in test_split_scene_ids_by_cluster["cluster"].items():
-                    if len(cluster_arr) == 5:
+                    if len(cluster_arr) == n_scenes_per_cluster:
                         full_clusters += 1
                 
                 if full_clusters == 60:
@@ -864,7 +884,7 @@ class DatasetHelper(MetadataHelper):
         test_split_scene_ids_by_cluster = collect_scene_ids_by_cluster()
 
         for cluster_id, cluster_arr in test_split_scene_ids_by_cluster["cluster"].items():
-            assert len(cluster_arr) == 5, f"Cluster {cluster_id} has contains {len(cluster_arr)} scenes."
+            assert len(cluster_arr) == n_scenes_per_cluster, f"Cluster {cluster_id} contains {len(cluster_arr)} scenes."
 
         def extract_scene_image_from_coco_folder(scene_id_jpg_name:str):
             """
@@ -894,7 +914,7 @@ class DatasetHelper(MetadataHelper):
                 scene_array_resized = cv2.resize(scene_array, (224, 224), interpolation=cv2.INTER_LINEAR)
 
                 scenes_in_cluster.append(scene_array_resized)
-            if len(scenes_in_cluster) != 5:
+            if len(scenes_in_cluster) != n_scenes_per_cluster:
                 raise ValueError(f"cluster_id has {len(scenes_in_cluster)} scenes")
             numpy_images_by_cluster.append(np.array(scenes_in_cluster))
         numpy_images_by_cluster = np.array(numpy_images_by_cluster)
@@ -907,8 +927,6 @@ class DatasetHelper(MetadataHelper):
         os.makedirs(save_folder, exist_ok=True)
         save_path = os.path.join(save_folder, save_file)
         np.save(save_path, numpy_images_by_cluster)
-
-        sys.exit("Completed create_simulation_crop_dataset.")
 
 
     def create_crop_dataset(self, debugging=False) -> None:
@@ -1013,8 +1031,8 @@ class DatasetHelper(MetadataHelper):
 
                 num_meg_timepoints = meg_data['grad'].shape[0]
 
-                logger.custom_info(f"[Session {session_id_num}]: Pre filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
-                logger.custom_info(f"[Session {session_id_num}]: Pre filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
+                logger.custom_debug(f"[Session {session_id_num}]: Pre filtering: meg_data['grad'].shape: {meg_data['grad'].shape}")
+                logger.custom_debug(f"[Session {session_id_num}]: Pre filtering: meg_data['mag'].shape: {meg_data['mag'].shape}")
 
                 # Filter considered meg data based on sensor type
                 for sensor_type in selected_channel_indices:
@@ -1053,14 +1071,14 @@ class DatasetHelper(MetadataHelper):
 
                     # Combine grad and mag data
                     if selected_channel_indices["grad"] and selected_channel_indices["mag"]:
-                        logger.custom_info("Using both grad and mag data.")
+                        logger.custom_debug("Using both grad and mag data.")
                         combined_meg = np.concatenate([meg_data_norm["grad"], meg_data_norm["mag"]], axis=1) #(2874, 306, 601)
                     elif selected_channel_indices["grad"]:
                         raise NotImplementedError("Not yet implemented for grad channels aswell (need to adjust normalize_array() at the least.)")
-                        logger.custom_info("Using only grad data.")
+                        logger.custom_debug("Using only grad data.")
                         combined_meg = meg_data_norm["grad"]
                     elif selected_channel_indices["mag"]:
-                        logger.custom_info("Using only mag data.")
+                        logger.custom_debug("Using only mag data.")
                         combined_meg = meg_data_norm["mag"]
 
                     # Debugging: Count timepoints in meg metadata
@@ -1348,6 +1366,49 @@ class DatasetHelper(MetadataHelper):
             logger.custom_debug(f"[Session {session_id}]: len train_split: {len(train_split_trials)}, len test_split: {len(test_split_trials)}, combined size: {len(train_split_trials) + len(test_split_trials)} \n")
 
 
+    def investigate_session_cluster_distribution(self, debugging=False):
+        """
+        Creates train/test split of trials based on scene_ids and even distribution of semantic cluster.
+        Each subject sees each scene only once over all sessions.
+        """
+        combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
+
+        # Collect all scenes shown in each session and their trial_id
+        scene_trial_tuple_list_by_session_id = {"sessions": {session_id: [] for session_id in self.session_ids_num}}
+        for session_id, session_dict in combined_metadata["sessions"].items():
+            for trial_id, trial_dict in session_dict["trials"].items():
+                # Get sceneID of trial based on first timepoint and store it in the list of the current session
+                first_timepoint = list(trial_dict["timepoints"].keys())[0]
+                scene_id = trial_dict["timepoints"][first_timepoint]["sceneID"]
+                
+                scene_trial_tuple_list_by_session_id["sessions"][session_id].append((scene_id, trial_id))
+
+        # Collect semantic cluster distribution of scenes among sessions
+        semantic_clusters_path = "/share/klab/datasets/avs/input/scene_sampling_MEG/scenes-per-sub-active-visual-semantics-MEG.csv"
+        semantic_clusters_df = pd.read_csv(semantic_clusters_path, delimiter='|', on_bad_lines='warn')
+
+        def extract_cluster_from_scene_id(scene_id:float):
+            df_scene_id_idx = semantic_clusters_df.index[semantic_clusters_df['cocoID'] == int(scene_id)].tolist()[0]  # Takes one df index out of all occurances of the scene_id in the dataset, based on which corresponding cluster and other info can be extracted 
+            cluster_id = semantic_clusters_df['cluster'][df_scene_id_idx]  # int between 0 and 59
+
+            return cluster_id
+
+        # Count occurances of scenes belonging to each cluster in each session
+        
+        cluster_of_interest_idx = [cluster_idx for cluster_idx in range(60)]
+        n_scenes_per_cluster_sessions = []
+        for session_id, session_list in scene_trial_tuple_list_by_session_id["sessions"].items():
+            #print(f"Session {session_id}: {len(session_list)} scenes.")
+            n_scenes_per_cluster = np.zeros(shape=(60))
+            for scene_id, trial_id in session_list:
+                cluster_id_trial = extract_cluster_from_scene_id(scene_id)
+                n_scenes_per_cluster[cluster_id_trial] += 1
+            n_scenes_per_cluster_sessions.append(n_scenes_per_cluster)
+            print(f"Session {session_id}: {n_scenes_per_cluster[cluster_of_interest_idx]}")
+        n_scenes_per_cluster_sessions = np.sum(np.array(n_scenes_per_cluster_sessions), axis=0)
+        print(f"n_scenes_per_cluster all sessions added: \n {n_scenes_per_cluster_sessions[cluster_of_interest_idx]} \n")
+        ### Clusters are evently distributed within subjects (64 to 68 scenes per cluster per subject), but unevenly within sessions! ###
+
     def create_pytorch_dataset(self, debugging=False):
         """
         Creates pytorch datasets from numpy image datasets.
@@ -1425,7 +1486,6 @@ class ExtractionHelper(BasicOperationsHelper):
         """
         Extracts features from the scenes selected for the generation of simulated responses.
         """
-
         # Load simulation scene dataset
         simulation_scenes_folder = f"data_files/{self.lock_event}/simulation_scenes/scenes_numpy/subject_{self.subject_id}"  
         simulation_scenes_file = f"simulation_scenes_by_clusters.npy"
@@ -1470,8 +1530,6 @@ class ExtractionHelper(BasicOperationsHelper):
         os.makedirs(save_folder, exist_ok=True)
         np.save(save_path, simulation_scenes_features)
 
-        sys.exit("Done extract_features_simulation_scene_dataset.")
-
 
     def reduce_feature_dimensionality_simulation_scene_dataset(self, z_score_features_before_pca:bool):
         """
@@ -1505,9 +1563,6 @@ class ExtractionHelper(BasicOperationsHelper):
         save_path = os.path.join(save_folder, save_file)
         os.makedirs(save_folder, exist_ok=True)
         np.save(save_path, simulation_features_reduced_dim) 
-
-
-        sys.exit("Done reduce_feature_dimensionality_simulation_scene_dataset.")
 
 
     def extract_features_from_all_crops(self):
@@ -1565,48 +1620,86 @@ class ExtractionHelper(BasicOperationsHelper):
         """
         Reduces dimensionality of extracted features using PCA. This seems to be necessary to avoid overfit in the ridge Regression.
         """
-        def apply_pca_to_features(ann_features):
-            """
-            Fits pca on train and test features  combined. Use fix amount of components to allow cross-session predictions
-            """
-            ann_features_combined = np.concatenate((ann_features["train"], ann_features["test"]))
-            if z_score_features_before_pca:
-                ann_features_combined = self.normalize_array(data=ann_features_combined, normalization="z_score")
-                n_train = len(ann_features["train"])
-                ann_features["train"] = ann_features_combined[:n_train,:]
-                ann_features["test"] = ann_features_combined[n_train:,:]
+        if not all_sessions_combined:
+            # Collect features of all sessions and splits 
+            n_elements_by_session_by_split = self.recursive_defaultdict()  # Store number of elements to seperate combined features into sessions and splits again
+            all_session_split_features_combined = []  # collect (train, test) tuples for all sessions  
+            for session_id in self.session_ids_num:
+                ann_features = self.load_split_data_from_file(session_id_num=session_id, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
+                all_session_split_features_combined.append((ann_features["train"], ann_features["test"]))
 
+                # Store number of elements
+                n_train_session = len(ann_features["train"])
+                n_test_session = len(ann_features["test"])
+                n_elements_by_session_by_split["session"][session_id]["train"] = n_train_session
+                n_elements_by_session_by_split["session"][session_id]["test"] = n_test_session
+                
+            # Combine all features into a single array to fit PCA on
+            all_session_split_features_combined = np.concatenate([np.concatenate((features_train, features_test)) for features_train, features_test in all_session_split_features_combined], axis=0)
+
+            # Fit PCA on combined sessions and splits
+            if z_score_features_before_pca:
+                all_session_split_features_combined = self.normalize_array(data=all_session_split_features_combined, normalization="z_score")
             pca = PCA(n_components=self.pca_components)
-            pca.fit(ann_features_combined)
+            pca.fit(all_session_split_features_combined)
+
             explained_var_per_component = pca.explained_variance_ratio_
             explained_var = 0
             for explained_var_component in explained_var_per_component:
                 explained_var += explained_var_component
+            logger.custom_info(f"\n Explained Variance: {explained_var} \n")
 
-            # Transform splits
-            for split in ann_features:
-                ann_features[split] = pca.transform(ann_features[split])
+            # Apply PCA to each session and each split and store results, seperating all_session_split_features_combined again (necessary due to z-scoring)
+            starting_feature_index = 0  # Updated with n elements belonging to each session to extract features belonging to each session
+            for session_idx, session_id in enumerate(self.session_ids_num):
+                # Get splits for this session from combined features by indices
+                n_train_session = n_elements_by_session_by_split["session"][session_id]["train"]
+                n_test_session = n_elements_by_session_by_split["session"][session_id]["test"]
+                n_total_session = n_train_session + n_test_session
 
-            return ann_features, explained_var
+                ann_features_train = all_session_split_features_combined[starting_feature_index:starting_feature_index + n_train_session]
+                ann_features_test = all_session_split_features_combined[starting_feature_index + n_train_session:starting_feature_index + n_train_session + n_test_session]
+                
+                session_features_splits = {"train": ann_features_train, "test": ann_features_test}
 
-        if not all_sessions_combined:
-            for session_id in self.session_ids_num:
-                pca_features = {"train": None, "test": None}
-                # Get ANN features for session
-                ann_features = self.load_split_data_from_file(session_id_num=session_id, type_of_content="ann_features", ann_model=self.ann_model, module=self.module_name)
-                logger.custom_debug(f"[Session {session_id}]: ann_features['train'].shape: {ann_features['train'].shape}")
+                for split in ["train", "test"]:
+                    session_features_splits[split] = pca.transform(session_features_splits[split])
 
-                ann_features_pca, explained_var = apply_pca_to_features(ann_features)
+                    save_folder = f"data_files/{self.lock_event}/ann_features_pca/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/session_{session_id}/{split}"
+                    save_file = "ann_features_pca.npy"
+                    os.makedirs(save_folder, exist_ok=True)
+                    save_path = os.path.join(save_folder, save_file)
+                    np.save(save_path, session_features_splits[split])
 
-                logger.custom_info(f"[Session {session_id}]: Explained Variance: {explained_var}")
-                logger.custom_debug(f"[Session {session_id}]: ann_features_pca['train'].shape: {ann_features_pca['train'].shape}")
-
-                for split in ann_features_pca:
-                    logger.custom_debug(f"Session {session_id}: {split}_features.shape: {ann_features_pca[split].shape}")
-
-                self.export_split_data_as_file(session_id=session_id, type_of_content="ann_features_pca", array_dict=ann_features_pca, ann_model=self.ann_model, module=self.module_name)
+                # update starting index for next session
+                starting_feature_index += n_total_session
         else:
             # Concat features over all sessions, only then apply pca
+
+            def apply_pca_to_features(ann_features):
+                """
+                Fits pca on train and test features  combined. Use fix amount of components to allow cross-session predictions
+                """
+                ann_features_combined = np.concatenate((ann_features["train"], ann_features["test"]))
+                if z_score_features_before_pca:
+                    ann_features_combined = self.normalize_array(data=ann_features_combined, normalization="z_score")
+                    n_train = len(ann_features["train"])
+                    ann_features["train"] = ann_features_combined[:n_train,:]
+                    ann_features["test"] = ann_features_combined[n_train:,:]
+
+                pca = PCA(n_components=self.pca_components)
+                pca.fit(ann_features_combined)
+                explained_var_per_component = pca.explained_variance_ratio_
+                explained_var = 0
+                for explained_var_component in explained_var_per_component:
+                    explained_var += explained_var_component
+
+                # Transform splits
+                for split in ann_features:
+                    ann_features[split] = pca.transform(ann_features[split])
+
+                return ann_features, explained_var
+
             pca_features = {"train": None, "test": None}
             for session_id in self.session_ids_num:
                 # Get ANN features for session
@@ -2060,17 +2153,16 @@ class VisualizationHelper(GLMHelper):
         self.n_grad = n_grad
         self.n_mag = n_mag
 
-        #self.calculate_and_visualize_between_clusters_RSMs_simulated_responses(omit_sessions_from_corr=["4"])
+        #self.calculate_and_visualize_cluster_geometry_RSMs_simulated_responses(omit_sessions_from_corr=["4"])
         #self.calculate_and_visualize_between_sessions_RSMs_simulated_responses(omit_sessions_from_corr=["4"])
 
 
-    def calculate_and_visualize_between_clusters_RSMs_simulated_responses(self, omit_sessions_from_corr:list):
+    def calculate_and_visualize_cluster_geometry_RSMs_simulated_responses(self, omit_sessions_from_corr:list):
         """
         Calculates response simlarity matrices for the simulated responses for the 60 semantic clusters. For each session, the similarity of all clusters is calculated. 
         Comparison of RSMs will show if the 'geometry' of the representations of the clusters (i.e. the cluster representations relative to each other, operationalized by the RSA)) changes over sessions.
         """
         session_day_differences = self.get_session_date_differences()
-        ### ! Make sure omitted sessions are correctly accorded for in this function ! ###
         session_ids = np.array([session_id for session_id in self.session_ids_num if session_id not in omit_sessions_from_corr])
         n_sessions = len(session_ids)
         for normalization in self.normalizations:
@@ -2108,12 +2200,12 @@ class VisualizationHelper(GLMHelper):
                 plt.figure(figsize=(10, 8))
                 plt.imshow(rsm_matrix_session, cmap='viridis', aspect='auto')
                 plt.colorbar(label='Pearson Correlation')
-                plt.title(f'RSM for Subject {self.subject_id}, Session {session_id}')
+                plt.title(f'Cluster Geometry RSM for Subject {self.subject_id}, Session {session_id}')
                 plt.xlabel('Cluster Index')
                 plt.ylabel('Cluster Index')
 
                 save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/RSMs/Cluster_Geometry_Singular_Session/subject_{self.subject_id}/{normalization}"  
-                save_file = f"session_{session_id}_RSM.png"
+                save_file = f"session_{session_id}_cluster_geometry_RSM.png"
                 self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
             
 
@@ -2122,7 +2214,7 @@ class VisualizationHelper(GLMHelper):
             cluster_geometry_session_comp_matrix = np.zeros(shape=(n_sessions, n_sessions))
             fig, ax1 = plt.subplots(figsize=(12, 8))
             # Loop over session combinations (no doubles and some sessions may be omitted), obtaining correlation by distances in days
-            session_pairs = list(itertools.combinations([int(session_id) for session_id in upper_tri_rsm_by_session["session"].keys() if session_id not in omit_sessions_from_corr], 2))# all combinations to be considered
+            session_pairs = list(itertools.combinations([int(session_id) for session_id in session_ids], 2))  # all combinations to be considered
             rsm_corr_by_distance = {}
             for session_id_1, session_id_2 in session_pairs:
                 session_id_1_str, session_id_2_str = str(session_id_1), str(session_id_2)
@@ -2153,7 +2245,7 @@ class VisualizationHelper(GLMHelper):
             r_value = "{:.3f}".format(r_value)  # limit to three decimals
             plt.plot(filtered_x_values_set, trend_line, color='green' , label=f"r={r_value}", linestyle='-', linewidth=3)
             plt.plot(x_values, y_values, marker='o', linestyle='')
-            plt.title('Correlations of (upper triangular) RSMs by distance between sessions \n based on which responses are simulated \n (based on which RSMs are calculated).')
+            plt.title('Correlations of (upper triangular) cluster geometry RSMs between sessions by distance.')
             plt.xlabel('Distance in days between RSM Sessions')
             plt.ylabel('Pearson Correlation')
             plt.legend()
@@ -2161,7 +2253,7 @@ class VisualizationHelper(GLMHelper):
             plt.grid(True)
 
             save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/Distance_Plots/RSM_between_session_corrs/subject_{self.subject_id}/{normalization}"  
-            save_file = f"session_RSM_corrs_by_distance.png"
+            save_file = f"session_cluster_geometry_RSM_corrs_by_distance.png"
             self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
 
             # Visualize same values as RSM
