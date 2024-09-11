@@ -33,7 +33,7 @@ import fracridge
 from fracridge import FracRidgeRegressorCV
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import r2_score
-from scipy.stats import linregress, pearsonr, permutation_test
+from scipy.stats import linregress, pearsonr, spearmanr, permutation_test
 
 # Logging related
 logger = logging.getLogger(__name__)
@@ -2153,15 +2153,17 @@ class VisualizationHelper(GLMHelper):
         self.n_grad = n_grad
         self.n_mag = n_mag
 
-        #self.calculate_and_visualize_cluster_geometry_RSMs_simulated_responses(omit_sessions_from_corr=["4"])
-        #self.calculate_and_visualize_between_sessions_RSMs_simulated_responses(omit_sessions_from_corr=["4"])
+        #self.calculate_and_visualize_cluster_geometry_RSMs_simulated_responses(image_level=True, omit_sessions_from_corr=[])
+        self.calculate_and_visualize_between_sessions_RSMs_simulated_responses(image_level=True, omit_sessions_from_corr=[])
 
 
-    def calculate_and_visualize_cluster_geometry_RSMs_simulated_responses(self, omit_sessions_from_corr:list):
+    def calculate_and_visualize_cluster_geometry_RSMs_simulated_responses(self, image_level:bool, omit_sessions_from_corr:list):
         """
-        Calculates response simlarity matrices for the simulated responses for the 60 semantic clusters. For each session, the similarity of all clusters is calculated. 
-        Comparison of RSMs will show if the 'geometry' of the representations of the clusters (i.e. the cluster representations relative to each other, operationalized by the RSA)) changes over sessions.
+        Calculates response simlarity matrices for the simulated responses for the 60 semantic clusters, or on image level. For each session, the similarity of all clusters/images is calculated. 
+        Comparison of RSMs will show if the 'geometry' of the representations of the clusters/images (i.e. the cluster/image representations relative to each other, operationalized by the RSA)) changes over sessions.
         """
+        comparison_level = "image_level" if image_level else "cluster_level"
+
         session_day_differences = self.get_session_date_differences()
         session_ids = np.array([session_id for session_id in self.session_ids_num if session_id not in omit_sessions_from_corr])
         n_sessions = len(session_ids)
@@ -2173,24 +2175,45 @@ class VisualizationHelper(GLMHelper):
                 simulated_responses_file = f"session_{session_id}_simulated_meg_responses_by_clusters.npy"
                 simulated_responses_path = os.path.join(simulated_responses_folder, simulated_responses_file)
                 simulated_responses = np.load(simulated_responses_path)  # shape: (n_clusters, n_scenes_per_cluster, n_sensors, n_timepoints) f.e. (60, 5, 5, 31)
+                #print(f"pre reshape simulated_responses.shape: {simulated_responses.shape}")
+                # Compare responses on image level
+                if image_level:
+                    # Reshape: eliminate cluster dimension
+                    simulated_responses = simulated_responses.reshape(-1, simulated_responses.shape[2], simulated_responses.shape[3])  # shape: (n_clusters x n_scenes_per_cluster, n_sensors, n_timepoints)
+                
+                    # Correlate simulated responses for all images
+                    n_images, n_sensors, n_timepoints = simulated_responses.shape
+                    rsm_matrix_session = np.zeros(shape=(n_images, n_images))
 
-                # Correlate the simulated responses for all clusters
-                n_clusters, _, n_sensors, n_timepoints = simulated_responses.shape
-                rsm_matrix_session = np.zeros(shape=(n_clusters, n_clusters))
-                for cluster1_idx in range(n_clusters):
-                    for cluster2_idx in range(cluster1_idx, n_clusters):
-                        # ! Flattening is only valid without consideration for correlation, not variance explained etc. !
-                        cluster_corr = pearsonr(simulated_responses[cluster1_idx].flatten(),simulated_responses[cluster2_idx].flatten())[0]
-                        rsm_matrix_session[cluster1_idx][cluster2_idx] = cluster_corr
+                    #print(f"post reshape simulated_responses.shape: {simulated_responses.shape}")
 
-                        if cluster1_idx != cluster2_idx:  # Fill in lower triangular part of matrix
-                            rsm_matrix_session[cluster2_idx, cluster1_idx] = cluster_corr
+                    for image1_idx in range(n_images):
+                        for image2_idx in range(image1_idx, n_images):
+                            # ! Flattening is only valid without consideration for correlation, not variance explained etc. !
+                            image_corr = pearsonr(simulated_responses[image1_idx].flatten(),simulated_responses[image2_idx].flatten())[0]
+                            rsm_matrix_session[image1_idx][image2_idx] = image_corr
+
+                            if image1_idx != image2_idx:  # Fill in lower triangular part of matrix
+                                rsm_matrix_session[image2_idx, image1_idx] = image_corr
+                # Compare responses on cluster level
+                else:
+                    # Correlate the simulated responses for all clusters
+                    n_clusters, _, n_sensors, n_timepoints = simulated_responses.shape
+                    rsm_matrix_session = np.zeros(shape=(n_clusters, n_clusters))
+                    for cluster1_idx in range(n_clusters):
+                        for cluster2_idx in range(cluster1_idx, n_clusters):
+                            # ! Flattening is only valid without consideration for correlation, not variance explained etc. !
+                            cluster_corr = pearsonr(simulated_responses[cluster1_idx].flatten(),simulated_responses[cluster2_idx].flatten())[0]
+                            rsm_matrix_session[cluster1_idx][cluster2_idx] = cluster_corr
+
+                            if cluster1_idx != cluster2_idx:  # Fill in lower triangular part of matrix
+                                rsm_matrix_session[cluster2_idx, cluster1_idx] = cluster_corr
 
                 # Extract upper triangular part for correlation between sessions (exluding doubled values and diagonal)
                 upper_tri_rsm_by_session["session"][session_id] = rsm_matrix_session[np.triu_indices_from(rsm_matrix_session, k=1)]
 
                 # Store RSM
-                save_folder = f"data_files/{self.lock_event}/simulation_scenes/RSMs/subject_{self.subject_id}/{normalization}"  
+                save_folder = f"data_files/{self.lock_event}/simulation_scenes/RSMs/{comparison_level}/subject_{self.subject_id}/{normalization}"  
                 save_file = f"session_{session_id}_RSM.npy"
                 save_path = os.path.join(save_folder, save_file)
                 os.makedirs(save_folder, exist_ok=True)
@@ -2200,18 +2223,20 @@ class VisualizationHelper(GLMHelper):
                 plt.figure(figsize=(10, 8))
                 plt.imshow(rsm_matrix_session, cmap='viridis', aspect='auto')
                 plt.colorbar(label='Pearson Correlation')
-                plt.title(f'Cluster Geometry RSM for Subject {self.subject_id}, Session {session_id}')
-                plt.xlabel('Cluster Index')
-                plt.ylabel('Cluster Index')
+                plt.title(f'{comparison_level} Geometry RSM for Subject {self.subject_id}, Session {session_id}')
+                x_y_label = 'Cluster Index' if not image_level else 'Image Index'
+                plt.xlabel(x_y_label)
+                plt.ylabel(x_y_label)
 
-                save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/RSMs/Cluster_Geometry_Singular_Session/subject_{self.subject_id}/{normalization}"  
-                save_file = f"session_{session_id}_cluster_geometry_RSM.png"
+                save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/RSMs/{comparison_level}/Geometry_Singular_Session/subject_{self.subject_id}/{normalization}"  
+                save_file = f"session_{session_id}_{comparison_level}_geometry_RSM.png"
                 self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
+                plt.close()
             
 
-            # Plot correlation of session RSMs as a function of the distance between the sessions which the models simulating the responses, based on which the RSMs were calculated, were trained on. (Phew!)
-            # Also visualize values of this plot as RSM where each value is the correlation of the cluster geometry RSM between two sessions
-            cluster_geometry_session_comp_matrix = np.zeros(shape=(n_sessions, n_sessions))
+            # Plot spearman correlation of session RSMs as a function of the distance between the sessions which the models simulating the responses, based on which the RSMs were calculated, were trained on. (Phew!)
+            # Also visualize values of this plot as RSM where each value is the correlation of the cluster/image geometry RSM between two sessions
+            geometry_session_comp_matrix = np.zeros(shape=(n_sessions, n_sessions))
             fig, ax1 = plt.subplots(figsize=(12, 8))
             # Loop over session combinations (no doubles and some sessions may be omitted), obtaining correlation by distances in days
             session_pairs = list(itertools.combinations([int(session_id) for session_id in session_ids], 2))  # all combinations to be considered
@@ -2224,17 +2249,18 @@ class VisualizationHelper(GLMHelper):
                 # Extract upper tri of session RSMs (cluster geometry)
                 upper_tri_rsm_session_1, upper_tri_rsm_session_2 = upper_tri_rsm_by_session["session"][session_id_1_str], upper_tri_rsm_by_session["session"][session_id_2_str]
                 distance = session_day_differences[session_id_1_str][session_id_2_str]
-                rsm_corr = pearsonr(upper_tri_rsm_session_1, upper_tri_rsm_session_2)[0]
+                #rsm_corr = pearsonr(upper_tri_rsm_session_1, upper_tri_rsm_session_2)[0]
+                rsm_spearman_r, _ = spearmanr(upper_tri_rsm_session_1, upper_tri_rsm_session_2)
                 if distance not in rsm_corr_by_distance.keys():
-                    rsm_corr_by_distance[distance] = [rsm_corr]
+                    rsm_corr_by_distance[distance] = [rsm_spearman_r]
                 else:
-                    rsm_corr_by_distance[distance].append(rsm_corr)
+                    rsm_corr_by_distance[distance].append(rsm_spearman_r)
                 # Also store corr for RSM visualization
-                cluster_geometry_session_comp_matrix[session_matrix_index_1][session_matrix_index_2] = rsm_corr
-                cluster_geometry_session_comp_matrix[session_matrix_index_2][session_matrix_index_1] = rsm_corr
+                geometry_session_comp_matrix[session_matrix_index_1][session_matrix_index_2] = rsm_spearman_r
+                geometry_session_comp_matrix[session_matrix_index_2][session_matrix_index_1] = rsm_spearman_r
             # Fill in diagonal values (always 1)
             for session_idx in range(n_sessions):
-                cluster_geometry_session_comp_matrix[session_idx][session_idx] = 1
+                geometry_session_comp_matrix[session_idx][session_idx] = 1
 
             # Plot correlations of session cluster geometry RSMs by session distance
             plt.figure(figsize=(8, 6))
@@ -2245,35 +2271,39 @@ class VisualizationHelper(GLMHelper):
             r_value = "{:.3f}".format(r_value)  # limit to three decimals
             plt.plot(filtered_x_values_set, trend_line, color='green' , label=f"r={r_value}", linestyle='-', linewidth=3)
             plt.plot(x_values, y_values, marker='o', linestyle='')
-            plt.title('Correlations of (upper triangular) cluster geometry RSMs between sessions by distance.')
+            plt.title(f'Correlations of (upper triangular) {comparison_level} geometry RSMs between sessions by distance.')
             plt.xlabel('Distance in days between RSM Sessions')
-            plt.ylabel('Pearson Correlation')
+            plt.ylabel('Spearman Correlation')
             plt.legend()
             plt.xticks(x_values) 
             plt.grid(True)
 
-            save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/Distance_Plots/RSM_between_session_corrs/subject_{self.subject_id}/{normalization}"  
-            save_file = f"session_cluster_geometry_RSM_corrs_by_distance.png"
+            save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/Distance_Plots/RSM_between_session_corrs/{comparison_level}/subject_{self.subject_id}/{normalization}"  
+            save_file = f"session_{comparison_level}_geometry_RSM_corrs_by_distance.png"
             self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
+            plt.close()
 
             # Visualize same values as RSM
             plt.figure(figsize=(10, 8))
-            plt.imshow(cluster_geometry_session_comp_matrix, cmap='viridis', aspect='auto')
-            plt.colorbar(label='Pearson Correlation')
+            plt.imshow(geometry_session_comp_matrix, cmap='viridis', aspect='auto')
+            plt.colorbar(label='Spearman Correlation')
             plt.title(f'RSM for Subject {self.subject_id}, Correlations of cluster geometry RSMs between Sessions.')
             plt.xlabel('Session Index')
             plt.ylabel('Session Index')
 
-            save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/RSMs/Cluster_Geometry_Session_Similarities/subject_{self.subject_id}/{normalization}"  
-            save_file = f"Cluster_Geometry_Session_Similarities.png"
+            save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/RSMs/Geometry_Session_Similarities/{comparison_level}/subject_{self.subject_id}/{normalization}"  
+            save_file = f"{comparison_level}_Geometry_Session_Similarities.png"
             self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
+            plt.close()
 
 
-    def calculate_and_visualize_between_sessions_RSMs_simulated_responses(self, omit_sessions_from_corr:list):
+    def calculate_and_visualize_between_sessions_RSMs_simulated_responses(self, image_level:bool, omit_sessions_from_corr:list):
         """
-        Calculates response simlarity matrices for the simulated responses for the sessions. For each cluster, the similarity of all sessions is calculated.
-        RSM will show if the representation of a given cluster changes over sessions.
+        Calculates response simlarity matrices for the simulated responses for the sessions. For each cluster/image, the similarity of all sessions is calculated.
+        RSM will show if the representation of a given cluster/image changes over sessions.
         """
+        comparison_level = "image_level" if image_level else "cluster_level"
+
         session_day_differences = self.get_session_date_differences()
         session_ids = np.array([session_id for session_id in self.session_ids_num if session_id not in omit_sessions_from_corr])
         session_pairs = list(itertools.combinations([int(session_id) for session_id in session_ids], 2)) # all session combinations to be considered
@@ -2286,95 +2316,130 @@ class VisualizationHelper(GLMHelper):
                 simulated_responses_file = f"session_{session_id}_simulated_meg_responses_by_clusters.npy"
                 simulated_responses_path = os.path.join(simulated_responses_folder, simulated_responses_file)
                 simulated_responses = np.load(simulated_responses_path)  # shape: (n_clusters, n_scenes_per_cluster, n_sensors, n_timepoints) f.e. (60, 5, 5, 31)
+                if image_level:
+                    # Reshape: eliminate cluster dimension
+                    simulated_responses = simulated_responses.reshape(-1, simulated_responses.shape[2], simulated_responses.shape[3])  # shape: (n_clusters x n_scenes_per_cluster, n_sensors, n_timepoints)
                 simulated_responses_by_sessions["sessions"][session_id] = simulated_responses
-            n_clusters, n_scenes_per_cluster, n_sensors, n_timepoints = simulated_responses.shape
+            
+            # For each image, correlate simulated responses for all session combinations with spearmans r
+            if image_level:
+                n_images, n_sensors, n_timepoints = simulated_responses.shape
+                rsm_matrices_images = []
+                for image_idx in range(n_images):
+                    rsm_matrix_image = np.zeros(shape=(n_sessions, n_sessions))
+                    for session_id_1, session_id_2 in session_pairs:
+                        session_id_1_str, session_id_2_str = str(session_id_1), str(session_id_2)  # use as dict keys
+                        # Extract matrix indices. not necessarily = session_id because of omitted sessions
+                        session_matrix_index_1 = np.where(session_ids == session_id_1_str)[0][0] 
+                        session_matrix_index_2 = np.where(session_ids == session_id_2_str)[0][0] 
+                        # ! Flattening is only valid without consideration for correlation, not variance explained etc. !
+                        image_sim_responses_sess_1 = simulated_responses_by_sessions["sessions"][session_id_1_str][image_idx]
+                        image_sim_responses_sess_2 = simulated_responses_by_sessions["sessions"][session_id_2_str][image_idx]
+                        session_corr = pearsonr(image_sim_responses_sess_1.flatten(),image_sim_responses_sess_2.flatten())[0]
+                        #session_corr_spearman_r, _ = spearmanr(image_sim_responses_sess_1.flatten(),image_sim_responses_sess_2.flatten())
+                        rsm_matrix_image[session_matrix_index_1][session_matrix_index_2] = session_corr
 
-            # For each Cluster, correlate simulated responses for all session combinations
-            rsm_matrices_clusters = []
-            for cluster_idx in range(n_clusters):
-                rsm_matrix_cluster = np.zeros(shape=(n_sessions, n_sessions))
-                for session_id_1, session_id_2 in session_pairs:
-                    session_id_1_str, session_id_2_str = str(session_id_1), str(session_id_2)  # use as dict keys
-                    # Extract matrix indices. not necessarily = session_id because of omitted sessions
-                    session_matrix_index_1 = np.where(session_ids == session_id_1_str)[0][0] 
-                    session_matrix_index_2 = np.where(session_ids == session_id_2_str)[0][0] 
-                    # ! Flattening is only valid without consideration for correlation, not variance explained etc. !
-                    cluster_sim_responses_sess_1 = simulated_responses_by_sessions["sessions"][session_id_1_str][cluster_idx]
-                    cluster_sim_responses_sess_2 = simulated_responses_by_sessions["sessions"][session_id_2_str][cluster_idx]
-                    session_corr = pearsonr(cluster_sim_responses_sess_1.flatten(),cluster_sim_responses_sess_2.flatten())[0]
-                    rsm_matrix_cluster[session_matrix_index_1][session_matrix_index_2] = session_corr
+                        if session_id_1 != session_id_2:  # Fill in lower triangular part of matrix
+                            rsm_matrix_image[session_matrix_index_2][session_matrix_index_1] = session_corr
+                    rsm_matrices_images.append(rsm_matrix_image)
 
-                    if session_id_1 != session_id_2:  # Fill in lower triangular part of matrix
-                        rsm_matrix_cluster[session_matrix_index_2][session_matrix_index_1] = session_corr
-                rsm_matrices_clusters.append(rsm_matrix_cluster)
+            # For each Cluster, correlate simulated responses for all session combinations with spearmans r
+            else:
+                n_clusters, n_scenes_per_cluster, n_sensors, n_timepoints = simulated_responses.shape
+                rsm_matrices_clusters = []
+                for cluster_idx in range(n_clusters):
+                    rsm_matrix_cluster = np.zeros(shape=(n_sessions, n_sessions))
+                    for session_id_1, session_id_2 in session_pairs:
+                        session_id_1_str, session_id_2_str = str(session_id_1), str(session_id_2)  # use as dict keys
+                        # Extract matrix indices. not necessarily = session_id because of omitted sessions
+                        session_matrix_index_1 = np.where(session_ids == session_id_1_str)[0][0] 
+                        session_matrix_index_2 = np.where(session_ids == session_id_2_str)[0][0] 
+                        # ! Flattening is only valid without consideration for correlation, not variance explained etc. !
+                        cluster_sim_responses_sess_1 = simulated_responses_by_sessions["sessions"][session_id_1_str][cluster_idx]
+                        cluster_sim_responses_sess_2 = simulated_responses_by_sessions["sessions"][session_id_2_str][cluster_idx]
+                        session_corr = pearsonr(cluster_sim_responses_sess_1.flatten(),cluster_sim_responses_sess_2.flatten())[0]
+                        rsm_matrix_cluster[session_matrix_index_1][session_matrix_index_2] = session_corr
 
-                # Visualize cluster RSM
-                plt.figure(figsize=(10, 8))
-                plt.imshow(rsm_matrix_cluster, cmap='viridis', aspect='auto')
-                plt.colorbar(label='Pearson Correlation')
-                plt.title(f'RSM for Subject {self.subject_id}, Cluser_idx {cluster_idx} \n Correlation of simulated reponses for this cluster between sessions.')
-                plt.xlabel('Session Index')
-                plt.ylabel('Session Index')
+                        if session_id_1 != session_id_2:  # Fill in lower triangular part of matrix
+                            rsm_matrix_cluster[session_matrix_index_2][session_matrix_index_1] = session_corr
+                    rsm_matrices_clusters.append(rsm_matrix_cluster)
 
-                save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/RSMs/Session_Similarities_Singular_Clusters/subject_{self.subject_id}/{normalization}"  
-                save_file = f"Cluster_idx_{cluster_idx}_Session_Similarities.png"
-                self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
+                    # Visualize cluster RSM
+                    plt.figure(figsize=(10, 8))
+                    plt.imshow(rsm_matrix_cluster, cmap='viridis', aspect='auto')
+                    plt.colorbar(label='Pearson Correlation')
+                    plt.title(f'RSM for Subject {self.subject_id}, Cluser_idx {cluster_idx} \n Correlation of simulated reponses for this cluster between sessions.')
+                    plt.xlabel('Session Index')
+                    plt.ylabel('Session Index')
 
-                # Create distance plot for current cluster
-                # Extract correlation between distance from RSM for current cluster
-                rsm_cluster_corr_by_distance = {}
-                for session_id_1, session_id_2 in session_pairs:
-                    # Extract matrix indices. not necessarily = session_id because of omitted sessions
-                    session_id_1_str, session_id_2_str = str(session_id_1), str(session_id_2)  # use as dict keys
-                    session_matrix_index_1 = np.where(session_ids == session_id_1_str)[0][0] 
-                    session_matrix_index_2 = np.where(session_ids == session_id_2_str)[0][0] 
+                    save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/RSMs/Session_Similarities_Singular_Clusters/subject_{self.subject_id}/{normalization}"  
+                    save_file = f"Cluster_idx_{cluster_idx}_Session_Similarities.png"
+                    self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
+                    plt.close()
 
-                    # Get distance between sessions and store corresponding corr
-                    session_distance = session_day_differences[session_id_1_str][session_id_2_str]
-                    session_corr_cluster = rsm_matrix_cluster[session_matrix_index_1][session_matrix_index_2]
-                    if session_distance not in rsm_cluster_corr_by_distance.keys():
-                        rsm_cluster_corr_by_distance[session_distance] = [session_corr_cluster]
-                    else:
-                        rsm_cluster_corr_by_distance[session_distance].append(session_corr_cluster)
+                    # Create distance plot for current cluster
+                    # Extract correlation between distance from RSM for current cluster
+                    rsm_cluster_corr_by_distance = {}
+                    for session_id_1, session_id_2 in session_pairs:
+                        # Extract matrix indices. not necessarily = session_id because of omitted sessions
+                        session_id_1_str, session_id_2_str = str(session_id_1), str(session_id_2)  # use as dict keys
+                        session_matrix_index_1 = np.where(session_ids == session_id_1_str)[0][0] 
+                        session_matrix_index_2 = np.where(session_ids == session_id_2_str)[0][0] 
 
-                # Plot correlations of simulated current cluster responses across sessions by session distance
-                plt.figure(figsize=(8, 6))
-                x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances=rsm_cluster_corr_by_distance, losses_averaged_within_distances=False)
-                filtered_x_values_set = np.array(list(set(x_values)))
-                slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
-                trend_line = slope * filtered_x_values_set + intercept
-                r_value = "{:.3f}".format(r_value)  # limit to three decimals
-                plt.plot(filtered_x_values_set, trend_line, color='green' , label=f"r={r_value}", linestyle='-', linewidth=3)
-                plt.plot(x_values, y_values, marker='o', linestyle='')
-                plt.title(f'Correlations of simulated responses cluster_idx {cluster_idx} responses by session distance.')
-                plt.xlabel('Distance in days between RSM Sessions')
-                plt.ylabel('Pearson Correlation')
-                plt.legend()
-                plt.xticks(x_values) 
-                plt.grid(True)
+                        # Get distance between sessions and store corresponding corr
+                        session_distance = session_day_differences[session_id_1_str][session_id_2_str]
+                        session_corr_cluster = rsm_matrix_cluster[session_matrix_index_1][session_matrix_index_2]
+                        if session_distance not in rsm_cluster_corr_by_distance.keys():
+                            rsm_cluster_corr_by_distance[session_distance] = [session_corr_cluster]
+                        else:
+                            rsm_cluster_corr_by_distance[session_distance].append(session_corr_cluster)
 
-                save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/Distance_Plots/Session_Similarities_Singular_Clusters/subject_{self.subject_id}/{normalization}"  
-                save_file = f"Cluster_idx_{cluster_idx}_session_corrs_by_distance.png"
-                self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
+                    # Plot correlations of simulated current cluster responses across sessions by session distance
+                    plt.figure(figsize=(8, 6))
+                    x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances=rsm_cluster_corr_by_distance, losses_averaged_within_distances=False)
+                    filtered_x_values_set = np.array(list(set(x_values)))
+                    slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
+                    trend_line = slope * filtered_x_values_set + intercept
+                    r_value = "{:.3f}".format(r_value)  # limit to three decimals
+                    plt.plot(filtered_x_values_set, trend_line, color='green' , label=f"r={r_value}", linestyle='-', linewidth=3)
+                    plt.plot(x_values, y_values, marker='o', linestyle='')
+                    plt.title(f'Correlations of simulated responses cluster_idx {cluster_idx} responses by session distance.')
+                    plt.xlabel('Distance in days between RSM Sessions')
+                    plt.ylabel('Pearson Correlation')
+                    plt.legend()
+                    plt.xticks(x_values) 
+                    plt.grid(True)
 
-            # Calculate average across RSMs of all clusters 
-            rsm_matrices_clusters = np.array(rsm_matrices_clusters) # shape: (60, 9, 9)
-            rsm_matrix_all_cluster_avg = np.mean(rsm_matrices_clusters, axis=0) # shape: (9, 9)
+                    save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/Distance_Plots/Session_Similarities_Singular_Clusters/subject_{self.subject_id}/{normalization}"  
+                    save_file = f"Cluster_idx_{cluster_idx}_session_corrs_by_distance.png"
+                    self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
+                    plt.close()
 
-            # Visualize average cluster RSM
+            # Calculate average across RSMs of all clusters/images 
+            if image_level:
+                rsm_matrices_list = rsm_matrices_images
+            else:
+                rsm_matrices_list = rsm_matrices_clusters
+            matrix_type = "Images" if image_level else "Clusters"
+            
+            rsm_matrices_arr = np.array(rsm_matrices_list) # clusters: shape: (60, 9, 9)
+            rsm_matrix_all_avg = np.mean(rsm_matrices_arr, axis=0) # clusters: shape: (9, 9)
+
+            # Visualize average cluster/image RSM
             plt.figure(figsize=(10, 8))
-            plt.imshow(rsm_matrix_all_cluster_avg, cmap='viridis', aspect='auto')
+            plt.imshow(rsm_matrix_all_avg, cmap='viridis', aspect='auto')
             plt.colorbar(label='Pearson Correlation')
-            plt.title(f'RSM for Subject {self.subject_id}, session differences averaged across all clusters.')
+            plt.title(f'RSM for Subject {self.subject_id}, session differences averaged across all {matrix_type}.')
             plt.xlabel('Session Index')
             plt.ylabel('Session Index')
 
-            save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/RSMs/All_Clusters_Averaged_Session_Similarities/subject_{self.subject_id}/{normalization}"  
-            save_file = f"All_Clusters_Averaged_Session_Similarities.png"
+            save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/RSMs/All_{matrix_type}_Averaged_Session_Similarities/subject_{self.subject_id}/{normalization}"  
+            save_file = f"All_{matrix_type}_Averaged_Session_Similarities.png"
             self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
+            plt.close()
             
             # Extract correlation between distance from RSM averaged over clusters
-            rsm_clusters_averaged_corr_by_distance = {}
+            rsm_averaged_corr_by_distance = {}
             for session_id_1, session_id_2 in session_pairs:
                 # Extract matrix indices. not necessarily = session_id because of omitted sessions
                 session_id_1_str, session_id_2_str = str(session_id_1), str(session_id_2)  # use as dict keys
@@ -2383,32 +2448,33 @@ class VisualizationHelper(GLMHelper):
 
                 # Get distance between sessions and store corresponding corr
                 session_distance = session_day_differences[session_id_1_str][session_id_2_str]
-                session_corr_all_cluster_avg = rsm_matrix_all_cluster_avg[session_matrix_index_1][session_matrix_index_2]
-                if session_distance not in rsm_clusters_averaged_corr_by_distance.keys():
-                    rsm_clusters_averaged_corr_by_distance[session_distance] = [session_corr_all_cluster_avg]
+                session_corr_avg = rsm_matrix_all_avg[session_matrix_index_1][session_matrix_index_2]
+                if session_distance not in rsm_averaged_corr_by_distance.keys():
+                    rsm_averaged_corr_by_distance[session_distance] = [session_corr_avg]
                 else:
-                    rsm_clusters_averaged_corr_by_distance[session_distance].append(session_corr_all_cluster_avg)
+                    rsm_averaged_corr_by_distance[session_distance].append(session_corr_avg)
 
 
             # Plot correlations of simulated cluster responses across sessions averaged across all clusters by session distance
             plt.figure(figsize=(8, 6))
-            x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances=rsm_clusters_averaged_corr_by_distance, losses_averaged_within_distances=False)
+            x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances=rsm_averaged_corr_by_distance, losses_averaged_within_distances=False)
             filtered_x_values_set = np.array(list(set(x_values)))
             slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
             trend_line = slope * filtered_x_values_set + intercept
             r_value = "{:.3f}".format(r_value)  # limit to three decimals
             plt.plot(filtered_x_values_set, trend_line, color='green' , label=f"r={r_value}", linestyle='-', linewidth=3)
             plt.plot(x_values, y_values, marker='o', linestyle='')
-            plt.title('Correlations of simulated cluster responses by session distance, averaged across all clusters.')
+            plt.title(f'Correlations of simulated {matrix_type} responses by session distance, averaged across all {matrix_type}.')
             plt.xlabel('Distance in days between RSM Sessions')
             plt.ylabel('Pearson Correlation')
             plt.legend()
             plt.xticks(x_values) 
             plt.grid(True)
 
-            save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/Distance_Plots/RSM_between_session_corrs/subject_{self.subject_id}/{normalization}"  
-            save_file = f"all_clusters_avg_session_corrs_by_distance.png"
+            save_folder = f"data_files/{self.lock_event}/visualizations/simulation_scenes/Distance_Plots/RSM_between_session_corrs/{comparison_level}/subject_{self.subject_id}/{normalization}"  
+            save_file = f"all_{matrix_type}_avg_session_corrs_by_distance.png"
             self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
+            plt.close()
 
 
     def calc_drift_corr_with_fit_measures_by_distances(self, fit_measures_by_distances:dict):
@@ -2551,7 +2617,7 @@ class VisualizationHelper(GLMHelper):
             labels = labels + labels2
 
         ax1.legend(lines, labels, loc='upper right')
-        ax1.set_title(f'Averaged Normalized Variance Explained vs Distance in days. \n Self-Pred Normalized?: {self_pred_normalized} \n Norm "mean_centered_ch_then_global_robust_scaling", omitted_sessions: {omitted_sessions}, {date.today()}')
+        ax1.set_title(f'Averaged Normalized Variance Explained vs Distance in days. \n Self-Pred Normalized?: {self_pred_normalized} \n, omitted_sessions: {omitted_sessions}, {date.today()}')
         plt.grid(True)
         
         # plt.show required?
@@ -3099,7 +3165,7 @@ class VisualizationHelper(GLMHelper):
                 permutation_p_value, permutation_plot, permutation_ax = self.perform_permutation_test(x_values, y_values, n_permutations=10000)
                 permutation_ax.set_title(f'Permutation Test for Subject {subject_id} \n r={observed_corr}, p={permutation_p_value}')
 
-                plot_folder = f"data_files/{self.lock_event}/visualizations/distance_drift/permutation_test/{fit_measure}"
+                plot_folder = f"data_files/{self.lock_event}/visualizations/distance_drift/permutation_test/{fit_measure}/{normalization}"
                 plot_file = f"permutation_test_results_{subject_id}.png"
                 self.save_plot_as_file(plt=permutation_plot, plot_folder=plot_folder, plot_file=plot_file)
 
@@ -3116,7 +3182,7 @@ class VisualizationHelper(GLMHelper):
             lines, labels = ax1.get_legend_handles_labels()
             ax1.legend(lines, labels, loc='upper right')
 
-            plot_folder = f"data_files/{self.lock_event}/visualizations/distance_drift/all_subjects"
+            plot_folder = f"data_files/{self.lock_event}/visualizations/distance_drift/all_subjects/{normalization}"
             plot_file = f"distance_drift_all_subjects_{fit_measure}.png"
             self.save_plot_as_file(fig, plot_folder=plot_folder, plot_file=plot_file)
 
@@ -3641,54 +3707,55 @@ class VisualizationHelper(GLMHelper):
                     """ 
 
 
-    def visualize_meg_means_stds(self, normalization:str):
+    def visualize_meg_means_stds(self):
         """
         Visualizes mean (and if selected std) of meg data for 3 exemplary timepoints comparing all sessions, as requested by Carmen.
         """
-        # Collect means and stds of sessions
-        mean_and_std_dict_by_timepoints = self.recursive_defaultdict()
-        for session_id in self.session_ids_num:
-            # Get session meg data (train and test split combined)
-            session_meg_data = []
-            for split in ["train", "test"]:
-                split_path = f"data_files/{self.lock_event}/meg_data/norm_{normalization}/subject_{self.subject_id}/session_{session_id}/{split}/meg_data.npy"  
-                split_data = np.load(split_path)
-                session_meg_data.extend(split_data)
-            session_meg_data = np.array(session_meg_data)
+        for normalization in self.normalizations:
+            # Collect means and stds of sessions
+            mean_and_std_dict_by_timepoints = self.recursive_defaultdict()
+            for session_id in self.session_ids_num:
+                # Get session meg data (train and test split combined)
+                session_meg_data = []
+                for split in ["train", "test"]:
+                    split_path = f"data_files/{self.lock_event}/meg_data/norm_{normalization}/subject_{self.subject_id}/session_{session_id}/{split}/meg_data.npy"  
+                    split_data = np.load(split_path)
+                    session_meg_data.extend(split_data)
+                session_meg_data = np.array(session_meg_data)
 
-            # Select exemplary timepoints and store their mean and std
-            n_timepoints = session_meg_data.shape[2]  # epochs, sensors, timepoints
-            selected_timepoint_idx = [timepoint_idx for timepoint_idx in range(0, n_timepoints, int(n_timepoints/4))]  # choose  timepoints: in beginning, middle and end
-            
-            for timepoint_idx in selected_timepoint_idx:
-                timepoint_mean = np.mean(session_meg_data[:,:,timepoint_idx])
-                timepoint_std = np.std(session_meg_data[:,:,timepoint_idx])
-
-                if session_id == "1":
-                    mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["means"] = [timepoint_mean]
-                    mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["stds"] = [timepoint_std]
-                else:
-                    mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["means"].append(timepoint_mean)
-                    mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["stds"].append(timepoint_std)
+                # Select exemplary timepoints and store their mean and std
+                n_timepoints = session_meg_data.shape[2]  # epochs, sensors, timepoints
+                selected_timepoint_idx = [timepoint_idx for timepoint_idx in range(0, n_timepoints, int(n_timepoints/4))]  # choose  timepoints: in beginning, middle and end
                 
-        # Plot means and stds
-        for plot_type in ["means", "stds"]:
-            measure_name = "Mean Value" if plot_type == "means" else "Standard Deviation Value"
-            timepoints_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in mean_and_std_dict_by_timepoints["timepoint"].keys()]
-            plt.figure(figsize=(10, 6))
-            for timepoint_number, timepoint_idx in enumerate(mean_and_std_dict_by_timepoints["timepoint"]):
-                sessions_list = [session_id for session_id in self.session_ids_num]
-                plt.plot(sessions_list, mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx][plot_type], label=f'{timepoints_ms[timepoint_number]} ms')
+                for timepoint_idx in selected_timepoint_idx:
+                    timepoint_mean = np.mean(session_meg_data[:,:,timepoint_idx])
+                    timepoint_std = np.std(session_meg_data[:,:,timepoint_idx])
 
-            plt.xlabel('Session')
-            plt.ylabel(measure_name)
-            plt.title(f'{measure_name} for each Session. \n Subject: {self.subject_id}, Norm: {normalization}')
-            plt.legend(title="Timepoints (ms)")  
+                    if session_id == "1":
+                        mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["means"] = [timepoint_mean]
+                        mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["stds"] = [timepoint_std]
+                    else:
+                        mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["means"].append(timepoint_mean)
+                        mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["stds"].append(timepoint_std)
+                    
+            # Plot means and stds
+            for plot_type in ["means", "stds"]:
+                measure_name = "Mean Value" if plot_type == "means" else "Standard Deviation Value"
+                timepoints_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in mean_and_std_dict_by_timepoints["timepoint"].keys()]
+                plt.figure(figsize=(10, 6))
+                for timepoint_number, timepoint_idx in enumerate(mean_and_std_dict_by_timepoints["timepoint"]):
+                    sessions_list = [session_id for session_id in self.session_ids_num]
+                    plt.plot(sessions_list, mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx][plot_type], label=f'{timepoints_ms[timepoint_number]} ms')
 
-            # Save plot
-            plot_folder = f"data_files/{self.lock_event}/visualizations/meg_data/session_comparison/{plot_type}/subject_{self.subject_id}/{normalization}/"
-            plot_file = f"Session_Comparison_{measure_name}.png"
-            self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+                plt.xlabel('Session')
+                plt.ylabel(measure_name)
+                plt.title(f'{measure_name} for each Session. \n Subject: {self.subject_id}, Norm: {normalization}')
+                plt.legend(title="Timepoints (ms)")  
+
+                # Save plot
+                plot_folder = f"data_files/{self.lock_event}/visualizations/meg_data/session_comparison/{plot_type}/subject_{self.subject_id}/{normalization}/"
+                plot_file = f"Session_Comparison_{measure_name}.png"
+                self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
     
 

@@ -17,7 +17,7 @@ sys.path.append(str(__location__))
 os.chdir(__location__)
 
 # Choose params
-subject_ids = ["01", "02", "03", "04", "05"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
+subject_ids = ["02", "04"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
 # Subject 03 only contains 3 scenes for cluster 46 in all sessions test sets
 # Subject 05 only contains 4 scenes for cluster 28 in all sessions test sets
 # --> Switched to 3 scenes per cluster for subject 03 and 05
@@ -53,7 +53,7 @@ alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000,
 
                                                     # originally discarded sessions # newest with mean_centered_ch_then_global_robust_scaling # no_norm
 omit_sessions_by_subject = {"01": ["1", "7"],  # ["1"] # ["1", "7", "8"] # ["1", "7"] (6 and 8 are close)
-                            "02": ["4"],  # ["4"]  # [] # []
+                            "02": [],  # ["4"]  # [] # ["4"]
                             "03": ["1", "2", "5", "7", "10"],  # ["1", "2", "5", "7", "10"] # ["1", "2", "5", "7", "10"]
                             "04": ["6"],  # [] # ["6"] # ["6"]
                             "05": ["4", "7", "9"], # ["9"] # ["4", "7", "9"] # ["4", "7", "9"]
@@ -68,12 +68,12 @@ create_train_test_split = False  # Careful! Everytime this is set to true, all s
 create_crop_datset_numpy = False
 create_meg_dataset = False
 extract_features = False
-perform_pca = True
-train_GLM = True
-generate_predictions_with_GLM = True
+perform_pca = False
+train_GLM = False
+generate_predictions_with_GLM = False
 visualization = True
-plot_distance_drift_all_subjects = True
-simulate_scene_responses = True
+simulate_scene_responses = False
+plot_distance_drift_all_subjects = False
 
 z_score_features_before_pca = True
 use_pca_features = True
@@ -229,13 +229,13 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
-            visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
+            ####visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="pearson_r_timepoint", by_timepoints=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
             # Visuzalize distance based predictions at timepoint scale
             ##visualization_helper.three_dim_timepoint_predictions(subtract_self_pred=subtract_self_pred) 
-            visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True)  
+            ####visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True)  
             
             # Visualize drift topographically with mne based on sensor level data 
             #visualization_helper.mne_topo_plot_per_sensor(data_type="drift", omitted_sessions=sessions_to_omit, all_timepoints_combined=False)  # data_type="self-pred" or "drift"
@@ -244,7 +244,7 @@ for run in range(run_pipeline_n_times):
             ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"
 
             # Visualize session means and stds
-            #visualization_helper.visualize_meg_means_stds(normalization="mean_centered_ch_then_global_robust_scaling")
+            ###visualization_helper.visualize_meg_means_stds()
 
             logger.custom_info("Visualization completed. \n \n")
 
@@ -280,6 +280,8 @@ if plot_distance_drift_all_subjects:
 
     # Plots distance based different for all subjects in one plot, as well as an average over the subjects. !!! How is this interpretable with different selected timepoints for each subject ?!
     global_visualization_helper.drift_distance_all_subjects(subject_ids=subject_ids, fit_measure="var_explained", omit_sessions_by_subject=omit_sessions_by_subject, include_0_distance=False)  
+    global_visualization_helper.drift_distance_all_subjects(subject_ids=subject_ids, fit_measure="pearson_r", omit_sessions_by_subject=omit_sessions_by_subject, include_0_distance=False)  
+
     # pearson_r, var_explained
 
 logger.custom_info("Pipeline completed.")
