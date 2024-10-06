@@ -11,4 +11,3 @@ ENVNAME=${ENVNAME:-$default_env}
 echo "Activating conda environment: " $ENVNAME
 conda activate $ENVNAME
 clear
-

@@ -188,6 +188,8 @@ class BasicOperationsHelper:
                     diff_hours =  round(abs((comp_session_date - og_session_date).total_seconds()) / 3600)
                     diff_days = round(diff_hours / 24)
                     session_day_differences[session_id_num][session_comp_id_num] = diff_days
+                else:
+                    session_day_differences[session_id_num][session_comp_id_num] = 0
         
         for session_id_num in self.session_ids_num:
             for session_comp_id_num in self.session_ids_num:
@@ -1634,10 +1636,10 @@ class ExtractionHelper(BasicOperationsHelper):
                 n_elements_by_session_by_split["session"][session_id]["train"] = n_train_session
                 n_elements_by_session_by_split["session"][session_id]["test"] = n_test_session
                 
-            # Combine all features into a single array to fit PCA on
+            # Combine all features into a single array to apply z-score to and fit PCA on
             all_session_split_features_combined = np.concatenate([np.concatenate((features_train, features_test)) for features_train, features_test in all_session_split_features_combined], axis=0)
 
-            # Fit PCA on combined sessions and splits
+            # Apply z-scoring and fit PCA on combined sessions and splits
             if z_score_features_before_pca:
                 all_session_split_features_combined = self.normalize_array(data=all_session_split_features_combined, normalization="z_score")
             pca = PCA(n_components=self.pca_components)
@@ -1835,6 +1837,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 logger.custom_info(f"Predicting from mapping for normalization {normalization}")
                 variance_explained_dict = self.recursive_defaultdict()
                 correlation_dict = self.recursive_defaultdict()
+                predicted_responses_dict = self.recursive_defaultdict()
                 mse_session_losses = {"session_mapping": {}}
                 for session_id_model in self.session_ids_num:
                     mse_session_losses["session_mapping"][session_id_model] = {"session_pred": {}}
@@ -1866,8 +1869,9 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         if shuffle_test_labels:
                             np.random.shuffle(Y_test)
 
-                        # Generate predictions
+                        # Generate and store predictions
                         predictions = ridge_model.predict(X_test, downscale_features=downscale_features)
+                        predicted_responses_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = predictions
 
                         if fit_measure_storage_distinction == "timepoint_level":
                             # Store fit measures seperately for each timepoint/model
@@ -1887,7 +1891,6 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                                 # Save fit measures
                                 variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = var_explained_timepoint
                                 correlation_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = r_pearson_timepoint
-
                         elif fit_measure_storage_distinction == "timepoint_sensor_level":
                             # Calculate fit measure seperately for each sensor and timepoint
                             # prediction shape example: (502, 5, 101) (epochs, sensors, timepoints)
@@ -1905,6 +1908,8 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
                             # Calculate variance explained 
                             var_explained = r2_score(Y_test.reshape(-1), predictions.reshape(-1))  # .reshape(-1)
+
+                            raise ValueError(f"fit_measure_storage_distinction {fit_measure_storage_distinction} deprecated. Flattening biases variance explained.")
                             """
                             TODO: Investigate effects of flattening; consider alternatives
                             logger.custom_info(f"Y_test.shape: {Y_test.shape}")
@@ -1931,6 +1936,15 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                             mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = mse
                             correlation_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = r_pearson
                             variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = var_explained
+
+                # Store predictions dict
+                storage_folder = f"data_files/{self.lock_event}/predicted_meg_responses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                os.makedirs(storage_folder, exist_ok=True)
+                storage_file = f"predicted_responses_dict.pkl"
+                storage_path = os.path.join(storage_folder, storage_file)
+
+                with open(storage_path, 'wb') as file:
+                    pickle.dump(predicted_responses_dict, file)
 
                 # Store loss dict
                 if fit_measure_storage_distinction == "session_level":
@@ -2154,8 +2168,133 @@ class VisualizationHelper(GLMHelper):
         self.n_mag = n_mag
 
         #self.calculate_and_visualize_cluster_geometry_RSMs_simulated_responses(image_level=True, omit_sessions_from_corr=[])
-        self.calculate_and_visualize_between_sessions_RSMs_simulated_responses(image_level=True, omit_sessions_from_corr=[])
+        #self.calculate_and_visualize_between_sessions_RSMs_simulated_responses(image_level=True, omit_sessions_from_corr=[])
+        #self.visualize_arousal_mean_over_sessions()
 
+    def visualize_arousal_mean_over_sessions(self):
+        """
+        Visualizes the average pupil dialation for each session as recorded by the eye-tracking software.
+        """
+        mean_pupil_dilations_by_session = {}
+        for session_id in self.session_ids_num:
+            # Read eye-tracking df
+            session_double_char_id = f"0{session_id}" if session_id != "10" else session_id
+            eyetracking_path = f"/share/klab/datasets/avs/results/as{self.subject_id}_{session_double_char_id}/as{self.subject_id[1]}_{session_id}_0_events.csv"
+            events_df = pd.read_csv(eyetracking_path)
+            #events_df.info()
+
+            # Filter events for only fixation events then calculate mean pupil dilations over all fixations, averaged over start and end of epoch
+            events_df = events_df[events_df["type"] == "fixation"]
+            mean_pupil_dilations = np.mean(np.array([events_df['supd_x'].to_numpy(), events_df['eupd_x'].to_numpy()]), axis=0)   # pupil dilations of all fixations, averaged between start and end of the fixation 
+            mean_pupil_dilations_by_session[int(session_id)] = mean_pupil_dilations
+
+        # Plot average pupil dilation across sessions
+        plt.figure(figsize=(8, 6))
+        x_values, y_values = self.extract_x_y_arrays(mean_pupil_dilations_by_session, losses_averaged_within_distances=False)
+        x_values_set = np.array(list(set(x_values)))
+        
+        slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
+        trend_line = slope * x_values_set + intercept
+        r_value = "{:.3f}".format(r_value)  # limit to three decimals
+        
+        plt.plot(x_values_set, trend_line, color='green' , label=f"r={r_value}", linestyle='-', linewidth=3)
+        #plt.plot(x_values, y_values, marker='o', linestyle='', markersize=3)
+        plt.title(f'Pupil dilation across sessions subject {self.subject_id}. \n Averaged across all start and end timepoints of fixation events in the session.')
+        plt.xlabel('Session')
+        plt.ylabel('Pupil Dilation')
+        plt.legend()
+        #plt.xticks(x_values) 
+        plt.grid(True)
+
+        save_folder = f"data_files/{self.lock_event}/visualizations/pupil_dilation/subject_{self.subject_id}"  
+        save_file = f"pupil_dilations_across_sessions.png"
+        self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
+        plt.close()
+     
+
+    def calculate_RSM_test_set_drift(self, omit_sessions_from_calc:list):
+        """
+        Investigate RSM drift based on test sets of all sessions: Calculate distance between true RSM and RSM of predicted values.
+        """
+        session_ids = np.array([session_id for session_id in self.session_ids_num if session_id not in omit_sessions_from_calc])
+        session_day_differences = self.get_session_date_differences()
+
+        for normalization in self.normalizations:
+            ### Calculate (true) RSM of responses (for each sessions test set) ###
+            true_rsms_by_session = {"sessions": {}}
+            for session_id in session_ids:
+                session_test_data = self.load_split_data_from_file(session_id_num=session_id, type_of_content="meg_data", type_of_norm=normalization)['test']  # shape: (n_epochs, n_channels, n_timepoints)
+                n_epochs, n_channels, n_timepoints = session_test_data.shape  # epochs = crops
+
+                rsm_matrix_session = np.zeros(shape=(n_epochs, n_epochs))
+                for epoch1_idx in range(n_epochs):
+                    for epoch2_idx in range(epoch1_idx, n_epochs):
+                        # ! Flattening is only valid without consideration for correlation, not variance explained etc. !
+                        epoch_corr = pearsonr(session_test_data[epoch1_idx].flatten(),session_test_data[epoch2_idx].flatten())[0]
+                        rsm_matrix_session[epoch1_idx][epoch2_idx] = epoch_corr
+                
+                # Store upper triangular part without diagonal (only part with values)
+                rsm_matrix_session = rsm_matrix_session[np.triu_indices_from(rsm_matrix_session, k=1)]
+                true_rsms_by_session["sessions"][session_id] = rsm_matrix_session
+
+                if 0 in rsm_matrix_session:
+                    raise ValueError("Error in upper tri extraction.")
+
+            ### Calculate RSMs of predicted responses and compare to true RSMs ###
+
+            # Load predicted responses
+            storage_folder = f"data_files/{self.lock_event}/predicted_meg_responses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+            storage_file = f"predicted_responses_dict.pkl"
+            storage_path = os.path.join(storage_folder, storage_file)
+            with open(storage_path, 'rb') as file:
+                predicted_responses_dict = pickle.load(file)
+
+            rsm_corr_by_distance = {}
+            for session_id_test_set in session_ids:
+                true_rsm_matrix_session = true_rsms_by_session["sessions"][session_id_test_set]
+                for session_id_model in session_ids:
+                    predicted_responses = predicted_responses_dict["session_mapping"][session_id_model]["session_pred"][session_id_test_set]
+                    n_epochs, n_channels, n_timepoints = predicted_responses.shape
+
+                    # Calculate RSM of predicted responses                        
+                    predicted_rsm_matrix = np.zeros(shape=(n_epochs, n_epochs))
+                    for epoch1_idx in range(n_epochs):
+                        for epoch2_idx in range(epoch1_idx, n_epochs):
+                            # ! Flattening is only valid without consideration for correlation, not variance explained etc. !
+                            epoch_corr = pearsonr(predicted_responses[epoch1_idx].flatten(),predicted_responses[epoch2_idx].flatten())[0]
+                            predicted_rsm_matrix[epoch1_idx][epoch2_idx] = epoch_corr
+                    # Extract upper triangular part without diagonal (only part with values)
+                    predicted_rsm_matrix = predicted_rsm_matrix[np.triu_indices_from(predicted_rsm_matrix, k=1)]
+
+                    # Calculate correlation of predicted and true RSM, stored as fit measure by distance
+                    distance = session_day_differences[session_id_model][session_id_test_set]
+                    rsm_spearman_r, _ = spearmanr(true_rsm_matrix_session, predicted_rsm_matrix)
+
+                    if distance not in rsm_corr_by_distance.keys():
+                        rsm_corr_by_distance[distance] = [rsm_spearman_r]
+                    else:
+                        rsm_corr_by_distance[distance].append(rsm_spearman_r)
+
+            # Plot drift
+            plt.figure(figsize=(8, 6))
+            x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances=rsm_corr_by_distance, losses_averaged_within_distances=False)
+            filtered_x_values_set = np.array(list(set(x_values)))
+            slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
+            trend_line = slope * filtered_x_values_set + intercept
+            r_value = "{:.3f}".format(r_value)  # limit to three decimals
+            plt.plot(filtered_x_values_set, trend_line, color='green' , label=f"r={r_value}", linestyle='-', linewidth=3)
+            plt.plot(x_values, y_values, marker='o', linestyle='')
+            plt.title(f'Correlations of (upper triangular) true RSMs and predicted RSMs by distance.')
+            plt.xlabel('Distance in days between test set session and model session')
+            plt.ylabel('Spearman Correlation')
+            plt.legend()
+            plt.xticks(x_values) 
+            plt.grid(True)
+
+            save_folder = f"data_files/{self.lock_event}/visualizations/RSM_Test_Set_Drift/Distance_Plots/subject_{self.subject_id}/{normalization}"  
+            save_file = f"RSM_Test_Set_Drift.png"
+            self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
+            plt.close()
 
     def calculate_and_visualize_cluster_geometry_RSMs_simulated_responses(self, image_level:bool, omit_sessions_from_corr:list):
         """
@@ -2505,10 +2644,10 @@ class VisualizationHelper(GLMHelper):
         else:
             x_values = []
             y_values = []
-            for distance in fit_measures_by_distances:
-                for fit_measure in fit_measures_by_distances[distance]:
+            for distance, fit_measure_list in fit_measures_by_distances.items():
+                for _ in range(len(fit_measure_list)):
                     x_values.append(distance)
-                    y_values.append(fit_measure)
+                y_values.extend(fit_measure_list)
             x_values = np.array(x_values)
             y_values = np.array(y_values)
         
