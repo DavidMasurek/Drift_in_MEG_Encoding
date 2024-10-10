@@ -504,6 +504,11 @@ class BasicOperationsHelper:
                 means_per_sensor = np.mean(data, axis=(0,2)).reshape(1,n_channels,1)
                 normalized_data = data - means_per_sensor
 
+            case "mean_centered_vox":
+                # 0 centered by mean for each voxel over all epochs and timepoints (identical to mean_centered_ch for voxels instead of channels, added to avoid confusion due to name; n_channels is in thise n_voxels)
+                means_per_voxel = np.mean(data, axis=(0,2)).reshape(1,n_channels,1)
+                normalized_data = data - means_per_voxel
+
             case "min_max":
                 data_min = data.min()
                 data_max = data.max()
@@ -999,6 +1004,8 @@ class DatasetHelper(MetadataHelper):
         """
         if interpolate_outliers and clip_outliers:
             raise ValueError("create_meg_dataset called with invalid parameter configuration. Can either clip or interpolate eithers, not both.")
+        if "mean_centered_voxel_then_global_robust_scaling" in self.normalizations:
+            raise ValueError("create_meg_dataset is not designed to perform normalization mean_centered_voxel_then_global_robust_scaling")
 
         # Read combined and meg metadata from json
         combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
@@ -1046,7 +1053,7 @@ class DatasetHelper(MetadataHelper):
                 if "grad" not in selected_channel_indices and "mag" not in selected_channel_indices:
                     raise ValueError("Neither mag or grad channels selected.")
 
-                # Filter considered meg data based relevant timepoints
+                # Filter considered meg data based on relevant timepoints
                 for sensor_type in meg_data:
                     meg_data[sensor_type] = meg_data[sensor_type][:,:,self.timepoint_min:self.timepoint_max+1]
 
@@ -1130,8 +1137,8 @@ class DatasetHelper(MetadataHelper):
                         raise ValueError("Number of timepoints in meg dataset and in combined metadata are not identical.")
 
 
-                    # Clip out outliers based percentile (except for two step norms, here it will be done later)
-                    if clip_outliers and normalization not in ["mean_centered_ch_then_global_robust_scaling", "mean_centered_ch_then_global_z"]:
+                    # Clip out outliers based percentile (except for normals with global, here it will be done later)
+                    if clip_outliers and "global" not in normalization:
                         q0_3, q99_7 = np.percentile(np.concatenate((meg_split["train"], meg_split["test"])), [0.3, 99.7], axis=None)
                         for split in meg_split:
                             meg_split[split] = np.clip(meg_split[split], a_min=q0_3, a_max=q99_7)
@@ -1145,140 +1152,221 @@ class DatasetHelper(MetadataHelper):
         logger.custom_debug(f"meg_timepoints_in_dataset after per-session normalization: {n_epochs_two_step_norm}")
         logger.custom_debug(f"combined train+test: {n_epochs_two_step_norm['train'] + n_epochs_two_step_norm['test']}")
 
-        def apply_global_robust_scaling_across_all_sessions(current_norm:str):
-            assert current_norm in ["mean_centered_ch_then_global_robust_scaling", "global_robust_scaling"], "Function currently limited to the two normalization methods."
-            #n_grad = len(selected_channel_indices["grad"])  # Needed when seperating sensor types
-            #n_mag = len(selected_channel_indices["mag"])  # Needed when seperating sensor types
-            # Load data for all sessions with mean_centering_ch already applied
-            meg_mean_centered_all_sessions = None
-            metadata_by_session = self.recursive_defaultdict()
-            for session_id_num in self.session_ids_num:
-                # Get data after per-session normalization steps (may no normalization if only global normalization is performed)
-                previous_norm_step = "mean_centered_ch" if current_norm == "mean_centered_ch_then_global_robust_scaling" else "no_norm"
-                meg_data_session = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=previous_norm_step)
-                # Combine train and test
-                # Store num of epochs for later concatenation
-                metadata_by_session["session_id_num"][session_id_num]["n_train_epochs"] = np.shape(meg_data_session["train"])[0] 
-                metadata_by_session["session_id_num"][session_id_num]["n_test_epochs"] = np.shape(meg_data_session["test"])[0] 
-
-                #logger.custom_debug(f"[Session {session_id_num}]: np.shape(meg_data_session['train']): {np.shape(meg_data_session['train'])}")
-                #logger.custom_debug(f"[Session {session_id_num}]: np.shape(meg_data_session['test']): {np.shape(meg_data_session['test'])}")
-
-                #logger.custom_debug(f"np.shape(meg_data_session['test'])[0] : {np.shape(meg_data_session['test'])[0] }")
-                #logger.custom_debug("n_train_epochs:", metadata_by_session["session_id_num"]["n_train_epochs"])   
-                #logger.custom_debug("n_test_epochs:", metadata_by_session["session_id_num"]["n_test_epochs"]) 
-
-                meg_data_session = np.concatenate((meg_data_session["train"], meg_data_session["test"]))
-                
-                # TODO: Seperate sensor types if required
-
-                # Concatenate over sessions
-                meg_mean_centered_all_sessions = meg_data_session if meg_mean_centered_all_sessions is None else np.concatenate((meg_mean_centered_all_sessions, meg_data_session))
-
-            # Apply robust scaling across complete dataset (all sessions)
-            meg_data_normalized = self.normalize_array(meg_mean_centered_all_sessions, normalization="robust_scaling") # "robust_scaling, z_score"
-
-            if clip_outliers: # 0.3 and 99.7 percentile is equal to 3 standard deviations
-                # Get indices from z-scored robust scaled data
-                logger.custom_debug(f"Clipping outliers.")
-                q0_3, q99_7 = np.percentile(meg_data_normalized, [0.3, 99.7], axis=None)
-                meg_data_normalized = np.clip(meg_data_normalized, a_min=q0_3, a_max=q99_7) # q0_3, q99_7
-
-            logger.custom_debug(f"meg_data_normalized.shape: {meg_data_normalized.shape}")
-            logger.custom_debug(f"meg_timepoints_in_dataset after final norm, before split into sessions: {meg_data_normalized.shape[0]}")
-
-            # Seperate into sessions and train/split again
-            meg_data_normalized_by_session = self.recursive_defaultdict()
-            epoch_start_index = 0
-            for session_id in self.session_ids_num:
-                n_train_epochs = metadata_by_session["session_id_num"][session_id]["n_train_epochs"]
-                n_test_epochs = metadata_by_session["session_id_num"][session_id]["n_test_epochs"]
-
-                end_train_index = epoch_start_index + n_train_epochs
-                end_test_index = end_train_index + n_test_epochs
-
-                #logger.custom_debug(f"n_train_epochs: {n_train_epochs}")
-                #logger.custom_debug(f"n_test_epochs: {n_test_epochs}")
-                #logger.custom_debug(f"end_train_index: {end_train_index}")
-                #logger.custom_debug(f"end_test_index: {end_test_index}")
-
-                meg_data_session_train = meg_data_normalized[epoch_start_index:end_train_index,:,:]
-                meg_data_session_test = meg_data_normalized[end_train_index:end_test_index,:,:]
-
-                meg_data_normalized_by_session[session_id]["train"] = meg_data_session_train
-                meg_data_normalized_by_session[session_id]["test"] = meg_data_session_test
-
-                logger.custom_debug(f"[Session {session_id}]: meg_data_normalized['train'].shape: {meg_data_normalized_by_session[session_id]['train'].shape}")
-                logger.custom_debug(f"[Session {session_id}]: meg_data_normalized['test'].shape: {meg_data_normalized_by_session[session_id]['test'].shape}")
-
-                # Deprecated. Interpolates all outliers on session level (defined as +- 3 std)
-                #if clip_outliers:
-                #    logger.custom_debug(f"\n \n Clipping outliers for session {session_id}")
-                #    meg_data_combined = np.concatenate((meg_data_normalized_by_session[session_id]["train"], meg_data_normalized_by_session[session_id]["test"]))
-                #    for sensor in range(meg_data_combined.shape[1]):
-                #        for timepoint in range(meg_data_combined.shape[2]):
-                #            # Clip over all epochs for a given sensor, timepoint combination
-                #            meg_data_ch_t = meg_data_combined[:,sensor,timepoint] # n values where n = num epochs
-                #            q0_5, q99_5 = np.percentile(meg_data_ch_t, [0.5, 99.5], axis=None)
-                #            meg_data_ch_t_normalized = np.clip(meg_data_ch_t, a_min=q0_5, a_max=q99_5)
-                #            meg_data_combined[:,sensor,timepoint] = meg_data_ch_t_normalized
-                #    # Build back into split # n_train_epochs
-                #    meg_data_normalized_by_session[session_id]["train"] = meg_data_combined[:n_train_epochs,:,:]
-                #    meg_data_normalized_by_session[session_id]["test"] = meg_data_combined[n_train_epochs:,:,:]
-
-                if interpolate_outliers:
-                    logger.custom_debug(f"\n \n Performing Interpolation for session {session_id}")
-                    logger.custom_debug(f"shapes before interpolation: Train: {meg_data_normalized_by_session[session_id]['train'].shape}, Test: {meg_data_normalized_by_session[session_id]['test'].shape}")
-                    meg_data_combined = np.concatenate((meg_data_normalized_by_session[session_id]["train"], meg_data_normalized_by_session[session_id]["test"]))
-                    n_outliers_in_session = 0
-                    for sensor in range(meg_data_combined.shape[1]):
-                        for timepoint in range(meg_data_combined.shape[2]):
-                            # Interpolate over all epochs for a given sensor, timepoint combination
-                            meg_data_ch_t = meg_data_combined[:,sensor,timepoint] # n values where n = num epochs
-                            indices = [index for index in range(len(meg_data_ch_t))]
-                            meg_data_ch_t_non_outliers = {index: meg_data_ch_t[index] for index in indices if abs(meg_data_ch_t[index]) <= 3}
-                            idx_to_be_interpolated = [idx for idx in indices if idx not in meg_data_ch_t_non_outliers.keys()]
-
-                            # If outliers exist for this session, channel and timepoint
-                            if idx_to_be_interpolated:
-                                interpolated_values = np.interp(idx_to_be_interpolated, list(meg_data_ch_t_non_outliers.keys()), list(meg_data_ch_t_non_outliers.values()))
-                                meg_data_ch_t_interpolated = meg_data_ch_t[idx_to_be_interpolated] = interpolated_values
-
-                                #logger.custom_info(f"meg_data_ch_t.shape: {meg_data_ch_t.shape}")
-                                #logger.custom_info(f"len(indices): {len(indices)}")
-                                #logger.custom_info(f"len(list(meg_data_ch_t_non_outliers.keys())): {len(list(meg_data_ch_t_non_outliers.keys()))}")
-                                #logger.custom_info(f"len(idx_to_be_interpolated): {len(idx_to_be_interpolated)}")
-                                #logger.custom_info(f"meg_data_ch_t_interpolated.shape: {meg_data_ch_t_interpolated.shape}")
-
-                                meg_data_combined[idx_to_be_interpolated,sensor,timepoint] = meg_data_ch_t_interpolated
-                                n_outliers_in_session += len(idx_to_be_interpolated)
-                                
-                    # Build back into split # n_train_epochs
-                    meg_data_normalized_by_session[session_id]["train"] = meg_data_combined[:n_train_epochs,:,:]
-                    meg_data_normalized_by_session[session_id]["test"] = meg_data_combined[n_train_epochs:,:,:]
-
-                    logger.custom_debug(f"shapes after interpolation: Train: {meg_data_normalized_by_session[session_id]['train'].shape}, Test: {meg_data_normalized_by_session[session_id]['test'].shape}")
-                    logger.custom_debug(f"[session_id: {session_id}]n_outliers_in_session: {n_outliers_in_session}")
+        
+        for normalization in self.normalizations:
+            if "global_robust_scaling" in normalization:
+                self._apply_global_robust_scaling_across_all_sessions(current_norm=normalization, interpolate_outliers=interpolate_outliers, clip_outliers=clip_outliers)
 
 
-                # Export meg dataset arrays to .npz
+    def _apply_global_robust_scaling_across_all_sessions(self, current_norm:str, interpolate_outliers:bool=False, clip_outliers:bool=True, glaser_region:str=None):
+        """
+        Applies robust scaling across all concatenated sessions, then stores them seperately again.
+        """
+        assert current_norm in ["mean_centered_ch_then_global_robust_scaling", "mean_centered_voxel_then_global_robust_scaling", "global_robust_scaling"], "Function currently limited to the three normalization methods."
+        
+        # Load data for all sessions with mean_centering_ch already applied
+        meg_data_all_sessions = None
+        metadata_by_session = self.recursive_defaultdict()
+
+        if current_norm == "mean_centered_ch_then_global_robust_scaling":
+            previous_norm_step = "mean_centered_ch"  
+        elif current_norm == "mean_centered_voxel_then_global_robust_scaling":
+            previous_norm_step = "mean_centered_vox"  
+        else:
+            previous_norm_step = "no_norm"
+
+        glaser_region_folder = f"/{glaser_region}" if glaser_region is not None else ""
+        
+        for session_id in self.session_ids_num:
+            # Get data after per-session normalization steps (may be no normalization if only global normalization is performed)
+            if glaser_region is not None:
+                storage_folder = f"data_files/{self.lock_event}/meg_data/source_space/{glaser_region}/{previous_norm_step}/subject_{self.subject_id}/session_{session_id}"  
+                meg_data_session = {"train": None, "test": None}
+                for split in meg_data_session:
+                    storage_file = f"meg_data_{split}.npy"
+                    storage_path = os.path.join(storage_folder, storage_file)
+
+                    meg_data_session[split] = np.load(storage_path)
+            else:
+                meg_data_session = self.load_split_data_from_file(session_id_num=session_id, type_of_content="meg_data", type_of_norm=previous_norm_step)
+            
+            # Combine train and test
+            # Store num of epochs for later concatenation
+            metadata_by_session["session_id"][session_id]["n_train_epochs"] = np.shape(meg_data_session["train"])[0] 
+            metadata_by_session["session_id"][session_id]["n_test_epochs"] = np.shape(meg_data_session["test"])[0] 
+
+            meg_data_session = np.concatenate((meg_data_session["train"], meg_data_session["test"]))
+            
+            # TODO: Seperate sensor types if required
+
+            # Concatenate over sessions
+            meg_data_all_sessions = meg_data_session if meg_data_all_sessions is None else np.concatenate((meg_data_all_sessions, meg_data_session))
+
+        # Apply robust scaling across complete dataset (all sessions)
+        meg_data_normalized = self.normalize_array(meg_data_all_sessions, normalization="robust_scaling") # "robust_scaling, z_score"
+
+        if clip_outliers: # 0.3 and 99.7 percentile is equal to 3 standard deviations
+            # Get indices from z-scored robust scaled data
+            logger.custom_debug(f"Clipping outliers.")
+            q0_3, q99_7 = np.percentile(meg_data_normalized, [0.3, 99.7], axis=None)
+            meg_data_normalized = np.clip(meg_data_normalized, a_min=q0_3, a_max=q99_7) # q0_3, q99_7
+
+        logger.custom_debug(f"meg_data_normalized.shape: {meg_data_normalized.shape}")
+        logger.custom_debug(f"meg_timepoints_in_dataset after final norm, before split into sessions: {meg_data_normalized.shape[0]}")
+
+        # Seperate into sessions and train/split again
+        meg_data_normalized_by_session = self.recursive_defaultdict()
+        epoch_start_index = 0
+        for session_id in self.session_ids_num:
+            n_train_epochs = metadata_by_session["session_id"][session_id]["n_train_epochs"]
+            n_test_epochs = metadata_by_session["session_id"][session_id]["n_test_epochs"]
+
+            end_train_index = epoch_start_index + n_train_epochs
+            end_test_index = end_train_index + n_test_epochs
+
+            meg_data_session_train = meg_data_normalized[epoch_start_index:end_train_index,:,:]
+            meg_data_session_test = meg_data_normalized[end_train_index:end_test_index,:,:]
+
+            meg_data_normalized_by_session[session_id]["train"] = meg_data_session_train
+            meg_data_normalized_by_session[session_id]["test"] = meg_data_session_test
+
+            logger.custom_debug(f"[Session {session_id}]: meg_data_normalized['train'].shape: {meg_data_normalized_by_session[session_id]['train'].shape}")
+            logger.custom_debug(f"[Session {session_id}]: meg_data_normalized['test'].shape: {meg_data_normalized_by_session[session_id]['test'].shape}")
+
+            if interpolate_outliers:
+                logger.custom_debug(f"\n \n Performing Interpolation for session {session_id}")
+                logger.custom_debug(f"shapes before interpolation: Train: {meg_data_normalized_by_session[session_id]['train'].shape}, Test: {meg_data_normalized_by_session[session_id]['test'].shape}")
+                meg_data_combined = np.concatenate((meg_data_normalized_by_session[session_id]["train"], meg_data_normalized_by_session[session_id]["test"]))
+                n_outliers_in_session = 0
+                for sensor in range(meg_data_combined.shape[1]):
+                    for timepoint in range(meg_data_combined.shape[2]):
+                        # Interpolate over all epochs for a given sensor, timepoint combination
+                        meg_data_ch_t = meg_data_combined[:,sensor,timepoint] # n values where n = num epochs
+                        indices = [index for index in range(len(meg_data_ch_t))]
+                        meg_data_ch_t_non_outliers = {index: meg_data_ch_t[index] for index in indices if abs(meg_data_ch_t[index]) <= 3}
+                        idx_to_be_interpolated = [idx for idx in indices if idx not in meg_data_ch_t_non_outliers.keys()]
+
+                        # If outliers exist for this session, channel and timepoint
+                        if idx_to_be_interpolated:
+                            interpolated_values = np.interp(idx_to_be_interpolated, list(meg_data_ch_t_non_outliers.keys()), list(meg_data_ch_t_non_outliers.values()))
+                            meg_data_ch_t_interpolated = meg_data_ch_t[idx_to_be_interpolated] = interpolated_values
+
+                            meg_data_combined[idx_to_be_interpolated,sensor,timepoint] = meg_data_ch_t_interpolated
+                            n_outliers_in_session += len(idx_to_be_interpolated)
+                            
+                # Build back into split # n_train_epochs
+                meg_data_normalized_by_session[session_id]["train"] = meg_data_combined[:n_train_epochs,:,:]
+                meg_data_normalized_by_session[session_id]["test"] = meg_data_combined[n_train_epochs:,:,:]
+
+                logger.custom_debug(f"shapes after interpolation: Train: {meg_data_normalized_by_session[session_id]['train'].shape}, Test: {meg_data_normalized_by_session[session_id]['test'].shape}")
+                logger.custom_debug(f"[session_id: {session_id}]n_outliers_in_session: {n_outliers_in_session}")
+
+
+            # Export meg dataset arrays to .npz
+            if glaser_region is not None:
+                for split in ["train", "test"]:
+                    save_folder = f"data_files/{self.lock_event}/meg_data/source_space/{glaser_region}/{current_norm}/subject_{self.subject_id}/session_{session_id}/{split}"  
+                    os.makedirs(save_folder, exist_ok=True)
+                    save_file = "meg_data.npy"
+                    save_path = os.path.join(save_folder, save_file)
+
+                    np.save(save_path, meg_data_normalized_by_session[session_id][split])
+            else:
                 self.export_split_data_as_file(session_id=session_id, 
-                                                type_of_content="meg_data",
-                                                array_dict=meg_data_normalized_by_session[session_id],
-                                                type_of_norm=current_norm)
+                    type_of_content="meg_data",
+                    array_dict=meg_data_normalized_by_session[session_id],
+                    type_of_norm=current_norm)
 
-                epoch_start_index = end_test_index
+            epoch_start_index = end_test_index
+    
+            # TODO: Combine grad and mag if both selected
         
-                # TODO: Combine grad and mag if both selected
-            
-            logger.custom_debug(f"end_test_index: {end_test_index}")
-           
-        for global_robust_scaling_norm in ["mean_centered_ch_then_global_robust_scaling", "global_robust_scaling"]:
-            if global_robust_scaling_norm in self.normalizations:
-                apply_global_robust_scaling_across_all_sessions(current_norm=global_robust_scaling_norm)
+        logger.custom_debug(f"end_test_index: {end_test_index}")
 
             
+    def create_source_meg_dataset(self, regions_of_interest:list, clip_outliers=True) -> None:
+        """
+        Creates one meg dataset per source region of interest (per session) (per normalization).
+        Seperate from 'create_meg_dataset' for reasons of readability.
+        ! assumes identical meg metadata for source data and sensor data !
+        """
+        if self.lock_event == "saccade":
+            raise ValueError("Only fixation-centered source reconstructed meg data available atm.")
+
+        # Read metadata and meg data
+        combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
+        meg_metadata = self.read_dict_from_json(type_of_content="meg_metadata")
+
+        meg_data_folder = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/source_space/beamformer/glasser/ori_None/hem_lh/filter_0.2_200/ica'
+
+        for session_id_char in self.session_ids_char:
+            session_id = self.map_session_letter_id_to_num(session_id_char)
+
+            # get session data
+            meg_file_name = f"as{self.subject_id}{session_id_char}_population_codes_{self.lock_event}_500hz_masked_False.h5"
+            meg_data_path = os.path.join(meg_data_folder, meg_file_name)
+
+            with h5py.File(meg_data_path, "r") as meg_file:
+                # create seperate dataset for each glaser region of interest
+                for glaser_region in regions_of_interest:
+                    meg_data = np.array(meg_file[glaser_region]['onset'])  #  shape: (n_epochs, n_voxels, n_timepoints)
+
+                    n_voxels = meg_data.shape[1]
+
+                    # Filter considered meg data based on relevant timepoints
+                    meg_data = meg_data[:,:,self.timepoint_min:self.timepoint_max+1]
+
+                    for normalization in self.normalizations:
+                        # Set normalization that is to be performed per session; some normalizations require additional global computations across all sessions
+                        if normalization == "mean_centered_voxel_then_global_robust_scaling":
+                            # Treat voxels as channels in normalization
+                            normalization_stage = "mean_centered_vox"
+                        elif normalization == "global_robust_scaling":
+                            normalization_stage = "no_norm"
+                        else:
+                            normalization_stage = normalization
+
+                        # Apply normalization step
+                        meg_data_norm = self.normalize_array(meg_data, normalization=normalization_stage, session_id=session_id, n_channels=n_voxels)
+
+                        # Split into train/test
+                        trials_split_dict = self.load_split_data_from_file(session_id_num=session_id, type_of_content="trial_splits")  # Get train/test split based on trials (based on scenes)
+
+                        # Iterate over train/test split by trials (not over meg_metadata as before)
+                        # In this fashion, the first element in the crop and meg dataset of each split type will surely be the first element in the array of trials for that split
+                        meg_split = {"train": [], "test": []}
+                        for split in meg_split:
+                            for trial_id in trials_split_dict[split]:
+                                # Get timepoints from combined_metadata
+                                for timepoint_id in combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"]:
+                                    meg_index = combined_metadata["sessions"][session_id]["trials"][trial_id]["timepoints"][timepoint_id]["meg_index"]
+                                    meg_datapoint = meg_data_norm[meg_index]
+
+                                    meg_split[split].append(meg_datapoint)
+
+                            meg_split[split] = np.array(meg_split[split])
+
+                        # Clip out outliers based percentile (except for two step norms, here it will be done later)
+                        if clip_outliers and "global" not in normalization:
+                            q0_3, q99_7 = np.percentile(np.concatenate((meg_split["train"], meg_split["test"])), [0.3, 99.7], axis=None)
+                            for split in meg_split:
+                                meg_split[split] = np.clip(meg_split[split], a_min=q0_3, a_max=q99_7)
+
+                        # Export meg dataset arrays to .npz
+                        save_folder = f"data_files/{self.lock_event}/meg_data/source_space/{glaser_region}/{normalization_stage}/subject_{self.subject_id}/session_{session_id}"  
+                        os.makedirs(save_folder, exist_ok=True)
+
+                        for split in meg_split:
+                            save_file = f"meg_data_{split}.npy"
+                            save_path = os.path.join(save_folder, save_file)
+
+                            np.save(save_path, meg_split[split])
         
+        for normalization in self.normalizations:
+            if "global_robust_scaling" in normalization:
+                for glaser_region in regions_of_interest:
+                    self._apply_global_robust_scaling_across_all_sessions(current_norm=normalization, clip_outliers=clip_outliers, interpolate_outliers=False, glaser_region=glaser_region)
+
 
     def create_train_test_split(self, debugging=False):
         """
@@ -1731,11 +1819,14 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         self.ann_features_type = "ann_features_pca" if pca_features else "ann_features"
 
 
-    def train_mapping(self, all_sessions_combined:bool=False, shuffle_train_labels:bool=False, downscale_features:bool=False):
+    def train_mapping(self, all_sessions_combined:bool=False, shuffle_train_labels:bool=False, downscale_features:bool=False, regions_of_interest:list=None):
         """
         Trains a mapping from ANN features to MEG data over all sessions.
         """
-        def train_model(X_train:np.ndarray, Y_train: np.ndarray, normalization:str, all_sessions_combined:bool, session_id_num:str=None):
+        if regions_of_interest is not None:
+            assert not all_sessions_combined, "[train_mapping]: Invalid argument combination."
+
+        def train_model(X_train:np.ndarray, Y_train: np.ndarray, normalization:str, all_sessions_combined:bool, session_id_num:str=None, glaser_region:str=None):
             # Initialize Helper class
             ridge_model = GLMHelper.MultiDimensionalRegression(self) 
 
@@ -1750,9 +1841,10 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
             all_session_folder = f"/all_sessions_combined" if all_sessions_combined else ""
             session_addition = f"/session_{session_id_num}" if not all_sessions_combined else ""
+            glaser_region_folder = f"/source_space/{glaser_region}" if glaser_region is not None else ""
 
             # Store trained models as pickle
-            save_folder = f"data_files/{self.lock_event}/GLM_models/{self.ann_model}/{self.module_name}/subject_{self.subject_id}{all_session_folder}/norm_{normalization}{session_addition}"  
+            save_folder = f"data_files/{self.lock_event}/GLM_models{glaser_region_folder}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}{all_session_folder}/norm_{normalization}{session_addition}"  
             save_file = "GLM_models.pkl"
             os.makedirs(save_folder, exist_ok=True)
             save_path = os.path.join(save_folder, save_file)
@@ -1766,23 +1858,37 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
             for normalization in self.normalizations:
                 logger.custom_info(f"Training mapping for normalization {normalization}")
                 session_alphas = {}
-                for session_id_num in self.session_ids_num:
-                    logger.custom_debug(f"Training mapping for Session {session_id_num}")
-                    logger.custom_debug(f"[Session {session_id_num}] Before relevant load_split_data_from_file")
-                    # Get ANN features for session
-                    ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content=self.ann_features_type, ann_model=self.ann_model, module=self.module_name)
-                    # Get MEG data for sesssion
-                    meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
+                if regions_of_interest is None:
+                    for session_id_num in self.session_ids_num:
+                        # Get ANN features and meg data for session
+                        ann_features = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content=self.ann_features_type, ann_model=self.ann_model, module=self.module_name)
+                        meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
 
-                    X_train, Y_train = ann_features['train'], meg_data['train']
+                        X_train, Y_train = ann_features['train'], meg_data['train']
 
-                    if shuffle_train_labels:
-                        np.random.shuffle(Y_train)
+                        if shuffle_train_labels:
+                            np.random.shuffle(Y_train)
 
-                    logger.custom_debug(f"[Session {session_id_num}] X_train.shape: {X_train.shape}, Y_train.shape: {Y_train.shape}")
-                    selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined, session_id_num=session_id_num)
-                    session_alphas[session_id_num] = selected_alphas
-                #self.save_dict_as_json(type_of_content="selected_alphas_by_session", dict_to_store=session_alphas, type_of_norm=normalization, predict_train_data=predict_train_data)
+                        selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined, session_id_num=session_id_num)
+                        session_alphas[session_id_num] = selected_alphas
+                    #self.save_dict_as_json(type_of_content="selected_alphas_by_session", dict_to_store=session_alphas, type_of_norm=normalization, predict_train_data=predict_train_data)
+                else:
+                    # seperately for each source/glaser region
+                    for session_id in self.session_ids_num:
+                        ann_features = self.load_split_data_from_file(session_id_num=session_id, type_of_content=self.ann_features_type, ann_model=self.ann_model, module=self.module_name)
+                        X_train = ann_features['train']
+                        for glaser_region in regions_of_interest:
+                            # load train meg data
+                            storage_folder = f"data_files/{self.lock_event}/meg_data/source_space/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id}/train"  
+                            storage_file = "meg_data.npy"
+                            storage_path = os.path.join(storage_folder, storage_file)
+
+                            Y_train = np.load(storage_path)
+
+                            if shuffle_train_labels:
+                                np.random.shuffle(Y_train)
+
+                            selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined, session_id_num=session_id, glaser_region=glaser_region)
         # all sessions combined
         else:
             for normalization in self.normalizations:
@@ -2044,6 +2150,93 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         json.dump(dict_to_store, file, indent=4)
 
 
+    def predict_from_mapping_source_all_sessions(self, predict_train_data:bool=False, shuffle_test_labels:bool=False, downscale_features:bool=False, regions_of_interest:list=None):
+        """
+        For each source region: based on the trained mapping for each session, predicts MEG data over all sessions from their respective test features.
+        For readability reasons seperated from predict_from_mapping_all_sessions.
+        If predict_train_data is True, predicts the train data of each session as a sanity check of the complete pipeline. Expect strong overfit.
+        """
+        for glaser_region in regions_of_interest:
+            for normalization in self.normalizations:
+                variance_explained_dict = self.recursive_defaultdict()
+                correlation_dict = self.recursive_defaultdict()
+                predicted_responses_dict = self.recursive_defaultdict()
+                for session_id_model in self.session_ids_num:
+                    # Get trained ridge regression model for this session
+                    # Load ridge model
+                    storage_folder = f"data_files/{self.lock_event}/GLM_models/source_space/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/session_{session_id_model}"  
+                    storage_file = "GLM_models.pkl"
+                    storage_path = os.path.join(storage_folder, storage_file)
+                    with open(storage_path, 'rb') as file:
+                        ridge_models = pickle.load(file)
+
+                    # Initialize MultiDim GLM class with stored models
+                    ridge_model = GLMHelper.MultiDimensionalRegression(self, models=ridge_models)
+
+                    # Generate predictions for test features over all sessions and evaluate them 
+                    for session_id_pred in self.session_ids_num:
+                        # Get ANN features and MEG data for session where predictions are to be evaluated
+                        ann_features = self.load_split_data_from_file(session_id_num=session_id_pred, type_of_content=self.ann_features_type, ann_model=self.ann_model, module=self.module_name)
+                        
+                        meg_data = {"train": None, "test": None}
+                        for split in meg_data:
+                            storage_folder = f"data_files/{self.lock_event}/meg_data/source_space/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id_pred}/{split}"  
+                            storage_file = "meg_data.npy"
+                            storage_path = os.path.join(storage_folder, storage_file)
+
+                            meg_data[split] = np.load(storage_path)
+
+                        if predict_train_data:
+                            X_test, Y_test = ann_features['train'], meg_data['train']
+                        else:
+                            X_test, Y_test = ann_features['test'], meg_data['test']
+
+                        if shuffle_test_labels:
+                            np.random.shuffle(Y_test)
+
+                        # Generate and store predictions
+                        predictions = ridge_model.predict(X_test, downscale_features=downscale_features)
+                        predicted_responses_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = predictions
+
+                        # Store fit measures seperately for each timepoint/model
+                        _, n_voxels, n_timepoints = predictions.shape
+                        for t in range(n_timepoints):
+                            var_explained_timepoint_sum = 0
+                            r_pearson_timepoint_sum = 0  
+                            for v in range(n_voxels):
+                                var_explained_timepoint_sum += r2_score(Y_test[:,v,t], predictions[:,v,t])
+                                r_pearson_timepoint_sensor, _ = pearsonr(Y_test[:,v,t], predictions[:,v,t])
+                                r_pearson_timepoint_sum += r_pearson_timepoint_sensor
+
+                            var_explained_timepoint = var_explained_timepoint_sum / n_voxels
+                            r_pearson_timepoint = r_pearson_timepoint_sum / n_voxels
+                                
+                            # Save fit measures
+                            variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = var_explained_timepoint
+                            correlation_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = r_pearson_timepoint
+
+                # Store predictions dict
+                storage_folder = f"data_files/{self.lock_event}/predicted_meg_responses/source_space/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                os.makedirs(storage_folder, exist_ok=True)
+                storage_file = f"predicted_responses_dict.pkl"
+                storage_path = os.path.join(storage_folder, storage_file)
+
+                with open(storage_path, 'wb') as file:
+                    pickle.dump(predicted_responses_dict, file)
+
+                # Store loss dict
+                storage_dicts_by_folders = {"var_explained_timepoints": variance_explained_dict, "pearson_r_timepoints": correlation_dict}
+
+                for main_folder, fit_measure_dict in storage_dicts_by_folders.items():
+                    storage_folder = f"data_files/{self.lock_event}/{main_folder}/source_space/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                    os.makedirs(storage_folder, exist_ok=True)
+                    json_storage_file = f"{main_folder}_dict.json"
+                    json_storage_path = os.path.join(storage_folder, json_storage_file)
+
+                    with open(json_storage_path, 'w') as file:
+                        json.dump(fit_measure_dict, file, indent=4)
+
+
     def predict_from_mapping_simulation_scene_dataset(self):
         """
         Predicts MEG activity from PCA reduced features extracted from the scenes selected for the generation of simulated responses.
@@ -2170,6 +2363,53 @@ class VisualizationHelper(GLMHelper):
         #self.calculate_and_visualize_cluster_geometry_RSMs_simulated_responses(image_level=True, omit_sessions_from_corr=[])
         #self.calculate_and_visualize_between_sessions_RSMs_simulated_responses(image_level=True, omit_sessions_from_corr=[])
         #self.visualize_arousal_mean_over_sessions()
+        #self.investigate_source_df()
+
+
+    def investigate_source_df(self):
+        """
+        source_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/source_space/dSPM/glasser/ori_normal/hem_lh/filter_0.2_200/ica/as{self.subject_id}a_et_epochs_info_saccade.fif' #_population_codes_saccade_500hz_masked_False.h5
+
+        # Load the source estimate (dSPM results) from the .fif file
+        stc = mne.read_source_estimate(source_file_path)
+
+        # Check the data shape and time range
+        print(f"Shape of source estimate data: {stc.data.shape}")
+        print(f"Time points (in seconds): {stc.times}")
+        print(f"Number of vertices in each hemisphere: {len(stc.vertices[0])}, {len(stc.vertices[1])}")
+
+        # You can access the data array (source estimates)
+        # stc.data gives a 2D array: [n_sources x n_times]
+        print(f"First few data points:\n{stc.data[:5, :5]}")
+
+        # Get the time step (difference between consecutive time points)
+        print(f"Time step: {stc.tstep}")
+
+        # Plot the source estimate for inspection (using the brain surface)
+        brain_plot = stc.plot(subject='sample', hemi='both', subjects_dir='path_to_your_subjects_dir')
+
+        plot_folder =  f"data_files/{self.lock_event}/visualizations/source_space/visual_inspection"
+        plot_file = f"source_space_estimation.png"
+        os.makedirs(plot_folder, exist_ok=True)
+        self.save_plot_as_file(plt=brain_plot, plot_folder=plot_folder, plot_file=plot_file)
+
+        # Plot time series for the first few sources (vertices)
+        #stc.plot_time_series(hemi='both')
+        """
+        source_file_path = f'/share/klab/datasets/avs/population_codes/as02/source_space/beamformer/glasser/ori_None/hem_lh/filter_0.2_200/ica/as{self.subject_id}a_population_codes_fixation_500hz_masked_False.h5'
+        with h5py.File(source_file_path, "r") as f:
+            print(f"f.keys(): {f.keys()}")
+            print(f"len f.keys(): {len(f.keys())}")
+            print(f"H5 f.attrs.keys(): {f.attrs.keys()}")
+
+            print(f"f['V3']['onset'].shape: {f['V3']['onset'].shape}")
+            print(f"f['V3A']['onset'].shape: {f['V3A']['onset'].shape}")
+            print(f"f['V3B']['onset'].shape: {f['V3B']['onset'].shape}")
+
+            print(f"H5 f.attrs['rois'].shape: {f.attrs['rois'].shape}")
+            print(f"H5 f.attrs['rois']: {f.attrs['rois']}")
+
+
 
     def visualize_arousal_mean_over_sessions(self):
         """
@@ -2864,10 +3104,13 @@ class VisualizationHelper(GLMHelper):
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
                 
 
-    def visualize_GLM_results(self, fit_measure_type:str, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True, average_distance_vals:bool = False):
+    def visualize_GLM_results(self, fit_measure_type:str, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True, average_distance_vals:bool = False, regions_of_interest:list = None):
         """
         Visualizes results from GLMHelper.predict_from_mapping_all_sessions
         """
+        if regions_of_interest is not None:
+            assert by_timepoints, "[visualize_GLM_results] currently only used for self-prediction timepoint comparisons in the context of source space analysis."
+
         session_day_differences = self.get_session_date_differences()
 
         # TODO: Remove reprecated var_explained parameter; by_timepoints can now also be var_explained
@@ -2881,18 +3124,19 @@ class VisualizationHelper(GLMHelper):
         
         fit_measure_norms = {}
         for normalization in self.normalizations:
-            # Load loss/var explained dict
-            if fit_measure_type not in ["var_explained_timepoint", "var_explained_sensors_timepoint", "pearson_r_timepoint"]:
-                session_fit_measures = self.read_dict_from_json(type_of_content=fit_measure_type, type_of_norm=normalization)
-            else:
-                storage_folder = f"data_files/{self.lock_event}/{fit_measure_type}s/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
-                json_storage_file = f"{fit_measure_type}s_dict.json"
-                json_storage_path = os.path.join(storage_folder, json_storage_file)
+            if regions_of_interest is None:
+                # Load loss/var explained dict
+                if fit_measure_type not in ["var_explained_timepoint", "var_explained_sensors_timepoint", "pearson_r_timepoint"]:
+                    session_fit_measures = self.read_dict_from_json(type_of_content=fit_measure_type, type_of_norm=normalization)
+                else:
+                    storage_folder = f"data_files/{self.lock_event}/{fit_measure_type}s/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                    json_storage_file = f"{fit_measure_type}s_dict.json"
+                    json_storage_path = os.path.join(storage_folder, json_storage_file)
 
-                with open(json_storage_path, 'r') as file:
-                    session_fit_measures = json.load(file)
+                    with open(json_storage_path, 'r') as file:
+                        session_fit_measures = json.load(file)
 
-            fit_measure_norms[normalization] = session_fit_measures
+                fit_measure_norms[normalization] = session_fit_measures
 
             if only_distance:
                 # Plot loss as a function of distance of predicted session from "training" session
@@ -3051,7 +3295,7 @@ class VisualizationHelper(GLMHelper):
             elif by_timepoints:
                 assert fit_measure_type in ["var_explained_timepoint", "var_explained_sensors_timepoint", "pearson_r_timepoint"]
 
-                def plot_timepoint_fit_measure(timepoint_loss_list, num_timepoints, session_id=None, sensor_name=None):
+                def plot_timepoint_fit_measure(timepoint_loss_list:list, num_timepoints:int, session_id:str=None, sensor_name:str=None, glaser_region:str=None):
                     plt.figure(figsize=(10, 6))
                     #timepoints_in_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in list(range(num_timepoints))]
                     #plt.bar(timepoints_in_ms, timepoint_loss_list, color='blue')
@@ -3060,15 +3304,17 @@ class VisualizationHelper(GLMHelper):
                     #plt.bar(list(range(num_timepoints)), timepoint_loss_list, color='blue')
                     #logger.custom_debug(f"list(range(num_timepoints): {list(range(num_timepoints))}")
                     session_subtitle = "Averaged across all Sessions, predicting themselves" if session_id is None else f"Session {session_id}, predicting iteself"
-                    sensor_subtile = "Averaged across all sensors" if sensor_name is None else f"Sensor {sensor_name}"
-                    plt.title(f'{type_of_fit_measure} Fit measure per Timepoint Model. \n {sensor_subtile} {session_subtitle} \n omitted sessions: {omit_sessions}.')
+                    sensor_subtitle = "Averaged across all sensors" if sensor_name is None else f"Sensor {sensor_name}"
+                    region_subtitle = "" if glaser_region is None else f"Glaser region {glaser_region}"
+                    plt.title(f'{type_of_fit_measure} Fit measure per Timepoint Model. \n {region_subtitle} {sensor_subtitle} {session_subtitle} \n omitted sessions: {omit_sessions}.')
                     plt.xlabel(f'Time relative to {self.lock_event} onset')
                     plt.ylabel(f'{type_of_fit_measure}')
                     plt.grid(True)
 
                     # Save the plot to a file
-                    session_folder_addition = f"/sensor_level/{sensor_name}" if sensor_name is not None else ""
-                    plot_folder = f"data_files/{self.lock_event}/visualizations/timepoint_model_comparison{session_folder_addition}/subject_{self.subject_id}/norm_{normalization}"
+                    sensor_folder_addition = f"/sensor_level/{sensor_name}" if sensor_name is not None else ""
+                    region_folder_addition = f"/source_space/{glaser_region}" if glaser_region is not None else ""
+                    plot_folder = f"data_files/{self.lock_event}/visualizations/timepoint_model_comparison{region_folder_addition}{sensor_folder_addition}/subject_{self.subject_id}/norm_{normalization}"
                     if session_id is None:
                         plot_folder += "/all_sessions_combined"  
                         session_name_addition = "" if sensor_name is None else f"_sensor_{sensor_name}"
@@ -3080,7 +3326,7 @@ class VisualizationHelper(GLMHelper):
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
                     plt.close()
 
-                def extract_self_session_pred_and_plot_by_timepoints(session_fit_measures:dict, sensor_name=None) -> None:
+                def extract_self_session_pred_and_plot_by_timepoints(session_fit_measures:dict, sensor_name:str=None, glaser_region:str=None) -> None:
                     # Collect fit_measures for timepoint models on predictions on the own session
                     fit_measures_by_session_by_timepoint = {"session": {}}
                     for session_id in session_fit_measures['session_mapping']:
@@ -3105,15 +3351,26 @@ class VisualizationHelper(GLMHelper):
                             timepoint_average_fit_measure[timepoint] = avg_loss
                         timepoint_avg_loss_list = [timepoint_average_fit_measure[timepoint] for timepoint in timepoint_average_fit_measure]
 
-                        plot_timepoint_fit_measure(timepoint_loss_list=timepoint_avg_loss_list, num_timepoints=num_timepoints, sensor_name=sensor_name)
+                        plot_timepoint_fit_measure(timepoint_loss_list=timepoint_avg_loss_list, num_timepoints=num_timepoints, sensor_name=sensor_name, glaser_region=glaser_region)
                     else:
                         for session_id in fit_measures_by_session_by_timepoint["session"]:
                             timepoint_loss_list = [fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"][timepoint] for timepoint in fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"]]
-                            plot_timepoint_fit_measure(timepoint_loss_list=timepoint_loss_list, num_timepoints=num_timepoints, session_id=session_id, sensor_name=sensor_name)
+                            plot_timepoint_fit_measure(timepoint_loss_list=timepoint_loss_list, num_timepoints=num_timepoints, session_id=session_id, sensor_name=sensor_name, glaser_region=glaser_region)
             
                 if fit_measure_type != "var_explained_sensors_timepoint":
                     # All sensors combined
-                    extract_self_session_pred_and_plot_by_timepoints(session_fit_measures=session_fit_measures)
+                    if regions_of_interest is None:
+                        extract_self_session_pred_and_plot_by_timepoints(session_fit_measures=session_fit_measures)
+                    else:
+                        # Load timepoint-based variance explained and plot seperately for each glaser region of interest
+                        for glaser_region in regions_of_interest:
+                            storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/source_space/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                            json_storage_file = f"var_explained_timepoints_dict.json"
+                            json_storage_path = os.path.join(storage_folder, json_storage_file)
+                            with open(json_storage_path, 'r') as file:
+                                fit_measures_by_session_by_timepoint = json.load(file)
+                            
+                            extract_self_session_pred_and_plot_by_timepoints(session_fit_measures=fit_measures_by_session_by_timepoint, glaser_region=glaser_region)
                 else:
                     # Each sensor seperate
                     sensor_index_name_dict = self.get_relevant_meg_channels(self.chosen_channels)
@@ -3325,7 +3582,12 @@ class VisualizationHelper(GLMHelper):
             plot_file = f"distance_drift_all_subjects_{fit_measure}.png"
             self.save_plot_as_file(fig, plot_folder=plot_folder, plot_file=plot_file)
 
-    def timepoint_window_drift(self, omitted_sessions:list, all_windows_one_plot:bool, subtract_self_pred:bool, sensor_level:bool, include_0_distance:bool, debugging=False):
+    def timepoint_window_drift(self, omitted_sessions:list, all_windows_one_plot:bool, subtract_self_pred:bool, sensor_level:bool, include_0_distance:bool, debugging:bool=False, regions_of_interest:list=None):
+        """
+        Plots drift for seperate timepoint windows, as well as for all windows combined.
+        """
+        if regions_of_interest is not None:
+            assert not sensor_level, "timepoint_window_drift was called on source data and sensor level."
 
         def filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint: dict, timepoint_window_start_idx:int):
             """
@@ -3345,8 +3607,9 @@ class VisualizationHelper(GLMHelper):
             
             return fit_measures_by_session_by_chosen_timepoints
 
-        def plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint:dict, sensor_name:str = None) -> None:
+        def plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint:dict, sensor_name:str=None, glaser_region:str=None) -> None:
             sensor_filename_addition = f"sensor_{sensor_name}_" if sensor_name is not None else ""
+            glaser_region_filename_addition = f"{glaser_region}" if glaser_region is not None else ""
 
             if subtract_self_pred:
                 # Normalize with self-predictions
@@ -3356,7 +3619,8 @@ class VisualizationHelper(GLMHelper):
 
             # Define storage folder for all plots in function
             sensor_folder_addition = "sensor_level/" if sensor_level else ""
-            storage_folder = f"data_files/{self.lock_event}/visualizations/only_distance/timepoint_windows/{sensor_folder_addition}{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
+            source_region_folder_addition = f"source_space/{glaser_region}/" if glaser_region is not None else ""
+            storage_folder = f"data_files/{self.lock_event}/visualizations/only_distance/timepoint_windows/{sensor_folder_addition}{source_region_folder_addition}{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
             
             # Calculate drift for various timewindows by slicing 
             if all_windows_one_plot:
@@ -3380,7 +3644,7 @@ class VisualizationHelper(GLMHelper):
                         # Store plot for current window
                         window_end = timepoint_window_start_idx + self.time_window_n_indices
                         timepoint_window_description = f"window_{timepoint_window_start_idx}-{window_end}"
-                        storage_filename = f"drift_plot_{sensor_filename_addition}{timepoint_window_description}"
+                        storage_filename = f"drift_plot_{sensor_filename_addition}{glaser_region_filename_addition}{timepoint_window_description}"
                         self.save_plot_as_file(plt=drift_plot_window, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
                     else:
                         fit_measures_by_distance_by_time_window["timewindow_start"][timepoint_window_start_idx] = {"fit_measures_by_distances": fit_measures_by_distances_window}
@@ -3427,15 +3691,26 @@ class VisualizationHelper(GLMHelper):
 
         for normalization in self.normalizations:
             if not sensor_level:
-                # Load timepoint-based variance explained
-                storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
-                json_storage_file = f"var_explained_timepoints_dict.json"
-                json_storage_path = os.path.join(storage_folder, json_storage_file)
-                with open(json_storage_path, 'r') as file:
-                    logger.custom_debug(f"var_explained_timepoints loaded from {json_storage_path}")
-                    fit_measures_by_session_by_timepoint = json.load(file)
+                if regions_of_interest is None:
+                    # Load timepoint-based variance explained
+                    storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                    json_storage_file = f"var_explained_timepoints_dict.json"
+                    json_storage_path = os.path.join(storage_folder, json_storage_file)
+                    with open(json_storage_path, 'r') as file:
+                        logger.custom_debug(f"var_explained_timepoints loaded from {json_storage_path}")
+                        fit_measures_by_session_by_timepoint = json.load(file)
 
-                plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint)
+                    plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint)
+                else:
+                    for glaser_region in regions_of_interest:
+                        # Load timepoint-based variance explained
+                        storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/source_space/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                        json_storage_file = f"var_explained_timepoints_dict.json"
+                        json_storage_path = os.path.join(storage_folder, json_storage_file)
+                        with open(json_storage_path, 'r') as file:
+                            fit_measures_by_session_by_timepoint = json.load(file)
+
+                        plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint, glaser_region=glaser_region)
             else:
                 # Load sensor- and timepoint-based variance explained
                 storage_folder = f"data_files/{self.lock_event}/var_explained_sensors_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
@@ -3761,90 +4036,137 @@ class VisualizationHelper(GLMHelper):
                     plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_timepoint-overview.png"
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
-    def new_visualize_model_perspective(self, plot_norms: list, seperate_plots=False):
+    def new_visualize_model_perspective(self, plot_norms:list, regions_of_interest:list=None):
         """
         Visualizes meg data from the regression models perspective. This means, we plot the values over the epochs for each timepoint, one line for each selected sensor.
         """
-        for session_id_num in self.session_ids_num:
-            # Use defaultdict to automatically create missing keys
-            session_dict = self.recursive_defaultdict()
-            for normalization in plot_norms:
-                # Load meg data and split into grad and mag
-                meg_data = self.load_split_data_from_file(session_id_num=session_id_num, type_of_content="meg_data", type_of_norm=normalization)
-                meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
+        def plot_model_perspective(meg_data_complete:np.ndarray, session_id:str, normalization:str, plot_timepoints:list, n_epochs_total:int, n_epochs_train:int, channel_names_by_indices:dict=None, voxel_indices:list=None, glaser_region:str=None):
+            """
+            Generates value plot over epochs based on selected meg_data, timepoints and sensors.
+            """
+            # Plotting
+            colormap = plt.cm.get_cmap('viridis', len(voxel_indices)) if voxel_indices is not None else plt.cm.get_cmap('viridis', len(list(channel_names_by_indices.keys())))
 
-                n_train = len(meg_data["train"])
-                n_total = n_train + len(meg_data["test"])
-                n_channels = self.n_grad + self.n_mag
+            for timepoint_idx in plot_timepoints:
+                timepoint_name = self.timepoint_min+timepoint_idx
+                legend_elements = []  # List to hold the custom legend elements (colors for norms)
+                plt.figure(figsize=(10, 6))
+                # Filter meg for timepoint
+                meg_timepoint = meg_data_complete[:,:,timepoint_idx]  # [epochs, channels, timepoints]
 
-                # Extract channel names for indices
-                selected_channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
-                channel_names_by_indices = {}
-                ch_ix = 0
-                for sensor_type in selected_channel_indices:
-                    for sensor_index_within_type in selected_channel_indices[sensor_type]["sensor_index_within_type"]:
-                        channel_names_by_indices[ch_ix] = selected_channel_indices[sensor_type]["sensor_index_within_type"][sensor_index_within_type]
-                        ch_ix += 1
-                
-                timepoints = np.array(list(range(1 + self.timepoint_max - self.timepoint_min)))
+                # Count outliers
+                n_outliers = sum(1 for meg_value in np.nditer(meg_timepoint) if abs(meg_value) > 2.5) if glaser_region is None else ""
 
-                # Select timepoints to plot (f.e. 10 total, every 60th)
-                plot_timepoints = []
-                timepoint_plot_interval = 20
-
-                for timepoint_index in range(min(timepoints), max(timepoints)+1, timepoint_plot_interval):
-                    plot_timepoints.append(timepoint_index)
-                n_plot_timepoints = len(plot_timepoints)
-                
-                num_epochs_for_x_axis = 0
-
-                # Plotting
-                for timepoint_idx in plot_timepoints:
-                    timepoint_name = self.timepoint_min+timepoint_idx
-                    legend_elements = []  # List to hold the custom legend elements (colors for norms)
-                    plt.figure(figsize=(10, 6))
-                    # Filter meg for timepoint
-                    meg_timepoint = meg_data_complete[:,:,timepoint_idx]  # [epochs, channels, timepoints]
-
-                    # Count outliers
-                    n_outliers = sum(1 for meg_value in np.nditer(meg_timepoint) if abs(meg_value) > 2.5)
-
+                if channel_names_by_indices is not None:
+                    second_dim = "sensor"
+                    source_folder_addition = ""
+                    n_channels = len(list(channel_names_by_indices.keys()))
                     for channel_idx in range(n_channels):
                         # Filter meg for channel
                         meg_timepoint_channel = meg_timepoint[:,channel_idx] # [epochs, channels]
-                        plt.plot(list(range(n_total)), meg_timepoint_channel, linewidth=0.2, color=f'C{channel_idx}')
+                        plt.plot(list(range(n_epochs_total)), meg_timepoint_channel, linewidth=0.2, color=colormap(channel_idx))
 
-                        legend_elements.append(Line2D([0], [0], color=f'C{channel_idx}', lw=4, label=channel_names_by_indices[channel_idx]))
+                        legend_elements.append(Line2D([0], [0], color=colormap(channel_idx), lw=4, label=channel_names_by_indices[channel_idx]))
+                elif voxel_indices is not None:
+                    second_dim = "voxel"
+                    source_folder_addition = f"/source_space/{glaser_region}"
+                    for voxel_idx in voxel_indices:
+                        # Filter meg for voxel
+                        meg_timepoint_voxel = meg_timepoint[:,voxel_idx] # [epochs, voxels]
+                        plt.plot(list(range(n_epochs_total)), meg_timepoint_voxel, linewidth=0.2, color=colormap(voxel_idx))
 
-                    # TODO: Color train and test seperately
+                        legend_elements.append(Line2D([0], [0], color=colormap(voxel_idx), lw=4, label=f"Voxel id {voxel_idx}"))
 
-                    # Set x-axis to show full range of epochs
-                    #plt.xlim(1, n_total)
+                else:
+                    raise ValueError("Either channel_names_by_indices or regions_by_indices need to be provided.")
 
-                    plt.xlabel('Epochs in Session)')
-                    plt.ylabel('MEG Value')
-                    plt.axvline(x=n_train, color='r', linestyle='--', linewidth=1, label='Train/Test Split')
-                    plt.title(f'MEG Signal over Channels. \n Session: {session_id_num}. Timepoint: {timepoint_name} Norm: {normalization} \n N Outliers: {n_outliers}')
-                    plt.legend(handles=legend_elements, title="Channel")
+                # TODO: Color train and test seperately
+
+                # Set x-axis to show full range of epochs
+                #plt.xlim(1, n_total)
+
+                plt.xlabel('Epochs in Session)')
+                plt.ylabel('MEG Value')
+                plt.axvline(x=n_epochs_train, color='r', linestyle='--', linewidth=1, label='Train/Test Split')
+                plt.title(f'MEG Signal over Epochs for {second_dim}s. \n Session: {session_id}. Timepoint: {timepoint_name} Norm: {normalization} \n N Outliers: {n_outliers}')
+                plt.legend(handles=legend_elements, title=f"{second_dim}")
+                
+                # Save plot
+                plot_folder = f"data_files/{self.lock_event}/visualizations/meg_data/new_regression_model_perspective{source_folder_addition}/{normalization}/timepoint_{timepoint_name}"
+                plot_file = f"Session-{session_id}_timepoint-overview.png"
+                self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+
+        if regions_of_interest is None:
+            for session_id in self.session_ids_num:
+                # Use defaultdict to automatically create missing keys
+                session_dict = self.recursive_defaultdict()
+                for normalization in plot_norms:
+                    # Load meg data and split into grad and mag
+                    meg_data = self.load_split_data_from_file(session_id_num=session_id, type_of_content="meg_data", type_of_norm=normalization)
+                    meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
+
+                    n_epochs_train = len(meg_data["train"])
+                    n_epochs_total = n_epochs_train + len(meg_data["test"])
+
+                    # Extract channel names for indices
+                    selected_channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
+                    channel_names_by_indices = {}
+                    ch_ix = 0
+                    for sensor_type in selected_channel_indices:
+                        for sensor_index_within_type in selected_channel_indices[sensor_type]["sensor_index_within_type"]:
+                            channel_names_by_indices[ch_ix] = selected_channel_indices[sensor_type]["sensor_index_within_type"][sensor_index_within_type]
+                            ch_ix += 1
                     
-                    # Save plot
-                    plot_folder = f"data_files/{self.lock_event}/visualizations/meg_data/new_regression_model_perspective/{normalization}/timepoint_{timepoint_name}"
-                    plot_file = f"Session-{session_id_num}_timepoint-overview.png"
-                    self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+                    timepoints = np.array(list(range(1 + self.timepoint_max - self.timepoint_min)))
 
-                    """
-                    # Select epochs to plot (f.e. 200 total, every 10th or smth)
-                    plot_epochs = []
-                    epoch_plot_interval = 10
-                    for epoch in range(1, num_epochs_for_x_axis, epoch_plot_interval):
-                        plot_epochs.append(epoch)
+                    # Select timepoints to plot (f.e. 10 total, every 60th)
+                    plot_timepoints = []
+                    timepoint_plot_interval = 20
 
-                    plot_epochs = np.array(plot_epochs)
-                    epochs = np.array(list(range(num_epochs)))
+                    for timepoint_index in range(min(timepoints), max(timepoints)+1, timepoint_plot_interval):
+                        plot_timepoints.append(timepoint_index)
+                    n_plot_timepoints = len(plot_timepoints)
 
-                    filtered_epoch_meg = meg_norm_sensor[plot_epochs, :]
-                    """ 
+                    plot_model_perspective(meg_data_complete=meg_data_complete, session_id=session_id, normalization=normalization, plot_timepoints=plot_timepoints, n_epochs_total=n_epochs_total, n_epochs_train=n_epochs_train, channel_names_by_indices=channel_names_by_indices)
+        else:
+            for glaser_region in regions_of_interest:
+                for session_id in self.session_ids_num:
+                    # Use defaultdict to automatically create missing keys
+                    session_dict = self.recursive_defaultdict()
+                    for normalization in plot_norms:
+                        # Load meg data and split into grad and mag
+                        meg_data = {"train": None, "test": None}
+                        for split in meg_data:
+                            storage_folder = f"data_files/{self.lock_event}/meg_data/source_space/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id}/{split}"  
+                            storage_file = "meg_data.npy"
+                            storage_path = os.path.join(storage_folder, storage_file)
 
+                            meg_data[split] = np.load(storage_path)
+                        meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
+
+                        n_epochs_train = len(meg_data["train"])
+                        n_epochs_total = n_epochs_train + len(meg_data["test"])
+
+                        n_voxels = meg_data["train"].shape[1]
+                        voxel_step_size = n_voxels // 2
+
+                        # Select some example voxels
+                        voxel_indices = []
+                        for voxel_idx in range(0, n_voxels, voxel_step_size):
+                            voxel_indices.append(voxel_idx)
+
+                        timepoints = np.array(list(range(1 + self.timepoint_max - self.timepoint_min)))
+
+                        # Select example timepoints (f.e. 10 total, every 60th)
+                        plot_timepoints = []
+                        timepoint_plot_interval = 20
+
+                        for timepoint_index in range(min(timepoints), max(timepoints)+1, timepoint_plot_interval):
+                            plot_timepoints.append(timepoint_index)
+                        n_plot_timepoints = len(plot_timepoints)
+
+                        plot_model_perspective(meg_data_complete=meg_data_complete, session_id=session_id, normalization=normalization, plot_timepoints=plot_timepoints, n_epochs_total=n_epochs_total, n_epochs_train=n_epochs_train, voxel_indices=voxel_indices, glaser_region=glaser_region)
+                
 
     def visualize_meg_means_stds(self):
         """

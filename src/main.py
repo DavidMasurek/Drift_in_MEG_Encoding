@@ -22,7 +22,7 @@ subject_ids = ["02"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05"
 # Subject 05 only contains 4 scenes for cluster 28 in all sessions test sets
 # --> Switched to 3 scenes per cluster for subject 03 and 05
 
-lock_event = "saccade" # "saccade" "fixation"
+lock_event = "fixation" # "saccade" "fixation"
 
 crop_size = 112  # 224 112
 # Size 224 crops not available for subject 03
@@ -34,7 +34,7 @@ batch_size = 32
 pca_components = 30
 
 best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 999, "timepoint_max": 999}, 
-                                            "02": {"timepoint_min": 310, "timepoint_max": 315},  # "02": {"timepoint_min": 290, "timepoint_max": 330},
+                                            "02": {"timepoint_min": 290, "timepoint_max": 330},  # "02": {"timepoint_min": 290, "timepoint_max": 330},
                                             "03": {"timepoint_min": 999, "timepoint_max": 999},
                                             "05": {"timepoint_min": 999, "timepoint_max": 999},},
                             # ! Saccade: Currently testing smaller windows due to sensor-level encoding differences.
@@ -47,7 +47,7 @@ best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 999, "timepo
 timepoint_min = 0  # fixation: 170, saccade: 275
 timepoint_max = 650  # fixation: 250, saccade: 375
 
-normalizations = ["global_robust_scaling", "mean_centered_ch_then_global_robust_scaling"]  #  ["mean_centered_ch_then_global_robust_scaling"] # , "no_norm", "mean_centered_ch_t", "robust_scaling", "global_robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
+normalizations = ["global_robust_scaling", "mean_centered_voxel_then_global_robust_scaling"]  # "mean_centered_voxel_then_global_robust_scaling"]  # "mean_centered_ch_then_global_robust_scaling"]  #  ["mean_centered_ch_then_global_robust_scaling"] # , "no_norm", "mean_centered_ch_t", "robust_scaling", "global_robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
 
 fractional_grid = np.array([fraction/100 for fraction in range(1, 100, 3)]) # range from 0.01 to 1 in steps or 0.03
 alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
@@ -74,8 +74,16 @@ train_GLM = False
 generate_predictions_with_GLM = False
 visualization = False
 simulate_scene_responses = False
-calculate_RSM_test_set_drift = True
+calculate_RSM_test_set_drift = False
 plot_distance_drift_all_subjects = False
+calculate_source_drift = True
+
+if not calculate_source_drift:
+    if "mean_centered_voxel_then_global_robust_scaling" in normalizations:
+        raise ValueError(f"Normalization mean_centered_voxel_then_global_robust_scaling is only valid for source drift analysis.")
+else:
+    if "mean_centered_ch_then_global_robust_scaling" in normalizations:
+        raise ValueError(f"Normalization mean_centered_ch_then_global_robust_scaling is not valid for source drift analysis.")
 
 z_score_features_before_pca = True
 use_pca_features = True
@@ -96,6 +104,8 @@ all_windows_one_plot = True
 omit_non_generalizing_sessions = True
 
 n_scenes_per_cluster = 3
+
+regions_of_interest = ["V1", "V2", "V3", "V3A", "V3B", "V3CD", "V4", "V4t", "V6", "V6A", "V7", "V8", "FFC"]
 
 if use_all_mag_sensors:
     # Load all available mag_channels from evoked file
@@ -230,19 +240,19 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
-            ####visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
+            visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="pearson_r_timepoint", by_timepoints=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
             # Visuzalize distance based predictions at timepoint scale
             ##visualization_helper.three_dim_timepoint_predictions(subtract_self_pred=subtract_self_pred) 
-            visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True)  
+            ####visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True)  
             
             # Visualize drift topographically with mne based on sensor level data 
             #visualization_helper.mne_topo_plot_per_sensor(data_type="drift", omitted_sessions=sessions_to_omit, all_timepoints_combined=False)  # data_type="self-pred" or "drift"
 
             # Visualize model perspective (values by timepoint)
-            ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"], seperate_plots=False)  # , "no_norm"
+            ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"])  # , "no_norm"
 
             # Visualize session means and stds
             ###visualization_helper.visualize_meg_means_stds()
@@ -280,6 +290,30 @@ for run in range(run_pipeline_n_times):
             visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
 
             visualization_helper.calculate_RSM_test_set_drift(omit_sessions_from_calc=sessions_to_omit)
+
+        if calculate_source_drift:
+            dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations, chosen_channels=meg_channels, lock_event=lock_event, timepoint_min=timepoint_min, timepoint_max=timepoint_max, crop_size=crop_size)
+            extraction_helper = ExtractionHelper(subject_id=subject_id, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, lock_event=lock_event)
+            glm_helper = GLMHelper(fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, lock_event=lock_event, ann_model=ann_model, module_name=module_name, batch_size=batch_size, crop_size=crop_size)
+            visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
+
+            # Create one dataset (containing all sessions) for each region of interest (lets start with visual cortex)
+            ###dataset_helper.create_source_meg_dataset(regions_of_interest=regions_of_interest, clip_outliers=clip_outliers)
+
+            # Debug: Plot source meg values      
+            visualization_helper.new_visualize_model_perspective(plot_norms=normalizations, regions_of_interest=regions_of_interest)  # , "no_norm"
+
+            # Train GLM for each region for each session
+            ###glm_helper.train_mapping(all_sessions_combined=all_sessions_combined, shuffle_train_labels=shuffle_train_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest)
+
+            # Generate predictions for each region for each train_session for each pred_session
+            ###glm_helper.predict_from_mapping_source_all_sessions(predict_train_data=False, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest)
+
+            # Plot self-prediction timepoint comparison for all regions
+            ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True, regions_of_interest=regions_of_interest)
+
+            # Accumulate losses by distance and plot drift
+            ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True, regions_of_interest=regions_of_interest)
 
 if plot_distance_drift_all_subjects:
     global_visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
