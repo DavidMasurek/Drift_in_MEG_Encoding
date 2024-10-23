@@ -322,14 +322,14 @@ for run in range(run_pipeline_n_times):
             #####    dataset_helper.apply_pca_to_voxels(regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)
 
             # Debug: Plot source meg values      
-            visualization_helper.new_visualize_model_perspective(plot_norms=normalizations, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)  # , "no_norm"
+            #####visualization_helper.new_visualize_model_perspective(plot_norms=normalizations, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)  # , "no_norm"
             ###visualization_helper.plot_ERPs(plot_norms=normalizations, regions_of_interest=regions_of_interest, non_preprocessed=False)  
 
             # Train GLM for each region for each session
-            ###glm_helper.train_mapping(all_sessions_combined=all_sessions_combined, shuffle_train_labels=shuffle_train_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)
+            #####glm_helper.train_mapping(all_sessions_combined=all_sessions_combined, shuffle_train_labels=shuffle_train_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)
 
             # Generate predictions for each region for each train_session for each pred_session
-            ###glm_helper.predict_from_mapping_source_all_sessions(predict_train_data=False, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, store_result_by_pc=store_result_by_pc, whiten=whiten_pcs)
+            glm_helper.predict_from_mapping_source_all_sessions(predict_train_data=False, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, store_result_by_pc=store_result_by_pc, whiten=whiten_pcs)
 
             # Plot self-prediction timepoint comparison for all regions and drift
             if source_pca_type != "voxels_and_timepoints":

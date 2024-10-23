@@ -1912,16 +1912,16 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         self.ann_features_type = "ann_features_pca" if pca_features else "ann_features"
 
 
-    def train_mapping(self, all_sessions_combined:bool=False, shuffle_train_labels:bool=False, downscale_features:bool=False, regions_of_interest:list=None, pca_voxels:bool=False):
+    def train_mapping(self, all_sessions_combined:bool=False, shuffle_train_labels:bool=False, downscale_features:bool=False, regions_of_interest:list=None, source_pca_type:str="", whiten:bool=False):
         """
         Trains a mapping from ANN features to MEG data over all sessions.
         """
         if regions_of_interest is not None:
             assert not all_sessions_combined, "[train_mapping]: Invalid argument combination."
 
-        def train_model(X_train:np.ndarray, Y_train: np.ndarray, normalization:str, all_sessions_combined:bool, session_id_num:str=None, glaser_region:str=None, pca_voxels:bool=False):
+        def train_model(X_train:np.ndarray, Y_train: np.ndarray, normalization:str, all_sessions_combined:bool, session_id_num:str=None, glaser_region:str=None, pca_folder:str="", timepoints_pca:bool=False):
             # Initialize Helper class
-            ridge_model = GLMHelper.MultiDimensionalRegression(self) 
+            ridge_model = GLMHelper.MultiDimensionalRegression(self, timepoints_pca=timepoints_pca) 
 
             if downscale_features:
                 X_train = self.normalize_array(data=X_train, normalization="range_-1_to_1")
@@ -1934,13 +1934,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
             all_session_folder = f"/all_sessions_combined" if all_sessions_combined else ""
             session_addition = f"/session_{session_id_num}" if not all_sessions_combined else ""
-            if glaser_region is not None:
-                if not pca_voxels:
-                    source_folder = f"/source_space/{glaser_region}" 
-                else:
-                    source_folder = f"/source_space/pca_reduced/{glaser_region}" 
-            else:
-                source_folder = ""
+            source_folder = f"/source_space{pca_folder}/{glaser_region}" if glaser_region is not None else ""
 
             # Store trained models as pickle
             save_folder = f"data_files/{self.lock_event}/GLM_models{source_folder}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}{all_session_folder}/norm_{normalization}{session_addition}"  
@@ -1972,14 +1966,23 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         session_alphas[session_id_num] = selected_alphas
                     #self.save_dict_as_json(type_of_content="selected_alphas_by_session", dict_to_store=session_alphas, type_of_norm=normalization, predict_train_data=predict_train_data)
                 else:
+                    whiten_folder = "/whiten" if whiten else ""
+                    if source_pca_type == 'voxels':
+                        pca_folder = f"/voxels_pca_reduced{whiten_folder}"
+                        timepoints_pca = False
+                    elif source_pca_type == 'voxels_and_timepoints':
+                        pca_folder = f"/voxels_and_timepoints_pca_reduced{whiten_folder}"
+                        timepoints_pca = True
+                    else:
+                        pca_folder = ""
+                        timepoints_pca = False
                     # seperately for each source/glaser region
                     for session_id in self.session_ids_num:
                         ann_features = self.load_split_data_from_file(session_id_num=session_id, type_of_content=self.ann_features_type, ann_model=self.ann_model, module=self.module_name)
                         X_train = ann_features['train']
                         for glaser_region in regions_of_interest:
                             # load train meg data
-                            voxels_pca_folder = "/pca_reduced" if pca_voxels else ""
-                            storage_folder = f"data_files/{self.lock_event}/meg_data/source_space/{voxels_pca_folder}{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id}/train"  
+                            storage_folder = f"data_files/{self.lock_event}/meg_data/source_space{pca_folder}/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id}/train"  
                             storage_file = "meg_data.npy"
                             storage_path = os.path.join(storage_folder, storage_file)
 
@@ -1988,7 +1991,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                             if shuffle_train_labels:
                                 np.random.shuffle(Y_train)
 
-                            selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined, session_id_num=session_id, glaser_region=glaser_region, pca_voxels=pca_voxels)
+                            selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined, session_id_num=session_id, glaser_region=glaser_region, pca_folder=pca_folder, timepoints_pca=timepoints_pca)
         # all sessions combined
         else:
             for normalization in self.normalizations:
@@ -2250,13 +2253,23 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         json.dump(dict_to_store, file, indent=4)
 
 
-    def predict_from_mapping_source_all_sessions(self, predict_train_data:bool=False, shuffle_test_labels:bool=False, downscale_features:bool=False, regions_of_interest:list=None, pca_voxels:bool=False):
+    def predict_from_mapping_source_all_sessions(self, regions_of_interest:list, source_pca_type:str, store_result_by_pc:bool, whiten:bool, predict_train_data:bool=False, shuffle_test_labels:bool=False, downscale_features:bool=False):
         """
         For each source region: based on the trained mapping for each session, predicts MEG data over all sessions from their respective test features.
         For readability reasons seperated from predict_from_mapping_all_sessions.
         If predict_train_data is True, predicts the train data of each session as a sanity check of the complete pipeline. Expect strong overfit.
         """
-        pca_voxels_folder = "/pca_reduced" if pca_voxels else ""
+        whiten_folder = "/whiten" if whiten else ""
+        if source_pca_type == 'voxels':
+            pca_folder = f"/voxels_pca_reduced{whiten_folder}"
+            timepoints_pca = False
+        elif source_pca_type == 'voxels_and_timepoints':
+            pca_folder = f"/voxels_and_timepoints_pca_reduced{whiten_folder}"
+            timepoints_pca = True
+        else:
+            pca_folder = ""
+            timepoints_pca = False
+
         for glaser_region in regions_of_interest:
             for normalization in self.normalizations:
                 variance_explained_dict = self.recursive_defaultdict()
@@ -2265,14 +2278,14 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 for session_id_model in self.session_ids_num:
                     # Get trained ridge regression model for this session
                     # Load ridge model
-                    storage_folder = f"data_files/{self.lock_event}/GLM_models/source_space{pca_voxels_folder}/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/session_{session_id_model}"  
+                    storage_folder = f"data_files/{self.lock_event}/GLM_models/source_space{pca_folder}/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/session_{session_id_model}"  
                     storage_file = "GLM_models.pkl"
                     storage_path = os.path.join(storage_folder, storage_file)
                     with open(storage_path, 'rb') as file:
                         ridge_models = pickle.load(file)
 
                     # Initialize MultiDim GLM class with stored models
-                    ridge_model = GLMHelper.MultiDimensionalRegression(self, models=ridge_models)
+                    ridge_model = GLMHelper.MultiDimensionalRegression(self, models=ridge_models, timepoints_pca=timepoints_pca)
 
                     # Generate predictions for test features over all sessions and evaluate them 
                     for session_id_pred in self.session_ids_num:
@@ -2281,7 +2294,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         
                         meg_data = {"train": None, "test": None}
                         for split in meg_data:
-                            storage_folder = f"data_files/{self.lock_event}/meg_data/source_space{pca_voxels_folder}/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id_pred}/{split}"  
+                            storage_folder = f"data_files/{self.lock_event}/meg_data/source_space{pca_folder}/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id_pred}/{split}"  
                             storage_file = "meg_data.npy"
                             storage_path = os.path.join(storage_folder, storage_file)
 
@@ -2300,24 +2313,47 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         predicted_responses_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = predictions
 
                         # Store fit measures seperately for each timepoint/model
-                        _, n_voxels, n_timepoints = predictions.shape
-                        for t in range(n_timepoints):
-                            var_explained_timepoint_sum = 0
-                            r_pearson_timepoint_sum = 0  
-                            for v in range(n_voxels):
-                                var_explained_timepoint_sum += r2_score(Y_test[:,v,t], predictions[:,v,t])
-                                r_pearson_timepoint_sensor, _ = pearsonr(Y_test[:,v,t], predictions[:,v,t])
-                                r_pearson_timepoint_sum += r_pearson_timepoint_sensor
+                        if not timepoints_pca:  # second dim are voxels or voxel pcs, third time are timepoints
+                            _, n_voxels, n_timepoints = predictions.shape
+                            if not store_result_by_pc:
+                                for t in range(n_timepoints):
+                                    var_explained_timepoint_sum = 0
+                                    r_pearson_timepoint_sum = 0  
+                                    for v in range(n_voxels):
+                                        var_explained_timepoint_sum += r2_score(Y_test[:,v,t], predictions[:,v,t])
+                                        r_pearson_timepoint_sensor, _ = pearsonr(Y_test[:,v,t], predictions[:,v,t])
+                                        r_pearson_timepoint_sum += r_pearson_timepoint_sensor
 
-                            var_explained_timepoint = var_explained_timepoint_sum / n_voxels
-                            r_pearson_timepoint = r_pearson_timepoint_sum / n_voxels
-                                
+                                    var_explained_timepoint = var_explained_timepoint_sum / n_voxels
+                                    r_pearson_timepoint = r_pearson_timepoint_sum / n_voxels
+                                        
+                                    # Save fit measures
+                                    variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = var_explained_timepoint
+                                    correlation_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = r_pearson_timepoint
+                            else:
+                                for t in range(n_timepoints):
+                                    for pc in range(n_voxels):
+                                        var_explained_timepoint_pc = r2_score(Y_test[:,pc,t], predictions[:,pc,t])
+                                        r_pearson_timepoint_pc = pearsonr(Y_test[:,pc,t], predictions[:,pc,t])[0]
+
+                                        # Save fit measures
+                                        variance_explained_dict["pcs"][pc]["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = var_explained_timepoint_pc
+                                        correlation_dict["pcs"][pc]["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = r_pearson_timepoint_pc
+                        else:
+                            _, n_pcs = predictions.shape
+                            var_explained_sum = 0
+                            r_pearson_sum = 0  
+                            for pc in range(n_pcs):
+                                var_explained_sum += r2_score(Y_test[:,pc], predictions[:,pc])
+                                r_pearson_sum += pearsonr(Y_test[:,pc], predictions[:,pc])[0]
+
                             # Save fit measures
-                            variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = var_explained_timepoint
-                            correlation_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = r_pearson_timepoint
+                            variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = var_explained_sum
+                            correlation_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = r_pearson_sum
+
 
                 # Store predictions dict
-                storage_folder = f"data_files/{self.lock_event}/predicted_meg_responses/source_space{pca_voxels_folder}/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                storage_folder = f"data_files/{self.lock_event}/predicted_meg_responses/source_space{pca_folder}/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
                 os.makedirs(storage_folder, exist_ok=True)
                 storage_file = f"predicted_responses_dict.pkl"
                 storage_path = os.path.join(storage_folder, storage_file)
@@ -2326,10 +2362,14 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                     pickle.dump(predicted_responses_dict, file)
 
                 # Store loss dict
-                storage_dicts_by_folders = {"var_explained_timepoints": variance_explained_dict, "pearson_r_timepoints": correlation_dict}
+                if not timepoints_pca:
+                    storage_dicts_by_folders = {"var_explained_timepoints": variance_explained_dict, "pearson_r_timepoints": correlation_dict}
+                else:
+                    storage_dicts_by_folders = {"var_explained": variance_explained_dict, "pearson_r": correlation_dict}
 
+                pc_storage_folder = "/pcs_separate" if store_result_by_pc else ""
                 for main_folder, fit_measure_dict in storage_dicts_by_folders.items():
-                    storage_folder = f"data_files/{self.lock_event}/{main_folder}/source_space{pca_voxels_folder}/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                    storage_folder = f"data_files/{self.lock_event}/{main_folder}/source_space{pca_folder}{pc_storage_folder}/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
                     os.makedirs(storage_folder, exist_ok=True)
                     json_storage_file = f"{main_folder}_dict.json"
                     json_storage_path = os.path.join(storage_folder, json_storage_file)
@@ -2379,78 +2419,87 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         """
         Inner class to apply (fractional) Ridge Regression over all timepoints. Enables training and prediction, as well as initialization of random weights for baseline comparison.
         """
-        def __init__(self, GLM_helper_instance, models:list=[], random_weights:bool=False):
+        def __init__(self, GLM_helper_instance, models:list=[], random_weights:bool=False, timepoints_pca:bool=False):
             self.GLM_helper_instance = GLM_helper_instance
             self.random_weights = random_weights
             self.models = models  # Standardly initialized as empty list, otherwise with passed, previously trained models
             self.alphas = self.GLM_helper_instance.alphas
             self.selected_alphas = None
+            self.timepoints_pca = timepoints_pca
+
+            if random_weights and timepoints_pca:
+                raise NotImplementedError("MultiDimensionalRegression not yet intended for random weights and timepoint-pca data.")
 
         def fit(self, X=None, Y=None):
-            n_features = X.shape[1]
-            n_sensors = Y.shape[1]
-            n_timepoints = Y.shape[2]
+            if not self.timepoints_pca:
+                n_features = X.shape[1]
+                n_sensors = Y.shape[1]
+                n_timepoints = Y.shape[2]
+                if self.GLM_helper_instance.fractional_ridge:
+                    self.models = [FracRidgeRegressorCV() for _ in range(n_timepoints)]
+                else:
+                    self.models = [RidgeCV(alphas=self.GLM_helper_instance.alphas) for _ in range(n_timepoints)]
+                
+                logger.custom_debug(f"Fit model with alphas {self.GLM_helper_instance.alphas}")
+                if self.random_weights:
+                    # Randomly initialize weights and intercepts
+                    # Careful, in the current implementation the random model does not use an alpha
+                    for model in self.models:
+                        model.coef_ = np.random.rand(n_sensors, n_features) - 0.5  # Random weights centered around 0
+                        model.intercept_ = np.random.rand(n_sensors) - 0.5  # Random intercepts centered around 0
+                else:
+                    for t in range(n_timepoints):
+                        Y_t = Y[:, :, t]
+                        if self.GLM_helper_instance.fractional_ridge:
+                            self.models[t].fit(X, Y_t, frac_grid=self.GLM_helper_instance.fractional_grid)
+                            if self.models[t].best_frac_ <= 0.000_000_000_000_000_1:  # log if smallest fraction has been chosen
+                                logger.custom_debug(f"\n Timepoint {self.GLM_helper_instance.timepoint_min+t}: frac = {self.models[t].best_frac_}, alpha = {self.models[t].alpha_}") 
+                        else:
+                            self.models[t].fit(X, Y_t)
 
-            if self.GLM_helper_instance.fractional_ridge:
-                self.models = [FracRidgeRegressorCV() for _ in range(n_timepoints)]
-            else:
-                self.models = [RidgeCV(alphas=self.GLM_helper_instance.alphas) for _ in range(n_timepoints)]
-            
-            logger.custom_debug(f"Fit model with alphas {self.GLM_helper_instance.alphas}")
-            if self.random_weights:
-                # Randomly initialize weights and intercepts
-                # Careful, in the current implementation the random model does not use an alpha
-                for model in self.models:
-                    model.coef_ = np.random.rand(n_sensors, n_features) - 0.5  # Random weights centered around 0
-                    model.intercept_ = np.random.rand(n_sensors) - 0.5  # Random intercepts centered around 0
-            else:
-                for t in range(n_timepoints):
-                    Y_t = Y[:, :, t]
-                    if self.GLM_helper_instance.fractional_ridge:
-                        self.models[t].fit(X, Y_t, frac_grid=self.GLM_helper_instance.fractional_grid)
-                        if self.models[t].best_frac_ <= 0.000_000_000_000_000_1:  # log if smallest fraction has been chosen
-                            logger.custom_debug(f"\n Timepoint {self.GLM_helper_instance.timepoint_min+t}: frac = {self.models[t].best_frac_}, alpha = {self.models[t].alpha_}") 
-                    else:
-                        self.models[t].fit(X, Y_t)
+                # Debugging: For each model (aka for each timepoint) store the alpha/fraction that was selected as best fit in RidgeCV/FracRidgeRegressorCV
+                if not self.GLM_helper_instance.fractional_ridge:
+                    selected_regularize_param = [timepoint_model.alpha_ for timepoint_model in self.models]
+                    param_type = "alphas"
+                    self.selected_alphas = selected_regularize_param
+                else:
+                    selected_regularize_param = [timepoint_model.best_frac_ for timepoint_model in self.models]
+                    param_type = "fractions"
 
-            # Debugging: For each model (aka for each timepoint) store the alpha/fraction that was selected as best fit in RidgeCV/FracRidgeRegressorCV
-            if not self.GLM_helper_instance.fractional_ridge:
-                selected_regularize_param = [timepoint_model.alpha_ for timepoint_model in self.models]
-                param_type = "alphas"
-                self.selected_alphas = selected_regularize_param
-            else:
-                selected_regularize_param = [timepoint_model.best_frac_ for timepoint_model in self.models]
-                param_type = "fractions"
+                counts_regularize_params = Counter(selected_regularize_param)
+                sorted_counts_regularize_params = sorted(counts_regularize_params.items(), key=lambda x: x[1], reverse=True)
+                logger.custom_debug(f"selected {param_type}: {sorted_counts_regularize_params}")
 
-            counts_regularize_params = Counter(selected_regularize_param)
-            sorted_counts_regularize_params = sorted(counts_regularize_params.items(), key=lambda x: x[1], reverse=True)
-            logger.custom_debug(f"selected {param_type}: {sorted_counts_regularize_params}")
-
-
+            else: # If PCA was performed over timepoints, we only fit a single model
+                
+                if self.GLM_helper_instance.fractional_ridge:
+                    self.models = [FracRidgeRegressorCV()]
+                    self.models[0].fit(X, Y, frac_grid=self.GLM_helper_instance.fractional_grid)
+                else:
+                    self.models = [RidgeCV(alphas=self.GLM_helper_instance.alphas)]
+                    self.models[0].fit(X, Y)
 
         def predict(self, X, downscale_features:bool=False):
             if downscale_features:
                 X = self.GLM_helper_instance.normalize_array(data=X, normalization="range_-1_to_1")
 
             n_samples = X.shape[0]
-            n_sensors = self.models[0].coef_.shape[0] if not self.GLM_helper_instance.fractional_ridge else self.models[0].coef_.shape[1]
-            n_timepoints = len(self.models)
-            predictions = np.zeros((n_samples, n_sensors, n_timepoints))
+            if not self.timepoints_pca:
+                n_sensors = self.models[0].coef_.shape[0] if not self.GLM_helper_instance.fractional_ridge else self.models[0].coef_.shape[1]
+                n_timepoints = len(self.models)
+                predictions = np.zeros((n_samples, n_sensors, n_timepoints))
 
-            #logger.custom_info(f"X.shape: {X.shape}")
-            #logger.custom_info(f"n_sensors: {n_sensors}")
-            #logger.custom_info(f"n_timepoints: {n_timepoints}")
-            #logger.custom_info(f"predictions: {predictions.shape}")
-            #logger.custom_info(f"self.models[0].coef_.shape: {self.models[0].coef_.shape}")
+                for t, model in enumerate(self.models):
+                    if self.random_weights:
+                        # Use the random weights and intercept to predict; we are missing configurations implicitly achieved when calling .fit()
+                        predictions[:, :, t] = X @ model.coef_.T + model.intercept_
+                    else:
+                        predictions[:, :, t] = model.predict(X)
+            else:
+                predictions = self.models[0].predict(X)
 
-            for t, model in enumerate(self.models):
-                if self.random_weights:
-                    # Use the random weights and intercept to predict; we are missing configurations implicitly achieved when calling .fit()
-                    predictions[:, :, t] = X @ model.coef_.T + model.intercept_
-                else:
-                    predictions[:, :, t] = model.predict(X)
             return predictions    
-    
+
 
 
 class VisualizationHelper(GLMHelper):
