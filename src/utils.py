@@ -1007,6 +1007,7 @@ class DatasetHelper(MetadataHelper):
             raise ValueError("create_meg_dataset called with invalid parameter configuration. Can either clip or interpolate eithers, not both.")
         if "mean_centered_voxel_then_global_robust_scaling" in self.normalizations:
             raise ValueError("create_meg_dataset is not designed to perform normalization mean_centered_voxel_then_global_robust_scaling")
+        q_bottom, q_top = 0.3, 99.7  # set default values for clipping
 
         # Read combined and meg metadata from json
         combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
@@ -1140,9 +1141,9 @@ class DatasetHelper(MetadataHelper):
 
                     # Clip out outliers based percentile (except for normals with global, here it will be done later)
                     if clip_outliers and "global" not in normalization:
-                        q0_3, q99_7 = np.percentile(np.concatenate((meg_split["train"], meg_split["test"])), [0.3, 99.7], axis=None)
+                        cutoff_low, cutoff_high = np.percentile(np.concatenate((meg_split["train"], meg_split["test"])), [q_bottom, q_top], axis=None)
                         for split in meg_split:
-                            meg_split[split] = np.clip(meg_split[split], a_min=q0_3, a_max=q99_7)
+                            meg_split[split] = np.clip(meg_split[split], a_min=cutoff_low, a_max=cutoff_high)
 
                     # Export meg dataset arrays to .npz
                     self.export_split_data_as_file(session_id=session_id_num, 
@@ -1156,10 +1157,10 @@ class DatasetHelper(MetadataHelper):
         
         for normalization in self.normalizations:
             if "global_robust_scaling" in normalization:
-                self._apply_global_robust_scaling_across_all_sessions(current_norm=normalization, interpolate_outliers=interpolate_outliers, clip_outliers=clip_outliers)
+                self._apply_global_robust_scaling_across_all_sessions(current_norm=normalization, interpolate_outliers=interpolate_outliers, clip_outliers=clip_outliers, q_bottom=q_bottom, q_top=q_top)
 
 
-    def _apply_global_robust_scaling_across_all_sessions(self, current_norm:str, interpolate_outliers:bool=False, clip_outliers:bool=True, glaser_region:str=None):
+    def _apply_global_robust_scaling_across_all_sessions(self, current_norm:str, q_bottom:float, q_top:float, interpolate_outliers:bool=False, clip_outliers:bool=True, glaser_region:str=None):
         """
         Applies robust scaling across all concatenated sessions, then stores them seperately again.
         """
@@ -1209,8 +1210,8 @@ class DatasetHelper(MetadataHelper):
         if clip_outliers: # 0.3 and 99.7 percentile is equal to 3 standard deviations
             # Get indices from z-scored robust scaled data
             logger.custom_debug(f"Clipping outliers.")
-            q0_3, q99_7 = np.percentile(meg_data_normalized, [0.3, 99.7], axis=None)
-            meg_data_normalized = np.clip(meg_data_normalized, a_min=q0_3, a_max=q99_7) # q0_3, q99_7
+            cutoff_low, cutoff_high = np.percentile(meg_data_normalized, [q_bottom, q_top], axis=None)
+            meg_data_normalized = np.clip(meg_data_normalized, a_min=cutoff_low, a_max=cutoff_high) # q0_3, q99_7
 
         logger.custom_debug(f"meg_data_normalized.shape: {meg_data_normalized.shape}")
         logger.custom_debug(f"meg_timepoints_in_dataset after final norm, before split into sessions: {meg_data_normalized.shape[0]}")
@@ -1285,10 +1286,11 @@ class DatasetHelper(MetadataHelper):
         logger.custom_debug(f"end_test_index: {end_test_index}")
 
 
-    def apply_pca_to_voxels(self, regions_of_interest:list) -> None:
+    def apply_pca_to_voxels(self, regions_of_interest:list, source_pca_type:str, whiten:bool) -> None:
         """
         Reduces dimensionality of estimated glaser region meg signal by applying PCA over voxels within regions.
         """
+        whiten_folder = "/whiten" if whiten else ""
         for normalization in self.normalizations:
             for glaser_region in regions_of_interest:
                 n_elements_by_session_by_split = self.recursive_defaultdict()  # Store number of elements to seperate combined meg data into sessions and splits again
@@ -1316,23 +1318,40 @@ class DatasetHelper(MetadataHelper):
                 # Fit and apply PCA on combined sessions and splits (seperately on each timepoint)
                 n_epochs, n_voxels, n_timepoints = all_session_split_data_combined.shape
                 #print(f"n_epochs, n_voxels, n_timepoints: {n_epochs, n_voxels, n_timepoints}")
-                n_pca_comps = int(n_voxels*0.05) if int(n_voxels*0.05) > 1 else 1  # keep 5% of components. V1: 4 components (out of 80 voxels) explain ~70% variance
-                all_session_split_data_combined_pca = np.zeros(shape=(n_epochs, n_pca_comps, n_timepoints))
-                for timepoint_idx in range(n_timepoints):
-                    # Fit PCA
-                    timepoint_data = all_session_split_data_combined[:,:,timepoint_idx]
-                    pca = PCA(n_components=n_pca_comps)
-                    pca.fit(timepoint_data)
+                if source_pca_type == "voxels":
+                    pca_folder = "/voxels_pca_reduced"
+                    n_pca_comps = int(n_voxels*0.05) if int(n_voxels*0.05) > 1 else 1  # keep 5% of components. V1: 4 components (out of 80 voxels) explain ~70% variance
+                    all_session_split_data_combined_pca = np.zeros(shape=(n_epochs, n_pca_comps, n_timepoints))
+                    for timepoint_idx in range(n_timepoints):
+                        # Fit PCA
+                        timepoint_data = all_session_split_data_combined[:,:,timepoint_idx]
+                        pca = PCA(n_components=n_pca_comps, whiten=whiten)
+                        pca.fit(timepoint_data)
 
-                    # Investigate variance explained by n components
+                        # Investigate variance explained by n components
+                        explained_var_per_component = pca.explained_variance_ratio_
+                        explained_var = 0
+                        for explained_var_component in explained_var_per_component:
+                            explained_var += explained_var_component
+                        #logger.custom_info(f"\n Explained Variance {glaser_region}: {explained_var} \n")
+
+                        # Apply pca
+                        all_session_split_data_combined_pca[:,:,timepoint_idx] = pca.transform(timepoint_data)
+                else:
+                    pca_folder = "/voxels_and_timepoints_pca_reduced"
+                    n_og_dims = n_voxels * n_timepoints
+                    n_pca_comps = 4
+                    meg_data_flattened = all_session_split_data_combined.reshape(n_epochs, -1)
+                    pca = PCA(n_components=n_pca_comps, whiten=whiten)
+                    pca.fit(meg_data_flattened)
+
                     explained_var_per_component = pca.explained_variance_ratio_
                     explained_var = 0
                     for explained_var_component in explained_var_per_component:
                         explained_var += explained_var_component
-                    #logger.custom_info(f"\n Explained Variance {glaser_region}: {explained_var} \n")
+                    logger.custom_info(f'''\n Explained Variance {glaser_region} with {n_pca_comps} PCs: {explained_var} \n''')
 
-                    # Apply pca
-                    all_session_split_data_combined_pca[:,:,timepoint_idx] = pca.transform(timepoint_data)
+                    all_session_split_data_combined_pca = pca.transform(meg_data_flattened)
 
                 # Seperate all_session_split_data_combined_pca again and store results
                 starting_meg_index = 0  # Updated with n elements belonging to each session to extract data belonging to each session
@@ -1348,7 +1367,7 @@ class DatasetHelper(MetadataHelper):
                     session_meg_splits = {"train": meg_data_train, "test": meg_data_test}
 
                     for split in ["train", "test"]:
-                        save_folder = f"data_files/{self.lock_event}/meg_data/source_space/pca_reduced/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id}/{split}"  
+                        save_folder = f"data_files/{self.lock_event}/meg_data/source_space{pca_folder}{whiten_folder}/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id}/{split}"  
                         save_file = "meg_data_pca.npy"
                         os.makedirs(save_folder, exist_ok=True)
                         save_path = os.path.join(save_folder, save_file)
@@ -1358,7 +1377,7 @@ class DatasetHelper(MetadataHelper):
                     starting_meg_index += n_total_session
 
             
-    def create_source_meg_dataset(self, regions_of_interest:list, clip_outliers=True) -> None:
+    def create_source_meg_dataset(self, regions_of_interest:list, q_bottom:float, q_top:float, clip_outliers=True) -> None:
         """
         Creates one meg dataset per source region of interest (per session) (per normalization).
         Seperate from 'create_meg_dataset' for reasons of readability.
@@ -1422,9 +1441,9 @@ class DatasetHelper(MetadataHelper):
 
                         # Clip out outliers based percentile (except for two step norms, here it will be done later)
                         if clip_outliers and "global" not in normalization:
-                            q0_3, q99_7 = np.percentile(np.concatenate((meg_split["train"], meg_split["test"])), [0.3, 99.7], axis=None)
+                            cutoff_low, cutoff_high = np.percentile(np.concatenate((meg_split["train"], meg_split["test"])), [q_bottom, q_top], axis=None)
                             for split in meg_split:
-                                meg_split[split] = np.clip(meg_split[split], a_min=q0_3, a_max=q99_7)
+                                meg_split[split] = np.clip(meg_split[split], a_min=cutoff_low, a_max=cutoff_high)
 
                         # Export meg dataset arrays to .npz
                         save_folder = f"data_files/{self.lock_event}/meg_data/source_space/{glaser_region}/{normalization_stage}/subject_{self.subject_id}/session_{session_id}"  
@@ -1439,7 +1458,7 @@ class DatasetHelper(MetadataHelper):
         for normalization in self.normalizations:
             if "global_robust_scaling" in normalization:
                 for glaser_region in regions_of_interest:
-                    self._apply_global_robust_scaling_across_all_sessions(current_norm=normalization, clip_outliers=clip_outliers, interpolate_outliers=False, glaser_region=glaser_region)
+                    self._apply_global_robust_scaling_across_all_sessions(current_norm=normalization, clip_outliers=clip_outliers, interpolate_outliers=False, glaser_region=glaser_region, q_bottom=q_bottom, q_top=q_top)
 
 
     def create_train_test_split(self, debugging=False):
@@ -4231,15 +4250,15 @@ class VisualizationHelper(GLMHelper):
                     plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_timepoint-overview.png"
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
-    def new_visualize_model_perspective(self, plot_norms:list, regions_of_interest:list=None):
+    def new_visualize_model_perspective(self, plot_norms:list, source_pca_type:str, whiten:bool, regions_of_interest:list=None):
         """
         Visualizes meg data from the regression models perspective. This means, we plot the values over the epochs for each timepoint, one line for each selected sensor.
         """
-        def plot_model_perspective(meg_data_complete:np.ndarray, session_id:str, normalization:str, plot_timepoints:list, n_epochs_total:int, n_epochs_train:int, channel_names_by_indices:dict=None, voxel_indices:list=None, glaser_region:str=None):
+        whiten_folder = "/whiten" if whiten else ""
+        def plot_model_perspective(meg_data_complete:np.ndarray, session_id:str, normalization:str, plot_timepoints:list, n_epochs_total:int, n_epochs_train:int, channel_names_by_indices:dict=None, voxel_indices:list=None, glaser_region:str=None, pca_folder:str=""):
             """
             Generates value plot over epochs based on selected meg_data, timepoints and sensors.
             """
-            # Plotting
             colormap = plt.cm.get_cmap('viridis', len(voxel_indices)) if voxel_indices is not None else plt.cm.get_cmap('viridis', len(list(channel_names_by_indices.keys())))
 
             for timepoint_idx in plot_timepoints:
@@ -4263,15 +4282,15 @@ class VisualizationHelper(GLMHelper):
 
                         legend_elements.append(Line2D([0], [0], color=colormap(channel_idx), lw=4, label=channel_names_by_indices[channel_idx]))
                 elif voxel_indices is not None:
-                    second_dim = "voxel"
-                    source_folder_addition = f"/source_space/{glaser_region}"
-                    for voxel_idx in voxel_indices:
+                    second_dim = "voxel" if pca_folder == "" else "pc"
+                    source_folder_addition = f"/source_space{pca_folder}/{glaser_region}"
+                    for voxel_nr, voxel_idx in enumerate(voxel_indices):  # iterate over voxels (or pcs in same dim)
                         # Filter meg for voxel
                         meg_timepoint_voxel = meg_timepoint[:,voxel_idx] # [epochs, voxels]
-                        plt.plot(list(range(n_epochs_total)), meg_timepoint_voxel, linewidth=0.2, color=colormap(voxel_idx))
+                        plt.plot(list(range(n_epochs_total)), meg_timepoint_voxel, linewidth=0.2, alpha=0.5, color=colormap(voxel_nr))
+                        plt.axhline(np.mean(meg_timepoint_voxel), linestyle='--', linewidth=2, color=colormap(voxel_nr))
 
-                        legend_elements.append(Line2D([0], [0], color=colormap(voxel_idx), lw=4, label=f"Voxel id {voxel_idx}"))
-
+                        legend_elements.append(Line2D([0], [0], color=colormap(voxel_nr), lw=4, label=f"{second_dim} id {voxel_idx}"))
                 else:
                     raise ValueError("Either channel_names_by_indices or regions_by_indices need to be provided.")
 
@@ -4324,6 +4343,13 @@ class VisualizationHelper(GLMHelper):
 
                     plot_model_perspective(meg_data_complete=meg_data_complete, session_id=session_id, normalization=normalization, plot_timepoints=plot_timepoints, n_epochs_total=n_epochs_total, n_epochs_train=n_epochs_train, channel_names_by_indices=channel_names_by_indices)
         else:
+            if source_pca_type == 'voxels':
+                pca_folder = f"/voxels_pca_reduced{whiten_folder}"
+            elif source_pca_type == 'voxels_and_timepoints':
+                raise NotImplementedError("Model perspective visualization not yet implemented for pca over timepoints.")
+                #pca_folder = f"/voxels_and_timepoints_pca_reduced{whiten_folder}"
+            else:
+                pca_folder = ""
             for glaser_region in regions_of_interest:
                 for session_id in self.session_ids_num:
                     # Use defaultdict to automatically create missing keys
@@ -4332,7 +4358,7 @@ class VisualizationHelper(GLMHelper):
                         # Load meg data and split into grad and mag
                         meg_data = {"train": None, "test": None}
                         for split in meg_data:
-                            storage_folder = f"data_files/{self.lock_event}/meg_data/source_space/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id}/{split}"  
+                            storage_folder = f"data_files/{self.lock_event}/meg_data/source_space{pca_folder}/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id}/{split}"  
                             storage_file = "meg_data.npy"
                             storage_path = os.path.join(storage_folder, storage_file)
 
@@ -4343,7 +4369,7 @@ class VisualizationHelper(GLMHelper):
                         n_epochs_total = len(meg_data_complete)
 
                         n_voxels = meg_data_complete.shape[1]
-                        voxel_step_size = n_voxels // 2
+                        voxel_step_size = n_voxels // 5 if n_voxels // 5 >= 1 else 1
 
                         # Select some example voxels
                         voxel_indices = []
@@ -4360,7 +4386,7 @@ class VisualizationHelper(GLMHelper):
                             plot_timepoints.append(timepoint_index)
                         n_plot_timepoints = len(plot_timepoints)
 
-                        plot_model_perspective(meg_data_complete=meg_data_complete, session_id=session_id, normalization=normalization, plot_timepoints=plot_timepoints, n_epochs_total=n_epochs_total, n_epochs_train=n_epochs_train, voxel_indices=voxel_indices, glaser_region=glaser_region)
+                        plot_model_perspective(meg_data_complete=meg_data_complete, session_id=session_id, normalization=normalization, plot_timepoints=plot_timepoints, n_epochs_total=n_epochs_total, n_epochs_train=n_epochs_train, voxel_indices=voxel_indices, glaser_region=glaser_region, pca_folder=pca_folder)
                 
 
     def visualize_meg_means_stds(self):
