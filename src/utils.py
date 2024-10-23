@@ -1912,7 +1912,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         self.ann_features_type = "ann_features_pca" if pca_features else "ann_features"
 
 
-    def train_mapping(self, all_sessions_combined:bool=False, shuffle_train_labels:bool=False, downscale_features:bool=False, regions_of_interest:list=None, source_pca_type:str="", whiten:bool=False):
+    def train_mapping(self, all_sessions_combined:bool=False, shuffle_train_labels:bool=False, downscale_features:bool=False, regions_of_interest:list=None, source_pca_type:str=None, whiten:bool=False):
         """
         Trains a mapping from ANN features to MEG data over all sessions.
         """
@@ -3254,10 +3254,16 @@ class VisualizationHelper(GLMHelper):
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
                 
 
-    def visualize_GLM_results(self, fit_measure_type:str, by_timepoints:bool=False, only_distance:bool=False, omit_sessions:list=[], separate_plots:bool=False, distance_in_days:bool=True, average_distance_vals:bool=False, regions_of_interest:list=None, pca_voxels:bool=False):
+    def visualize_GLM_results(self, fit_measure_type:str, by_timepoints:bool=False, only_distance:bool=False, omit_sessions:list=[], separate_plots:bool=False, distance_in_days:bool=True, average_distance_vals:bool=False, regions_of_interest:list=None, source_pca_type:str=None, result_stored_by_pc:bool=False, whiten:bool=False):
         """
         Visualizes results from GLMHelper.predict_from_mapping_all_sessions
         """
+        pc_storage_folder = "/pcs_separate" if result_stored_by_pc else ""
+        whiten_folder = "/whiten" if whiten else ""
+        if source_pca_type == 'voxels':
+            pca_folder = f"/voxels_pca_reduced{whiten_folder}"
+        else:
+            pca_folder = ""
         if regions_of_interest is not None:
             assert by_timepoints, "[visualize_GLM_results] currently only used for self-prediction timepoint comparisons in the context of source space analysis."
 
@@ -3271,7 +3277,6 @@ class VisualizationHelper(GLMHelper):
             type_of_fit_measure = "Pearson correlation"
         else:
             type_of_fit_measure = "MSE"
-        pca_voxels_folder = "/pca_reduced" if pca_voxels else ""
         
         fit_measure_norms = {}
         for normalization in self.normalizations:
@@ -3447,7 +3452,7 @@ class VisualizationHelper(GLMHelper):
             elif by_timepoints:
                 assert fit_measure_type in ["var_explained_timepoint", "var_explained_sensors_timepoint", "pearson_r_timepoint"]
 
-                def plot_timepoint_fit_measure(timepoint_loss_list:list, num_timepoints:int, session_id:str=None, sensor_name:str=None, glaser_region:str=None):
+                def plot_timepoint_fit_measure(timepoint_loss_list:list, num_timepoints:int, session_id:str=None, sensor_name:str=None, glaser_region:str=None, pca_folder:str="", pc_num:str=None):
                     plt.figure(figsize=(10, 6))
                     #timepoints_in_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in list(range(num_timepoints))]
                     #plt.bar(timepoints_in_ms, timepoint_loss_list, color='blue')
@@ -3465,7 +3470,8 @@ class VisualizationHelper(GLMHelper):
 
                     # Save the plot to a file
                     sensor_folder_addition = f"/sensor_level/{sensor_name}" if sensor_name is not None else ""
-                    region_folder_addition = f"/source_space{pca_voxels_folder}/{glaser_region}" if glaser_region is not None else ""
+                    pc_storage_folder = "/pcs_separate" if pc_num is not None else ""
+                    region_folder_addition = f"/source_space{pca_folder}{pc_storage_folder}/{glaser_region}" if glaser_region is not None else ""
                     plot_folder = f"data_files/{self.lock_event}/visualizations/timepoint_model_comparison{region_folder_addition}{sensor_folder_addition}/subject_{self.subject_id}/norm_{normalization}"
                     if session_id is None:
                         plot_folder += "/all_sessions_combined"  
@@ -3473,12 +3479,12 @@ class VisualizationHelper(GLMHelper):
                     else:
                         plot_folder += f""
                         session_name_addition = f"_session{session_id}" if sensor_name is None else f"_sensor_{sensor_name}_session{session_id}"
-                    plot_file = f"{fit_measure_type}_comparison_{normalization}{session_name_addition}.png"
+                    plot_file = f"pc_{pc_num}_{fit_measure_type}_comparison_{pc_storage_folder[1:]}_{normalization}{session_name_addition}.png"
                     logger.custom_debug(f"plot_folder: {plot_folder}")
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
                     plt.close()
 
-                def extract_self_session_pred_and_plot_by_timepoints(session_fit_measures:dict, sensor_name:str=None, glaser_region:str=None) -> None:
+                def extract_self_session_pred_and_plot_by_timepoints(session_fit_measures:dict, sensor_name:str=None, glaser_region:str=None, pca_folder:str="", pc_num:str=None) -> None:
                     # Collect fit_measures for timepoint models on predictions on the own session
                     fit_measures_by_session_by_timepoint = {"session": {}}
                     for session_id in session_fit_measures['session_mapping']:
@@ -3503,11 +3509,11 @@ class VisualizationHelper(GLMHelper):
                             timepoint_average_fit_measure[timepoint] = avg_loss
                         timepoint_avg_loss_list = [timepoint_average_fit_measure[timepoint] for timepoint in timepoint_average_fit_measure]
 
-                        plot_timepoint_fit_measure(timepoint_loss_list=timepoint_avg_loss_list, num_timepoints=num_timepoints, sensor_name=sensor_name, glaser_region=glaser_region)
+                        plot_timepoint_fit_measure(timepoint_loss_list=timepoint_avg_loss_list, num_timepoints=num_timepoints, sensor_name=sensor_name, glaser_region=glaser_region, pca_folder=pca_folder, pc_num=pc_num)
                     else:
                         for session_id in fit_measures_by_session_by_timepoint["session"]:
                             timepoint_loss_list = [fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"][timepoint] for timepoint in fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"]]
-                            plot_timepoint_fit_measure(timepoint_loss_list=timepoint_loss_list, num_timepoints=num_timepoints, session_id=session_id, sensor_name=sensor_name, glaser_region=glaser_region)
+                            plot_timepoint_fit_measure(timepoint_loss_list=timepoint_loss_list, num_timepoints=num_timepoints, session_id=session_id, sensor_name=sensor_name, glaser_region=glaser_region, pca_folder=pca_folder, pc_num=pc_num)
             
                 if fit_measure_type != "var_explained_sensors_timepoint":
                     # All sensors combined
@@ -3516,13 +3522,17 @@ class VisualizationHelper(GLMHelper):
                     else:
                         # Load timepoint-based variance explained and plot seperately for each glaser region of interest
                         for glaser_region in regions_of_interest:
-                            storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/source_space{pca_voxels_folder}/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                            storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/source_space{pca_folder}{pc_storage_folder}/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
                             json_storage_file = f"var_explained_timepoints_dict.json"
                             json_storage_path = os.path.join(storage_folder, json_storage_file)
                             with open(json_storage_path, 'r') as file:
                                 fit_measures_by_session_by_timepoint = json.load(file)
                             
-                            extract_self_session_pred_and_plot_by_timepoints(session_fit_measures=fit_measures_by_session_by_timepoint, glaser_region=glaser_region)
+                            if not result_stored_by_pc:
+                                extract_self_session_pred_and_plot_by_timepoints(session_fit_measures=fit_measures_by_session_by_timepoint, glaser_region=glaser_region, pca_folder=pca_folder)
+                            else:
+                                for pc, pc_fit_measures_by_session_by_timepoint in fit_measures_by_session_by_timepoint["pcs"].items():
+                                    extract_self_session_pred_and_plot_by_timepoints(session_fit_measures=pc_fit_measures_by_session_by_timepoint, glaser_region=glaser_region, pca_folder=pca_folder, pc_num=pc)
                 else:
                     # Each sensor seperate
                     sensor_index_name_dict = self.get_relevant_meg_channels(self.chosen_channels)
@@ -3734,12 +3744,20 @@ class VisualizationHelper(GLMHelper):
             plot_file = f"distance_drift_all_subjects_{fit_measure}.png"
             self.save_plot_as_file(fig, plot_folder=plot_folder, plot_file=plot_file)
 
-    def timepoint_window_drift(self, omitted_sessions:list, all_windows_one_plot:bool, subtract_self_pred:bool, sensor_level:bool, include_0_distance:bool, debugging:bool=False, regions_of_interest:list=None):
+    def timepoint_window_drift(self, omitted_sessions:list, all_windows_one_plot:bool, subtract_self_pred:bool, sensor_level:bool, include_0_distance:bool, debugging:bool=False, regions_of_interest:list=None, source_pca_type:str=None, whiten:bool=False):
         """
         Plots drift for seperate timepoint windows, as well as for all windows combined.
         """
         if regions_of_interest is not None:
             assert not sensor_level, "timepoint_window_drift was called on source data and sensor level."
+
+        whiten_folder = "/whiten" if whiten else ""
+        if source_pca_type == 'voxels':
+            pca_folder = f"/voxels_pca_reduced{whiten_folder}"
+        elif source_pca_type == 'voxels_and_timepoints':
+            raise ValueError("[timepoint_window_drift] does not work for timepoint pca.")
+        else:
+            pca_folder = ""
 
         def filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint: dict, timepoint_window_start_idx:int):
             """
@@ -3759,9 +3777,10 @@ class VisualizationHelper(GLMHelper):
             
             return fit_measures_by_session_by_chosen_timepoints
 
-        def plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint:dict, sensor_name:str=None, glaser_region:str=None) -> None:
+        def plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint:dict, sensor_name:str=None, glaser_region:str=None, pca_folder:str="") -> None:
             sensor_filename_addition = f"sensor_{sensor_name}_" if sensor_name is not None else ""
             glaser_region_filename_addition = f"{glaser_region}" if glaser_region is not None else ""
+            pca_filename_addition = "voxels_pca_reduced_" if pca_folder.startswith("/voxels_pca_reduced") else ""
 
             if subtract_self_pred:
                 # Normalize with self-predictions
@@ -3771,7 +3790,7 @@ class VisualizationHelper(GLMHelper):
 
             # Define storage folder for all plots in function
             sensor_folder_addition = "sensor_level/" if sensor_level else ""
-            source_region_folder_addition = f"source_space/{glaser_region}/" if glaser_region is not None else ""
+            source_region_folder_addition = f"source_space{pca_folder}/{glaser_region}/" if glaser_region is not None else ""
             storage_folder = f"data_files/{self.lock_event}/visualizations/only_distance/timepoint_windows/{sensor_folder_addition}{source_region_folder_addition}{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}"
             
             # Calculate drift for various timewindows by slicing 
@@ -3796,7 +3815,7 @@ class VisualizationHelper(GLMHelper):
                         # Store plot for current window
                         window_end = timepoint_window_start_idx + self.time_window_n_indices
                         timepoint_window_description = f"window_{timepoint_window_start_idx}-{window_end}"
-                        storage_filename = f"drift_plot_{sensor_filename_addition}{glaser_region_filename_addition}{timepoint_window_description}"
+                        storage_filename = f"drift_plot_{pca_filename_addition}{sensor_filename_addition}{glaser_region_filename_addition}{timepoint_window_description}"
                         self.save_plot_as_file(plt=drift_plot_window, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
                     else:
                         fit_measures_by_distance_by_time_window["timewindow_start"][timepoint_window_start_idx] = {"fit_measures_by_distances": fit_measures_by_distances_window}
@@ -3806,7 +3825,7 @@ class VisualizationHelper(GLMHelper):
             # Plot all timewindows in the same plot (with different colors)
             if all_windows_one_plot:
                 drift_plot_all_windows = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distance_by_time_window, omitted_sessions=omitted_sessions, self_pred_normalized=subtract_self_pred, losses_averaged_within_distances=False, all_windows_one_plot=True, include_0_distance=include_0_distance)
-                storage_filename = f"drift_plot_{sensor_filename_addition}all_windows_comparison"
+                storage_filename = f"drift_plot_{pca_filename_addition}{sensor_filename_addition}all_windows_comparison"
                 self.save_plot_as_file(plt=drift_plot_all_windows, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
 
             # For control/comparison, plot the drift for the all timepoint values combined/averaged aswell
@@ -3814,7 +3833,7 @@ class VisualizationHelper(GLMHelper):
             fit_measures_by_distances_all_timepoints = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False, include_0_distance=include_0_distance)
             drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999, include_0_distance=include_0_distance)  # 999 indicates that we are considering all timepoints
 
-            storage_filename = f"drift_plot_{sensor_filename_addition}all_timepoints"
+            storage_filename = f"drift_plot_{pca_filename_addition}{sensor_filename_addition}all_timepoints"
             self.save_plot_as_file(plt=drift_plot_all_timepoints, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
             #plt.close(drift_plot_all_timepoints)
 
@@ -3823,7 +3842,6 @@ class VisualizationHelper(GLMHelper):
                 fit_measures_by_distances_session_level = self.average_timepoint_data_per_session(fit_measures_by_session_by_timepoint)
 
                 storage_filename = f"var_explained_session_level_used_for_timepoint_plots.json"
-                os.makedirs(storage_folder, exist_ok=True)
                 json_storage_path = os.path.join(storage_folder, storage_filename)
 
                 with open(json_storage_path, 'w') as file:
@@ -3856,13 +3874,13 @@ class VisualizationHelper(GLMHelper):
                 else:
                     for glaser_region in regions_of_interest:
                         # Load timepoint-based variance explained
-                        storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/source_space/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                        storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/source_space{pca_folder}/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
                         json_storage_file = f"var_explained_timepoints_dict.json"
                         json_storage_path = os.path.join(storage_folder, json_storage_file)
                         with open(json_storage_path, 'r') as file:
                             fit_measures_by_session_by_timepoint = json.load(file)
 
-                        plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint, glaser_region=glaser_region)
+                        plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint, glaser_region=glaser_region, pca_folder=pca_folder)
             else:
                 # Load sensor- and timepoint-based variance explained
                 storage_folder = f"data_files/{self.lock_event}/var_explained_sensors_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"

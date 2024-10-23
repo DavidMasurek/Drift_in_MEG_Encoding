@@ -111,7 +111,7 @@ regions_of_interest = ["V1", "V2", "V3"]  # ["V1", "V2", "V3", "V3A", "V3B", "V3
 source_pca_type = "voxels"  
 
 source_q_bottom, source_q_top = 0.5, 90.0  # asymmetric, due bias towards positive outliers
-store_result_by_pc = True
+store_result_by_pc = False
 whiten_pcs = True  # whether or not PCs should be scaled to unit variance
 
 assert source_pca_type in ["voxels", "voxels_and_timepoints", None], f"Invalid argument for source_pca_type: {source_pca_type}."
@@ -329,13 +329,12 @@ for run in range(run_pipeline_n_times):
             #####glm_helper.train_mapping(all_sessions_combined=all_sessions_combined, shuffle_train_labels=shuffle_train_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)
 
             # Generate predictions for each region for each train_session for each pred_session
-            glm_helper.predict_from_mapping_source_all_sessions(predict_train_data=False, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, store_result_by_pc=store_result_by_pc, whiten=whiten_pcs)
+            #####glm_helper.predict_from_mapping_source_all_sessions(predict_train_data=False, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, store_result_by_pc=store_result_by_pc, whiten=whiten_pcs)
 
             # Plot self-prediction timepoint comparison for all regions and drift
             if source_pca_type != "voxels_and_timepoints":
-                pass
-                ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, store_result_by_pc=store_result_by_pc, white=whiten_pcs)
-                ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type)
+                #####visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, result_stored_by_pc=store_result_by_pc, whiten=whiten_pcs)
+                visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)
             else:
                 visualization_helper.visualize_source_self_pred_pca(regions_of_interest=regions_of_interest, source_pca_type=source_pca_type)
                 visualization_helper.visualize_source_drift_pca(omitted_sessions=sessions_to_omit, include_0_distance=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type)
