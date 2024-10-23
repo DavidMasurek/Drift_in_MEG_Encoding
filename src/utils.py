@@ -54,6 +54,7 @@ class BasicOperationsHelper:
             max_ms = 500
         else:
             # AVS ICA-claned: Fixation: 651 timepoints, -500 to 800.  Old, Andrej: Fixation: 401 timepoints, -300 to 500
+            #TODO: Validate timepoints. -500 to 800 for ica cleaned?
             min_ms = -800
             max_ms = 500
 
@@ -1283,6 +1284,79 @@ class DatasetHelper(MetadataHelper):
         
         logger.custom_debug(f"end_test_index: {end_test_index}")
 
+
+    def apply_pca_to_voxels(self, regions_of_interest:list) -> None:
+        """
+        Reduces dimensionality of estimated glaser region meg signal by applying PCA over voxels within regions.
+        """
+        for normalization in self.normalizations:
+            for glaser_region in regions_of_interest:
+                n_elements_by_session_by_split = self.recursive_defaultdict()  # Store number of elements to seperate combined meg data into sessions and splits again
+                all_session_split_data_combined = []
+                for session_id in self.session_ids_num:
+                    # Load session and region specific data
+                    meg_split = {"train": None, "test": None}
+                    for split in meg_split:
+                        storage_folder = f"data_files/{self.lock_event}/meg_data/source_space/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id}/{split}"  
+                        storage_file = "meg_data.npy"
+                        storage_path = os.path.join(storage_folder, storage_file)
+
+                        meg_split[split] = np.load(storage_path)
+                    all_session_split_data_combined.append((meg_split["train"], meg_split["test"]))
+
+                    # Store number of elements
+                    n_train_session = len(meg_split["train"])
+                    n_test_session = len(meg_split["test"])
+                    n_elements_by_session_by_split["session"][session_id]["train"] = n_train_session
+                    n_elements_by_session_by_split["session"][session_id]["test"] = n_test_session
+
+                # Combine all features into a single array to apply z-score to and fit PCA on
+                all_session_split_data_combined = np.concatenate([np.concatenate((meg_train, meg_test)) for meg_train, meg_test in all_session_split_data_combined], axis=0)
+
+                # Fit and apply PCA on combined sessions and splits (seperately on each timepoint)
+                n_epochs, n_voxels, n_timepoints = all_session_split_data_combined.shape
+                #print(f"n_epochs, n_voxels, n_timepoints: {n_epochs, n_voxels, n_timepoints}")
+                n_pca_comps = int(n_voxels*0.05) if int(n_voxels*0.05) > 1 else 1  # keep 5% of components. V1: 4 components (out of 80 voxels) explain ~70% variance
+                all_session_split_data_combined_pca = np.zeros(shape=(n_epochs, n_pca_comps, n_timepoints))
+                for timepoint_idx in range(n_timepoints):
+                    # Fit PCA
+                    timepoint_data = all_session_split_data_combined[:,:,timepoint_idx]
+                    pca = PCA(n_components=n_pca_comps)
+                    pca.fit(timepoint_data)
+
+                    # Investigate variance explained by n components
+                    explained_var_per_component = pca.explained_variance_ratio_
+                    explained_var = 0
+                    for explained_var_component in explained_var_per_component:
+                        explained_var += explained_var_component
+                    #logger.custom_info(f"\n Explained Variance {glaser_region}: {explained_var} \n")
+
+                    # Apply pca
+                    all_session_split_data_combined_pca[:,:,timepoint_idx] = pca.transform(timepoint_data)
+
+                # Seperate all_session_split_data_combined_pca again and store results
+                starting_meg_index = 0  # Updated with n elements belonging to each session to extract data belonging to each session
+                for session_idx, session_id in enumerate(self.session_ids_num):
+                    # Get splits for this session from combined meg data by indices
+                    n_train_session = n_elements_by_session_by_split["session"][session_id]["train"]
+                    n_test_session = n_elements_by_session_by_split["session"][session_id]["test"]
+                    n_total_session = n_train_session + n_test_session
+
+                    meg_data_train = all_session_split_data_combined_pca[starting_meg_index:starting_meg_index + n_train_session]
+                    meg_data_test = all_session_split_data_combined_pca[starting_meg_index + n_train_session:starting_meg_index + n_train_session + n_test_session]
+                    
+                    session_meg_splits = {"train": meg_data_train, "test": meg_data_test}
+
+                    for split in ["train", "test"]:
+                        save_folder = f"data_files/{self.lock_event}/meg_data/source_space/pca_reduced/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id}/{split}"  
+                        save_file = "meg_data_pca.npy"
+                        os.makedirs(save_folder, exist_ok=True)
+                        save_path = os.path.join(save_folder, save_file)
+                        np.save(save_path, session_meg_splits[split])
+
+                    # update starting index for next session
+                    starting_meg_index += n_total_session
+
             
     def create_source_meg_dataset(self, regions_of_interest:list, clip_outliers=True) -> None:
         """
@@ -1819,14 +1893,14 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         self.ann_features_type = "ann_features_pca" if pca_features else "ann_features"
 
 
-    def train_mapping(self, all_sessions_combined:bool=False, shuffle_train_labels:bool=False, downscale_features:bool=False, regions_of_interest:list=None):
+    def train_mapping(self, all_sessions_combined:bool=False, shuffle_train_labels:bool=False, downscale_features:bool=False, regions_of_interest:list=None, pca_voxels:bool=False):
         """
         Trains a mapping from ANN features to MEG data over all sessions.
         """
         if regions_of_interest is not None:
             assert not all_sessions_combined, "[train_mapping]: Invalid argument combination."
 
-        def train_model(X_train:np.ndarray, Y_train: np.ndarray, normalization:str, all_sessions_combined:bool, session_id_num:str=None, glaser_region:str=None):
+        def train_model(X_train:np.ndarray, Y_train: np.ndarray, normalization:str, all_sessions_combined:bool, session_id_num:str=None, glaser_region:str=None, pca_voxels:bool=False):
             # Initialize Helper class
             ridge_model = GLMHelper.MultiDimensionalRegression(self) 
 
@@ -1841,10 +1915,16 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
 
             all_session_folder = f"/all_sessions_combined" if all_sessions_combined else ""
             session_addition = f"/session_{session_id_num}" if not all_sessions_combined else ""
-            glaser_region_folder = f"/source_space/{glaser_region}" if glaser_region is not None else ""
+            if glaser_region is not None:
+                if not pca_voxels:
+                    source_folder = f"/source_space/{glaser_region}" 
+                else:
+                    source_folder = f"/source_space/pca_reduced/{glaser_region}" 
+            else:
+                source_folder = ""
 
             # Store trained models as pickle
-            save_folder = f"data_files/{self.lock_event}/GLM_models{glaser_region_folder}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}{all_session_folder}/norm_{normalization}{session_addition}"  
+            save_folder = f"data_files/{self.lock_event}/GLM_models{source_folder}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}{all_session_folder}/norm_{normalization}{session_addition}"  
             save_file = "GLM_models.pkl"
             os.makedirs(save_folder, exist_ok=True)
             save_path = os.path.join(save_folder, save_file)
@@ -1879,7 +1959,8 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         X_train = ann_features['train']
                         for glaser_region in regions_of_interest:
                             # load train meg data
-                            storage_folder = f"data_files/{self.lock_event}/meg_data/source_space/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id}/train"  
+                            voxels_pca_folder = "/pca_reduced" if pca_voxels else ""
+                            storage_folder = f"data_files/{self.lock_event}/meg_data/source_space/{voxels_pca_folder}{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id}/train"  
                             storage_file = "meg_data.npy"
                             storage_path = os.path.join(storage_folder, storage_file)
 
@@ -1888,7 +1969,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                             if shuffle_train_labels:
                                 np.random.shuffle(Y_train)
 
-                            selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined, session_id_num=session_id, glaser_region=glaser_region)
+                            selected_alphas = train_model(X_train=X_train, Y_train=Y_train, normalization=normalization, all_sessions_combined=all_sessions_combined, session_id_num=session_id, glaser_region=glaser_region, pca_voxels=pca_voxels)
         # all sessions combined
         else:
             for normalization in self.normalizations:
@@ -2150,12 +2231,13 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         json.dump(dict_to_store, file, indent=4)
 
 
-    def predict_from_mapping_source_all_sessions(self, predict_train_data:bool=False, shuffle_test_labels:bool=False, downscale_features:bool=False, regions_of_interest:list=None):
+    def predict_from_mapping_source_all_sessions(self, predict_train_data:bool=False, shuffle_test_labels:bool=False, downscale_features:bool=False, regions_of_interest:list=None, pca_voxels:bool=False):
         """
         For each source region: based on the trained mapping for each session, predicts MEG data over all sessions from their respective test features.
         For readability reasons seperated from predict_from_mapping_all_sessions.
         If predict_train_data is True, predicts the train data of each session as a sanity check of the complete pipeline. Expect strong overfit.
         """
+        pca_voxels_folder = "/pca_reduced" if pca_voxels else ""
         for glaser_region in regions_of_interest:
             for normalization in self.normalizations:
                 variance_explained_dict = self.recursive_defaultdict()
@@ -2164,7 +2246,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 for session_id_model in self.session_ids_num:
                     # Get trained ridge regression model for this session
                     # Load ridge model
-                    storage_folder = f"data_files/{self.lock_event}/GLM_models/source_space/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/session_{session_id_model}"  
+                    storage_folder = f"data_files/{self.lock_event}/GLM_models/source_space{pca_voxels_folder}/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/session_{session_id_model}"  
                     storage_file = "GLM_models.pkl"
                     storage_path = os.path.join(storage_folder, storage_file)
                     with open(storage_path, 'rb') as file:
@@ -2180,7 +2262,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         
                         meg_data = {"train": None, "test": None}
                         for split in meg_data:
-                            storage_folder = f"data_files/{self.lock_event}/meg_data/source_space/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id_pred}/{split}"  
+                            storage_folder = f"data_files/{self.lock_event}/meg_data/source_space{pca_voxels_folder}/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id_pred}/{split}"  
                             storage_file = "meg_data.npy"
                             storage_path = os.path.join(storage_folder, storage_file)
 
@@ -2216,7 +2298,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                             correlation_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = r_pearson_timepoint
 
                 # Store predictions dict
-                storage_folder = f"data_files/{self.lock_event}/predicted_meg_responses/source_space/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                storage_folder = f"data_files/{self.lock_event}/predicted_meg_responses/source_space{pca_voxels_folder}/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
                 os.makedirs(storage_folder, exist_ok=True)
                 storage_file = f"predicted_responses_dict.pkl"
                 storage_path = os.path.join(storage_folder, storage_file)
@@ -2228,7 +2310,7 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                 storage_dicts_by_folders = {"var_explained_timepoints": variance_explained_dict, "pearson_r_timepoints": correlation_dict}
 
                 for main_folder, fit_measure_dict in storage_dicts_by_folders.items():
-                    storage_folder = f"data_files/{self.lock_event}/{main_folder}/source_space/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                    storage_folder = f"data_files/{self.lock_event}/{main_folder}/source_space{pca_voxels_folder}/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
                     os.makedirs(storage_folder, exist_ok=True)
                     json_storage_file = f"{main_folder}_dict.json"
                     json_storage_path = os.path.join(storage_folder, json_storage_file)
@@ -3104,7 +3186,7 @@ class VisualizationHelper(GLMHelper):
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
                 
 
-    def visualize_GLM_results(self, fit_measure_type:str, by_timepoints:bool = False, only_distance:bool = False, omit_sessions:list = [], separate_plots:bool = False, distance_in_days:bool = True, average_distance_vals:bool = False, regions_of_interest:list = None):
+    def visualize_GLM_results(self, fit_measure_type:str, by_timepoints:bool=False, only_distance:bool=False, omit_sessions:list=[], separate_plots:bool=False, distance_in_days:bool=True, average_distance_vals:bool=False, regions_of_interest:list=None, pca_voxels:bool=False):
         """
         Visualizes results from GLMHelper.predict_from_mapping_all_sessions
         """
@@ -3121,6 +3203,7 @@ class VisualizationHelper(GLMHelper):
             type_of_fit_measure = "Pearson correlation"
         else:
             type_of_fit_measure = "MSE"
+        pca_voxels_folder = "/pca_reduced" if pca_voxels else ""
         
         fit_measure_norms = {}
         for normalization in self.normalizations:
@@ -3137,6 +3220,7 @@ class VisualizationHelper(GLMHelper):
                         session_fit_measures = json.load(file)
 
                 fit_measure_norms[normalization] = session_fit_measures
+                
 
             if only_distance:
                 # Plot loss as a function of distance of predicted session from "training" session
@@ -3313,7 +3397,7 @@ class VisualizationHelper(GLMHelper):
 
                     # Save the plot to a file
                     sensor_folder_addition = f"/sensor_level/{sensor_name}" if sensor_name is not None else ""
-                    region_folder_addition = f"/source_space/{glaser_region}" if glaser_region is not None else ""
+                    region_folder_addition = f"/source_space{pca_voxels_folder}/{glaser_region}" if glaser_region is not None else ""
                     plot_folder = f"data_files/{self.lock_event}/visualizations/timepoint_model_comparison{region_folder_addition}{sensor_folder_addition}/subject_{self.subject_id}/norm_{normalization}"
                     if session_id is None:
                         plot_folder += "/all_sessions_combined"  
@@ -3364,7 +3448,7 @@ class VisualizationHelper(GLMHelper):
                     else:
                         # Load timepoint-based variance explained and plot seperately for each glaser region of interest
                         for glaser_region in regions_of_interest:
-                            storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/source_space/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                            storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/source_space{pca_voxels_folder}/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
                             json_storage_file = f"var_explained_timepoints_dict.json"
                             json_storage_path = os.path.join(storage_folder, json_storage_file)
                             with open(json_storage_path, 'r') as file:
@@ -3889,6 +3973,117 @@ class VisualizationHelper(GLMHelper):
                 plot_file = f"{sensor_type}_plot.png"
                 self.save_plot_as_file(plt=epochs_plot, plot_folder=plot_folder, plot_file=plot_file, plot_type="mne")
 
+    
+    def plot_ERPs(self, plot_norms:list, regions_of_interest:list, non_preprocessed:bool=False):
+        """
+        Visualizes meg data in ERP fashion, averaged over sessions and channels.
+        """
+        if not non_preprocessed:
+            if regions_of_interest is not None:
+                for glaser_region in regions_of_interest:
+                    for session_id in self.session_ids_num:
+                        # Use defaultdict to automatically create missing keys
+                        session_by_norms_dict = self.recursive_defaultdict()
+                        n_timepoints = None
+                        for normalization in plot_norms:
+                            # Load meg data for region, session and norm
+                            meg_data = {"train": None, "test": None}
+                            for split in meg_data:
+                                storage_folder = f"data_files/{self.lock_event}/meg_data/source_space/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id}/{split}"  
+                                storage_file = "meg_data.npy"
+                                storage_path = os.path.join(storage_folder, storage_file)
+
+                                meg_data[split] = np.load(storage_path)
+                            meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"])) 
+
+                            # Calculate the mean over the epochs and voxels (not timepoints)
+                            mean_timepoint_values = np.mean(meg_data_complete, axis=(0, 1))
+                            session_by_norms_dict[normalization] = mean_timepoint_values
+
+                            if n_timepoints is None:
+                                n_timepoints = len(mean_timepoint_values)
+
+                        timepoints = np.array(list(range(n_timepoints)))
+
+                        # Plotting
+                        plt.figure(figsize=(10, 6))
+                        for normalisation in plot_norms:
+                            plt.plot(timepoints, session_by_norms_dict[normalisation], label=f'{normalisation}')
+
+                        plt.xlabel('Timepoints)')
+                        plt.ylabel('MEG Value')
+                        plt.title(f'ERP-like Average MEG Signal, averaged over Epochs and Voxels. Session {session_id} Region {glaser_region}')
+                        plt.legend()
+
+                        # Save plot
+                        plot_folder = f"data_files/{self.lock_event}/visualizations/meg_data/ERP_like/source_space/{glaser_region}"
+                        plot_file = f"Region-{glaser_region}_Session-{session_id}_plot.png"
+                        self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+            else:
+                for session_id in self.session_ids_num:
+                    # Use defaultdict to automatically create missing keys
+                    session_by_norms_dict = self.recursive_defaultdict()
+                    n_timepoints = None
+                    for normalization in plot_norms:
+                        # Load meg data for region, session and norm
+                        meg_data = self.load_split_data_from_file(session_id_num=session_id, type_of_content="meg_data", type_of_norm=normalization)
+                        meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"])) 
+
+                        # Calculate the mean over the epochs and channels (not timepoints)
+                        mean_timepoint_values = np.mean(meg_data_complete, axis=(0, 1))
+                        session_by_norms_dict[normalization] = mean_timepoint_values
+
+                        if n_timepoints is None:
+                            n_timepoints = len(mean_timepoint_values)
+
+                    timepoints = np.array(list(range(n_timepoints)))
+
+                    # Plotting
+                    plt.figure(figsize=(10, 6))
+                    for normalisation in plot_norms:
+                        plt.plot(timepoints, session_by_norms_dict[normalisation], label=f'{normalisation}')
+
+                    plt.xlabel('Timepoints)')
+                    plt.ylabel('MEG Value')
+                    plt.title(f'ERP-like Average MEG Signal, averaged over Epochs and Channels. Session {session_id}')
+                    plt.legend()
+
+                    # Save plot
+                    plot_folder = f"data_files/{self.lock_event}/visualizations/meg_data/ERP_like"
+                    plot_file = f"Session-{session_id}_plot.png"
+                    self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+        else:
+            if regions_of_interest is not None:
+                meg_data_folder = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/source_space/beamformer/glasser/ori_None/hem_lh/filter_0.2_200/ica'
+                for session_id_char in self.session_ids_char:
+                    session_id = self.map_session_letter_id_to_num(session_id_char)
+                    meg_file_name = f"as{self.subject_id}{session_id_char}_population_codes_{self.lock_event}_500hz_masked_False.h5"
+                    meg_data_path = os.path.join(meg_data_folder, meg_file_name)
+
+                    with h5py.File(meg_data_path, "r") as meg_file:
+                        for glaser_region in regions_of_interest:
+                            # Load meg data for region and session 
+                            meg_data_reg_sess = np.array(meg_file[glaser_region]['onset'])
+
+                            # Calculate the mean over the epochs and voxels (not timepoints)
+                            mean_timepoint_values = np.mean(meg_data_reg_sess, axis=(0, 1))
+
+                            # Plotting
+                            plt.figure(figsize=(10, 6))
+                            timepoints = np.array(list(range(len(mean_timepoint_values))))
+                            plt.plot(timepoints, mean_timepoint_values)
+
+                            plt.xlabel('Timepoints)')
+                            plt.ylabel('MEG Value')
+                            plt.title(f'ERP-like Average MEG Signal (non-preprocessed), averaged over Epochs and Voxels. Session {session_id} Region {glaser_region}')
+
+                            # Save plot
+                            plot_folder = f"data_files/{self.lock_event}/visualizations/meg_data/ERP_like/non_preprocessed/source_space/{glaser_region}"
+                            plot_file = f"Non_preprocessed_Region-{glaser_region}_Session-{session_id}_plot.png"
+                            self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+            else:
+                raise NotImplementedError("plot_ERPs not yet implemented to visualize non-preproccessed non-source meg data.")
+
 
     def visualize_meg_ERP_style(self, plot_norms: list):
         """
@@ -4145,9 +4340,9 @@ class VisualizationHelper(GLMHelper):
                         meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
 
                         n_epochs_train = len(meg_data["train"])
-                        n_epochs_total = n_epochs_train + len(meg_data["test"])
+                        n_epochs_total = len(meg_data_complete)
 
-                        n_voxels = meg_data["train"].shape[1]
+                        n_voxels = meg_data_complete.shape[1]
                         voxel_step_size = n_voxels // 2
 
                         # Select some example voxels

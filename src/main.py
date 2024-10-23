@@ -34,7 +34,7 @@ batch_size = 32
 pca_components = 30
 
 best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 999, "timepoint_max": 999}, 
-                                            "02": {"timepoint_min": 290, "timepoint_max": 330},  # "02": {"timepoint_min": 290, "timepoint_max": 330},
+                                            "02": {"timepoint_min": 195, "timepoint_max": 235},  # source: {"timepoint_min": 195, "timepoint_max": 235}, non source: "02": {"timepoint_min": 290, "timepoint_max": 330},
                                             "03": {"timepoint_min": 999, "timepoint_max": 999},
                                             "05": {"timepoint_min": 999, "timepoint_max": 999},},
                             # ! Saccade: Currently testing smaller windows due to sensor-level encoding differences.
@@ -47,14 +47,14 @@ best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 999, "timepo
 timepoint_min = 0  # fixation: 170, saccade: 275
 timepoint_max = 650  # fixation: 250, saccade: 375
 
-normalizations = ["global_robust_scaling", "mean_centered_voxel_then_global_robust_scaling"]  # "mean_centered_voxel_then_global_robust_scaling"]  # "mean_centered_ch_then_global_robust_scaling"]  #  ["mean_centered_ch_then_global_robust_scaling"] # , "no_norm", "mean_centered_ch_t", "robust_scaling", "global_robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
+normalizations = ["mean_centered_voxel_then_global_robust_scaling"]  # "global_robust_scaling, mean_centered_voxel_then_global_robust_scaling, mean_centered_ch_then_global_robust_scaling"]  # "mean_centered_ch_then_global_robust_scaling"]  #  ["mean_centered_ch_then_global_robust_scaling"] # , "no_norm", "mean_centered_ch_t", "robust_scaling", "global_robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
 
 fractional_grid = np.array([fraction/100 for fraction in range(1, 100, 3)]) # range from 0.01 to 1 in steps or 0.03
 alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
 
                                                     # originally discarded sessions # newest with mean_centered_ch_then_global_robust_scaling # no_norm
 omit_sessions_by_subject = {"01": ["1", "6", "7", "8"],  # ["1"] # ["1", "7", "8"] # ["1", "7"] (6 and 8 are close)
-                            "02": [],  # ["4"]  # [] # []
+                            "02": ["1", "3", "5", "8", "9"],  # ["4"]  # [] # [] # Source: ["1", "3", "5", "8", "9"]
                             "03": ["1", "2", "5", "7", "10"],  # ["1", "2", "5", "7", "10"] # ["1", "2", "5", "7", "10"]
                             "04": ["6"],  # [] # ["6"] # ["6"]
                             "05": ["7", "9"], # ["9"] # ["4", "7", "9"] # ["4", "7", "9"]
@@ -105,7 +105,23 @@ omit_non_generalizing_sessions = True
 
 n_scenes_per_cluster = 3
 
-regions_of_interest = ["V1", "V2", "V3", "V3A", "V3B", "V3CD", "V4", "V4t", "V6", "V6A", "V7", "V8", "FFC"]
+# Source config
+# ! different timepoints processed for V1, V2, V3 recently !
+regions_of_interest = ["V1", "V2", "V3"]  # ["V1", "V2", "V3", "V3A", "V3B", "V3CD", "V4", "V4t", "V6", "V6A", "V7", "V8", "FFC"]
+source_pca_type = "voxels"  
+
+source_q_bottom, source_q_top = 0.5, 90  # asymmetric, due bias towards positive outliers
+store_result_by_pc = True
+whiten_pcs = True  # whether or not PCs should be scaled to unit variance
+
+assert source_pca_type in ["voxels", "voxels_and_timepoints", None], f"Invalid argument for source_pca_type: {source_pca_type}."
+if store_result_by_pc:
+    assert source_pca_type in ["voxels", "voxels_and_timepoints"], "store_result_by_pc True but no PCA performed."
+    if source_pca_type == "voxels_and_timepoints":
+        raise NotImplementedError("Seperate storage of fit measures for PCs not yet implemented for PCA over timepoints.")
+if whiten_pcs:
+    assert source_pca_type in ["voxels", "voxels_and_timepoints"], "whiten_pcs True but no PCA performed."
+        
 
 if use_all_mag_sensors:
     # Load all available mag_channels from evoked file
@@ -230,6 +246,7 @@ for run in range(run_pipeline_n_times):
 
             # Visualize meg data ERP style
             #visualization_helper.visualize_meg_ERP_style(plot_norms=["no_norm", "mean_centered_ch_t"])  # ,"robust_scaling_ch_t", "z_score_ch_t", "robust_scaling", "z_score"
+            ###visualization_helper.plot_ERPs(plot_norms=normalizations, regions_of_interest=None)  
 
             # Visualize encoding model performance
             ###visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["train","test"], all_sessions_combined=all_sessions_combined)
@@ -240,7 +257,7 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
-            visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
+            ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="pearson_r_timepoint", by_timepoints=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
@@ -252,7 +269,7 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.mne_topo_plot_per_sensor(data_type="drift", omitted_sessions=sessions_to_omit, all_timepoints_combined=False)  # data_type="self-pred" or "drift"
 
             # Visualize model perspective (values by timepoint)
-            ##visualization_helper.new_visualize_model_perspective(plot_norms=["mean_centered_ch_then_global_robust_scaling"])  # , "no_norm"
+            visualization_helper.new_visualize_model_perspective(plot_norms=normalizations)  
 
             # Visualize session means and stds
             ###visualization_helper.visualize_meg_means_stds()
@@ -297,23 +314,34 @@ for run in range(run_pipeline_n_times):
             glm_helper = GLMHelper(fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, lock_event=lock_event, ann_model=ann_model, module_name=module_name, batch_size=batch_size, crop_size=crop_size)
             visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
 
+            
             # Create one dataset (containing all sessions) for each region of interest (lets start with visual cortex)
-            ###dataset_helper.create_source_meg_dataset(regions_of_interest=regions_of_interest, clip_outliers=clip_outliers)
+            ###dataset_helper.create_source_meg_dataset(regions_of_interest=regions_of_interest, clip_outliers=clip_outliers, q_bottom=source_q_bottom, q_top=source_q_top)
+            ###if source_pca_type != None:
+            # TODO: Change number of PCs in case of source_pca_type (currently too many)
+            ###    dataset_helper.apply_pca_to_voxels(regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)
 
             # Debug: Plot source meg values      
-            visualization_helper.new_visualize_model_perspective(plot_norms=normalizations, regions_of_interest=regions_of_interest)  # , "no_norm"
+            ###visualization_helper.new_visualize_model_perspective(plot_norms=normalizations, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type)  # , "no_norm"
+            ###visualization_helper.plot_ERPs(plot_norms=normalizations, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type)  
+            ###visualization_helper.plot_ERPs(plot_norms=None, regions_of_interest=regions_of_interest, non_preprocessed=True)
 
             # Train GLM for each region for each session
-            ###glm_helper.train_mapping(all_sessions_combined=all_sessions_combined, shuffle_train_labels=shuffle_train_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest)
+            glm_helper.train_mapping(all_sessions_combined=all_sessions_combined, shuffle_train_labels=shuffle_train_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)
 
             # Generate predictions for each region for each train_session for each pred_session
-            ###glm_helper.predict_from_mapping_source_all_sessions(predict_train_data=False, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest)
+            glm_helper.predict_from_mapping_source_all_sessions(predict_train_data=False, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, store_result_by_pc=store_result_by_pc, whiten=whiten_pcs)
 
-            # Plot self-prediction timepoint comparison for all regions
-            ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True, regions_of_interest=regions_of_interest)
-
+            # Plot self-prediction timepoint comparison for all regions and drift
+            if source_pca_type != "voxels_and_timepoints":
+                visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, store_result_by_pc=store_result_by_pc, white=whiten_pcs)
+                ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type)
+            else:
+                visualization_helper.visualize_source_self_pred_pca(regions_of_interest=regions_of_interest, source_pca_type=source_pca_type)
+                visualization_helper.visualize_source_drift_pca(omitted_sessions=sessions_to_omit, include_0_distance=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type)
+            
             # Accumulate losses by distance and plot drift
-            ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True, regions_of_interest=regions_of_interest)
+            ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type)
 
 if plot_distance_drift_all_subjects:
     global_visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
