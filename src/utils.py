@@ -62,7 +62,9 @@ class BasicOperationsHelper:
         #logger.custom_debug(f"all_ms_values linspace: {self.all_ms_values}")
 
        
-    def perform_permutation_test(self, x_array, y_array, n_permutations=1000):
+    def perform_permutation_test(self, x_array, y_array, n_permutations=10000, direction:str="left", generate_plot:bool=False):
+        assert direction in ["left", "right", "both"], f"Unrecognized direction argument: {direction}"
+
         def correlation_statistic(x,y):
             return pearsonr(x,y)[0]
 
@@ -75,31 +77,47 @@ class BasicOperationsHelper:
             np.random.shuffle(x_array_permutate)
             null_distribution_corrs.append(correlation_statistic(x_array_permutate, y_array))
         null_distribution_corrs = np.array(null_distribution_corrs)
+        p_0_05_corr = np.percentile(null_distribution_corrs, 5)
+        p_0_95_corr = np.percentile(null_distribution_corrs, 95)
+
+        print(f"p_0_05_corr: {p_0_05_corr}")
+        print(f"p_0_95_corr: {p_0_95_corr}")
 
         # Compute (directed) p-value: proportion of permutations yielding a correlation lower than the empirical correlation
-        num_corrs_lower_empirical = np.sum(null_distribution_corrs < empirical_corr)
-        p_value = num_corrs_lower_empirical / n_permutations
+        if direction == "left":
+            num_corrs_greater_empirical = np.sum(null_distribution_corrs < empirical_corr)
+        elif direction == "right":
+            num_corrs_greater_empirical = np.sum(null_distribution_corrs > empirical_corr)
+        else: 
+            # beidseitig
+            num_corrs_greater_empirical = np.sum(np.abs(null_distribution_corrs) > abs(empirical_corr))
 
-        # Create figure illustration permutation test result: Empirical correlation in comparison to null distribution
-        permutation_fig, permutation_ax = plt.subplots()
+        print(f"num_corrs_greater_empirical: {num_corrs_greater_empirical}")
+        p_value = num_corrs_greater_empirical / n_permutations
 
-        # Null distribution of correlations
-        permutation_ax.hist(null_distribution_corrs, bins=30, color='lightgray', density=True)
+        if generate_plot:
+            # Create figure illustration permutation test result: Empirical correlation in comparison to null distribution
+            permutation_fig, permutation_ax = plt.subplots()
 
-        # Vertical line for the empirical correlation, zero correlation and dashed line for p 0.05 correlation
-        permutation_ax.axvline(empirical_corr, color='black', linewidth=2)
-        permutation_ax.axvline(0, color='black', linewidth=1)
-        p_0_05_corr = np.percentile(null_distribution_corrs, 5)
-        permutation_ax.axvline(p_0_05_corr, color='red', linestyle='--', linewidth=2, label=f'P=0.05 (r={p_0_05_corr:.2f})')
+            # Null distribution of correlations
+            permutation_ax.hist(null_distribution_corrs, bins=30, color='lightgray', density=True)
 
-        permutation_ax.set_xlabel('correlation (r)')
-        permutation_ax.set_ylabel('permutations prob.')
+            # Vertical line for the empirical correlation, zero correlation and dashed line for p 0.05 correlation
+            permutation_ax.axvline(empirical_corr, color='black', linewidth=2)
+            permutation_ax.axvline(0, color='black', linewidth=1)
+            
+            permutation_ax.axvline(p_0_05_corr, color='red', linestyle='--', linewidth=2, label=f'P=0.05 (r={p_0_05_corr:.2f})')
 
-        # DEPRECATED: Perform scipy the permutation test for comparison; none of the permutation type options seem appropriate
-        #p_scipy = permutation_test((x_array, y_array), correlation_statistic, permutation_type='pairings', alternative='less', n_resamples=10000)
-        #print(f"p_scipy: {p_scipy}")
+            permutation_ax.set_xlabel('correlation (r)')
+            permutation_ax.set_ylabel('permutations prob.')
 
-        return p_value, permutation_fig, permutation_ax
+            # DEPRECATED: Perform scipy the permutation test for comparison; none of the permutation type options seem appropriate
+            #p_scipy = permutation_test((x_array, y_array), correlation_statistic, permutation_type='pairings', alternative='less', n_resamples=10000)
+            #print(f"p_scipy: {p_scipy}")
+
+            return p_value, permutation_fig, permutation_ax
+        else:
+            return p_value
 
 
     def omit_selected_sessions_from_fit_measures(self, fit_measures_by_session:dict, omitted_sessions:list, sensors_seperated:bool) -> dict:
@@ -1368,7 +1386,7 @@ class DatasetHelper(MetadataHelper):
 
                     for split in ["train", "test"]:
                         save_folder = f"data_files/{self.lock_event}/meg_data/source_space{pca_folder}{whiten_folder}/{glaser_region}/{normalization}/subject_{self.subject_id}/session_{session_id}/{split}"  
-                        save_file = "meg_data_pca.npy"
+                        save_file = "meg_data.npy"
                         os.makedirs(save_folder, exist_ok=True)
                         save_path = os.path.join(save_folder, save_file)
                         np.save(save_path, session_meg_splits[split])
@@ -1912,12 +1930,23 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         self.ann_features_type = "ann_features_pca" if pca_features else "ann_features"
 
 
+
     def train_mapping(self, all_sessions_combined:bool=False, shuffle_train_labels:bool=False, downscale_features:bool=False, regions_of_interest:list=None, source_pca_type:str=None, whiten:bool=False):
         """
         Trains a mapping from ANN features to MEG data over all sessions.
         """
         if regions_of_interest is not None:
             assert not all_sessions_combined, "[train_mapping]: Invalid argument combination."
+        whiten_folder = "/whiten" if whiten else ""
+        if source_pca_type == 'voxels':
+            pca_folder = f"/voxels_pca_reduced{whiten_folder}"
+            timepoints_pca = False
+        elif source_pca_type == 'voxels_and_timepoints':
+            pca_folder = f"/voxels_and_timepoints_pca_reduced{whiten_folder}"
+            timepoints_pca = True
+        else:
+            pca_folder = ""
+            timepoints_pca = False
 
         def train_model(X_train:np.ndarray, Y_train: np.ndarray, normalization:str, all_sessions_combined:bool, session_id_num:str=None, glaser_region:str=None, pca_folder:str="", timepoints_pca:bool=False):
             # Initialize Helper class
@@ -1966,16 +1995,6 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                         session_alphas[session_id_num] = selected_alphas
                     #self.save_dict_as_json(type_of_content="selected_alphas_by_session", dict_to_store=session_alphas, type_of_norm=normalization, predict_train_data=predict_train_data)
                 else:
-                    whiten_folder = "/whiten" if whiten else ""
-                    if source_pca_type == 'voxels':
-                        pca_folder = f"/voxels_pca_reduced{whiten_folder}"
-                        timepoints_pca = False
-                    elif source_pca_type == 'voxels_and_timepoints':
-                        pca_folder = f"/voxels_and_timepoints_pca_reduced{whiten_folder}"
-                        timepoints_pca = True
-                    else:
-                        pca_folder = ""
-                        timepoints_pca = False
                     # seperately for each source/glaser region
                     for session_id in self.session_ids_num:
                         ann_features = self.load_split_data_from_file(session_id_num=session_id, type_of_content=self.ann_features_type, ann_model=self.ann_model, module=self.module_name)
@@ -2341,15 +2360,22 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                                         correlation_dict["pcs"][pc]["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(t)] = r_pearson_timepoint_pc
                         else:
                             _, n_pcs = predictions.shape
-                            var_explained_sum = 0
-                            r_pearson_sum = 0  
-                            for pc in range(n_pcs):
-                                var_explained_sum += r2_score(Y_test[:,pc], predictions[:,pc])
-                                r_pearson_sum += pearsonr(Y_test[:,pc], predictions[:,pc])[0]
+                            if not store_result_by_pc:
+                                var_explained_sum = 0
+                                r_pearson_sum = 0  
+                                for pc in range(n_pcs):
+                                    var_explained_sum += r2_score(Y_test[:,pc], predictions[:,pc])
+                                    r_pearson_sum += pearsonr(Y_test[:,pc], predictions[:,pc])[0]
 
-                            # Save fit measures
-                            variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = var_explained_sum
-                            correlation_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = r_pearson_sum
+                                variance_explained_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = var_explained_sum
+                                correlation_dict["session_mapping"][session_id_model]["session_pred"][session_id_pred] = r_pearson_sum
+                            else:
+                                for pc in range(n_pcs):
+                                    var_explained_pc = r2_score(Y_test[:,pc], predictions[:,pc])
+                                    r_pearson_pc = pearsonr(Y_test[:,pc], predictions[:,pc])[0]
+
+                                    variance_explained_dict["pcs"][pc]["session_mapping"][session_id_model]["session_pred"][session_id_pred] = var_explained_pc
+                                    correlation_dict["pcs"][pc]["session_mapping"][session_id_model]["session_pred"][session_id_pred] = r_pearson_pc
 
 
                 # Store predictions dict
@@ -2578,6 +2604,8 @@ class VisualizationHelper(GLMHelper):
             mean_pupil_dilations = np.mean(np.array([events_df['supd_x'].to_numpy(), events_df['eupd_x'].to_numpy()]), axis=0)   # pupil dilations of all fixations, averaged between start and end of the fixation 
             mean_pupil_dilations_by_session[int(session_id)] = mean_pupil_dilations
 
+        global_mean_pupil_dilations_for_sessions = [np.mean(mean_pupil_dilations_by_session[session_id_int]) for session_id_int in sorted(mean_pupil_dilations_by_session, key=int)]
+
         # Plot average pupil dilation across sessions
         plt.figure(figsize=(8, 6))
         x_values, y_values = self.extract_x_y_arrays(mean_pupil_dilations_by_session, losses_averaged_within_distances=False)
@@ -2585,10 +2613,14 @@ class VisualizationHelper(GLMHelper):
         
         slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
         trend_line = slope * x_values_set + intercept
-        r_value = "{:.3f}".format(r_value)  # limit to three decimals
+        r_value = "{:.3f}".format(r_value) 
+        print(f"x_values: {x_values}")
+        print(f"y_values: {y_values}")
+        print(f"x_values.shape, y_values.shape: {x_values.shape, y_values.shape}")
+        p_value = "{:.4f}".format(self.perform_permutation_test(x_values, y_values, n_permutations))
         
-        plt.plot(x_values_set, trend_line, color='green' , label=f"r={r_value}", linestyle='-', linewidth=3)
-        #plt.plot(x_values, y_values, marker='o', linestyle='', markersize=3)
+        plt.plot(x_values_set, trend_line, color='green' , label=f"r={r_value}, p={p_value}", linestyle='-', linewidth=3)
+        plt.plot(x_values_set, global_mean_pupil_dilations_for_sessions, marker='o', linestyle='', markersize=3)
         plt.title(f'Pupil dilation across sessions subject {self.subject_id}. \n Averaged across all start and end timepoints of fixation events in the session.')
         plt.xlabel('Session')
         plt.ylabel('Pupil Dilation')
@@ -2602,7 +2634,7 @@ class VisualizationHelper(GLMHelper):
         plt.close()
      
 
-    def calculate_RSM_test_set_drift(self, omit_sessions_from_calc:list):
+    def calculate_RSM_test_set_drift(self, omit_sessions_from_calc:list, calculate_anew:bool):
         """
         Investigate RSM drift based on test sets of all sessions: Calculate distance between true RSM and RSM of predicted values.
         """
@@ -2610,69 +2642,91 @@ class VisualizationHelper(GLMHelper):
         session_day_differences = self.get_session_date_differences()
 
         for normalization in self.normalizations:
-            ### Calculate (true) RSM of responses (for each sessions test set) ###
-            true_rsms_by_session = {"sessions": {}}
-            for session_id in session_ids:
-                session_test_data = self.load_split_data_from_file(session_id_num=session_id, type_of_content="meg_data", type_of_norm=normalization)['test']  # shape: (n_epochs, n_channels, n_timepoints)
-                n_epochs, n_channels, n_timepoints = session_test_data.shape  # epochs = crops
+            if calculate_anew:
+                ### Calculate (true) RSM of responses (for each sessions test set) ###
+                true_rsms_by_session = {"sessions": {}}
+                for session_id in session_ids:
+                    session_test_data = self.load_split_data_from_file(session_id_num=session_id, type_of_content="meg_data", type_of_norm=normalization)['test']  # shape: (n_epochs, n_channels, n_timepoints)
+                    n_epochs, n_channels, n_timepoints = session_test_data.shape  # epochs = crops
 
-                rsm_matrix_session = np.zeros(shape=(n_epochs, n_epochs))
-                for epoch1_idx in range(n_epochs):
-                    for epoch2_idx in range(epoch1_idx, n_epochs):
-                        # ! Flattening is only valid without consideration for correlation, not variance explained etc. !
-                        epoch_corr = pearsonr(session_test_data[epoch1_idx].flatten(),session_test_data[epoch2_idx].flatten())[0]
-                        rsm_matrix_session[epoch1_idx][epoch2_idx] = epoch_corr
-                
-                # Store upper triangular part without diagonal (only part with values)
-                rsm_matrix_session = rsm_matrix_session[np.triu_indices_from(rsm_matrix_session, k=1)]
-                true_rsms_by_session["sessions"][session_id] = rsm_matrix_session
-
-                if 0 in rsm_matrix_session:
-                    raise ValueError("Error in upper tri extraction.")
-
-            ### Calculate RSMs of predicted responses and compare to true RSMs ###
-
-            # Load predicted responses
-            storage_folder = f"data_files/{self.lock_event}/predicted_meg_responses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
-            storage_file = f"predicted_responses_dict.pkl"
-            storage_path = os.path.join(storage_folder, storage_file)
-            with open(storage_path, 'rb') as file:
-                predicted_responses_dict = pickle.load(file)
-
-            rsm_corr_by_distance = {}
-            for session_id_test_set in session_ids:
-                true_rsm_matrix_session = true_rsms_by_session["sessions"][session_id_test_set]
-                for session_id_model in session_ids:
-                    predicted_responses = predicted_responses_dict["session_mapping"][session_id_model]["session_pred"][session_id_test_set]
-                    n_epochs, n_channels, n_timepoints = predicted_responses.shape
-
-                    # Calculate RSM of predicted responses                        
-                    predicted_rsm_matrix = np.zeros(shape=(n_epochs, n_epochs))
+                    rsm_matrix_session = np.zeros(shape=(n_epochs, n_epochs))
                     for epoch1_idx in range(n_epochs):
                         for epoch2_idx in range(epoch1_idx, n_epochs):
                             # ! Flattening is only valid without consideration for correlation, not variance explained etc. !
-                            epoch_corr = pearsonr(predicted_responses[epoch1_idx].flatten(),predicted_responses[epoch2_idx].flatten())[0]
-                            predicted_rsm_matrix[epoch1_idx][epoch2_idx] = epoch_corr
-                    # Extract upper triangular part without diagonal (only part with values)
-                    predicted_rsm_matrix = predicted_rsm_matrix[np.triu_indices_from(predicted_rsm_matrix, k=1)]
+                            epoch_corr = pearsonr(session_test_data[epoch1_idx].flatten(),session_test_data[epoch2_idx].flatten())[0]
+                            rsm_matrix_session[epoch1_idx][epoch2_idx] = epoch_corr
+                    
+                    # Store upper triangular part without diagonal (only part with values)
+                    rsm_matrix_session = rsm_matrix_session[np.triu_indices_from(rsm_matrix_session, k=1)]
+                    true_rsms_by_session["sessions"][session_id] = rsm_matrix_session
 
-                    # Calculate correlation of predicted and true RSM, stored as fit measure by distance
-                    distance = session_day_differences[session_id_model][session_id_test_set]
-                    rsm_spearman_r, _ = spearmanr(true_rsm_matrix_session, predicted_rsm_matrix)
+                    if 0 in rsm_matrix_session:
+                        raise ValueError("Error in upper tri extraction.")
 
-                    if distance not in rsm_corr_by_distance.keys():
-                        rsm_corr_by_distance[distance] = [rsm_spearman_r]
-                    else:
-                        rsm_corr_by_distance[distance].append(rsm_spearman_r)
+                ### Calculate RSMs of predicted responses and compare to true RSMs ###
+
+                # Load predicted responses
+                storage_folder = f"data_files/{self.lock_event}/predicted_meg_responses/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                storage_file = f"predicted_responses_dict.pkl"
+                storage_path = os.path.join(storage_folder, storage_file)
+                with open(storage_path, 'rb') as file:
+                    predicted_responses_dict = pickle.load(file)
+
+                rsm_corr_by_distance = {}
+                for session_id_test_set in session_ids:
+                    true_rsm_matrix_session = true_rsms_by_session["sessions"][session_id_test_set]
+                    for session_id_model in session_ids:
+                        predicted_responses = predicted_responses_dict["session_mapping"][session_id_model]["session_pred"][session_id_test_set]
+                        n_epochs, n_channels, n_timepoints = predicted_responses.shape
+
+                        # Calculate RSM of predicted responses                        
+                        predicted_rsm_matrix = np.zeros(shape=(n_epochs, n_epochs))
+                        for epoch1_idx in range(n_epochs):
+                            for epoch2_idx in range(epoch1_idx, n_epochs):
+                                # ! Flattening is only valid without consideration for correlation, not variance explained etc. !
+                                epoch_corr = pearsonr(predicted_responses[epoch1_idx].flatten(),predicted_responses[epoch2_idx].flatten())[0]
+                                predicted_rsm_matrix[epoch1_idx][epoch2_idx] = epoch_corr
+                        # Extract upper triangular part without diagonal (only part with values)
+                        predicted_rsm_matrix = predicted_rsm_matrix[np.triu_indices_from(predicted_rsm_matrix, k=1)]
+
+                        # Calculate correlation of predicted and true RSM, stored as fit measure by distance
+                        distance = session_day_differences[session_id_model][session_id_test_set]
+                        rsm_spearman_r, _ = spearmanr(true_rsm_matrix_session, predicted_rsm_matrix)
+
+                        if distance not in rsm_corr_by_distance.keys():
+                            rsm_corr_by_distance[distance] = [rsm_spearman_r]
+                        else:
+                            rsm_corr_by_distance[distance].append(rsm_spearman_r)
+
+                # Store computation results
+                save_folder = f"data_files/{self.lock_event}/rsm_corr_by_distance/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                os.makedirs(save_folder, exist_ok=True)
+                save_file = f"rsm_corr_by_distance.json"
+                save_path = os.path.join(save_folder, save_file)
+                with open(save_path, 'w') as file:
+                    json.dump(rsm_corr_by_distance, file, indent=4)
+            else:
+                # Load from previous calculation (takes ~2hours)
+                storage_folder = f"data_files/{self.lock_event}/rsm_corr_by_distance/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                storage_file = f"rsm_corr_by_distance.json"
+                storage_path = os.path.join(storage_folder, storage_file)
+                with open(storage_path, 'r') as file:
+                    rsm_corr_by_distance = json.load(file)
+
 
             # Plot drift
             plt.figure(figsize=(8, 6))
             x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances=rsm_corr_by_distance, losses_averaged_within_distances=False)
             filtered_x_values_set = np.array(list(set(x_values)))
+
+            print(f"x_values: {x_values}")
+            print(f"y_values: {y_values}")
+
             slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
             trend_line = slope * filtered_x_values_set + intercept
             r_value = "{:.3f}".format(r_value)  # limit to three decimals
-            plt.plot(filtered_x_values_set, trend_line, color='green' , label=f"r={r_value}", linestyle='-', linewidth=3)
+            p_value = self.perform_permutation_test(x_values, y_values, direction="both")
+            plt.plot(filtered_x_values_set, trend_line, color='green' , label=f"r={r_value}, p={p_value}", linestyle='-', linewidth=3)
             plt.plot(x_values, y_values, marker='o', linestyle='')
             plt.title(f'Correlations of (upper triangular) true RSMs and predicted RSMs by distance.')
             plt.xlabel('Distance in days between test set session and model session')
@@ -3036,7 +3090,7 @@ class VisualizationHelper(GLMHelper):
             y_values = []
             for distance, fit_measure_list in fit_measures_by_distances.items():
                 for _ in range(len(fit_measure_list)):
-                    x_values.append(distance)
+                    x_values.append(int(distance))
                 y_values.extend(fit_measure_list)
             x_values = np.array(x_values)
             y_values = np.array(y_values)
@@ -3050,7 +3104,7 @@ class VisualizationHelper(GLMHelper):
         """
         x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances, losses_averaged_within_distances=False)
 
-        permutation_p_value, _, _ = self.perform_permutation_test(x_values, y_values, n_permutations=10000)
+        permutation_p_value = self.perform_permutation_test(x_values, y_values, n_permutations=10000)
         """
         if subject_id is not None:  # Called from drift_distance_all_subjects
 
@@ -3085,13 +3139,13 @@ class VisualizationHelper(GLMHelper):
         if timepoint_window_start_idx not in [None, 999]:
             timepoint_start_ms = self.map_timepoint_idx_to_ms(timepoint_window_start_idx)
             timepoint_end_ms = timepoint_start_ms + (self.time_window_n_indices * 2)  # each timepoint is equivalent to 2ms (i.e. )
-            label = f"{timepoint_start_ms} to {timepoint_end_ms}ms, (r={r_value})" 
+            label = f"{timepoint_start_ms} to {timepoint_end_ms}ms, (r={r_value}, p={permutation_p_value})" 
         elif timepoint_window_start_idx == 999:
             # In this case we are plotting all timepoints
             min_index = 0  # 0 because timepoint_min is added in the mapping
             max_index = self.timepoint_max - self.timepoint_min
             #logger.custom_info(f"max_index: {max_index}")
-            label = f"{self.map_timepoint_idx_to_ms(min_index)} to {self.map_timepoint_idx_to_ms(max_index)}ms, (r={r_value})"   
+            label = f"{self.map_timepoint_idx_to_ms(min_index)} to {self.map_timepoint_idx_to_ms(max_index)}ms, (r={r_value}, p={permutation_p_value})"   
         elif subject_id != None:
             label = f"Subject {subject_id}: r={r_value}, p={permutation_p_value}"
         else:
@@ -3454,17 +3508,17 @@ class VisualizationHelper(GLMHelper):
 
                 def plot_timepoint_fit_measure(timepoint_loss_list:list, num_timepoints:int, session_id:str=None, sensor_name:str=None, glaser_region:str=None, pca_folder:str="", pc_num:str=None):
                     plt.figure(figsize=(10, 6))
-                    #timepoints_in_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in list(range(num_timepoints))]
+                    timepoints_in_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in list(range(num_timepoints))]
                     #plt.bar(timepoints_in_ms, timepoint_loss_list, color='blue')
-                    timepoints_indices = [timepoint_idx for timepoint_idx in list(range(num_timepoints))]
-                    plt.bar(timepoints_indices, timepoint_loss_list, color='blue')
+                    #timepoints_indices = [timepoint_idx for timepoint_idx in list(range(num_timepoints))]
+                    plt.bar(timepoints_in_ms, timepoint_loss_list, color='blue', width=1.6)
                     #plt.bar(list(range(num_timepoints)), timepoint_loss_list, color='blue')
-                    #logger.custom_debug(f"list(range(num_timepoints): {list(range(num_timepoints))}")
+                    #logger.custom_info(f"list(range(num_timepoints): {list(range(num_timepoints))}")
                     session_subtitle = "Averaged across all Sessions, predicting themselves" if session_id is None else f"Session {session_id}, predicting iteself"
                     sensor_subtitle = "Averaged across all sensors" if sensor_name is None else f"Sensor {sensor_name}"
                     region_subtitle = "" if glaser_region is None else f"Glaser region {glaser_region}"
-                    plt.title(f'{type_of_fit_measure} Fit measure per Timepoint Model. \n {region_subtitle} {sensor_subtitle} {session_subtitle} \n omitted sessions: {omit_sessions}.')
-                    plt.xlabel(f'Time relative to {self.lock_event} onset')
+                    plt.title(f'{type_of_fit_measure} per Timepoint Model. \n {region_subtitle} {sensor_subtitle} {session_subtitle}.')
+                    plt.xlabel(f'Time relative to {self.lock_event} onset in ms')
                     plt.ylabel(f'{type_of_fit_measure}')
                     plt.grid(True)
 
@@ -3479,7 +3533,8 @@ class VisualizationHelper(GLMHelper):
                     else:
                         plot_folder += f""
                         session_name_addition = f"_session{session_id}" if sensor_name is None else f"_sensor_{sensor_name}_session{session_id}"
-                    plot_file = f"pc_{pc_num}_{fit_measure_type}_comparison_{pc_storage_folder[1:]}_{normalization}{session_name_addition}.png"
+                    pc_name_addition = f"pc_{pc_num}_" if pc_num is not None else ""
+                    plot_file = f"{pc_name_addition}{fit_measure_type}_comparison_{normalization}{session_name_addition}.png"
                     logger.custom_debug(f"plot_folder: {plot_folder}")
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
                     plt.close()
@@ -3488,8 +3543,6 @@ class VisualizationHelper(GLMHelper):
                     # Collect fit_measures for timepoint models on predictions on the own session
                     fit_measures_by_session_by_timepoint = {"session": {}}
                     for session_id in session_fit_measures['session_mapping']:
-                        if session_id in omit_sessions:
-                            continue
                         fit_measures_by_session_by_timepoint["session"][session_id] = {"timepoint":{}}
                         for timepoint in session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]["timepoint"]:
                             fit_measure_timepoint = session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]["timepoint"][timepoint]
@@ -3720,7 +3773,7 @@ class VisualizationHelper(GLMHelper):
                 x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances_subject, losses_averaged_within_distances=False)
 
                 observed_corr = "{:.3f}".format(pearsonr(x_values,y_values)[0])
-                permutation_p_value, permutation_plot, permutation_ax = self.perform_permutation_test(x_values, y_values, n_permutations=10000)
+                permutation_p_value, permutation_plot, permutation_ax = self.perform_permutation_test(x_values, y_values, n_permutations=10000, generate_plot=True)
                 permutation_ax.set_title(f'Permutation Test for Subject {subject_id} \n r={observed_corr}, p={permutation_p_value}')
 
                 plot_folder = f"data_files/{self.lock_event}/visualizations/distance_drift/permutation_test/{fit_measure}/{normalization}"
@@ -3931,7 +3984,7 @@ class VisualizationHelper(GLMHelper):
                 drift_correlations_sensors = []
                 for sensor_idx, sensor_name in enumerate(sensor_names):
                     sensor_fit_measures_by_session_by_timepoint = fit_measures_by_sensor_by_session_by_timepoint["sensor"][str(sensor_idx)]
-                    logger.custom_info(f"Processing sensor {sensor_name}")
+                    logger.custom_debug(f"Processing sensor {sensor_name}")
                     
                     sensor_fit_measures_by_distances = self.calculate_fit_by_distances(fit_measures_by_session=sensor_fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
 
@@ -3959,8 +4012,8 @@ class VisualizationHelper(GLMHelper):
                         drift_correlations_sensors.append(np.array(sensor_drift_correlations_timepoints))
 
                 drift_correlations_sensors = np.array(drift_correlations_sensors)
-                min_corr = np.min(drift_correlations_sensors)
-                max_corr = np.max(drift_correlations_sensors)
+                min_corr = "{:.4f}".format(np.min(drift_correlations_sensors))
+                max_corr = "{:.4f}".format(np.max(drift_correlations_sensors))
 
                 # plot_topomap always expects shape (n_sensors, n_timepoints)
                 if all_timepoints_combined:
@@ -3983,8 +4036,8 @@ class VisualizationHelper(GLMHelper):
                     self_pred_values_sensors.append(np.array(sensor_self_preds_timepoints))
                 self_pred_values_sensors = np.array(self_pred_values_sensors)
                     
-                min_var_explained = np.min(self_pred_values_sensors)
-                max_var_explained = np.max(self_pred_values_sensors)
+                min_var_explained = "{:.4f}".format(np.min(self_pred_values_sensors))
+                max_var_explained = "{:.4f}".format(np.max(self_pred_values_sensors)) 
 
             # Create mne info object
             fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/saccade_evoked_{self.subject_id}_01_.fif'
@@ -3995,9 +4048,11 @@ class VisualizationHelper(GLMHelper):
             # Get arr of timepoints to plot
             if all_timepoints_combined:
                 # These are dummy values, we average across all timepoints but mne requires a timepoint value
-                t_start = self.map_timepoint_idx_to_ms(self.timepoint_min) / 1000  # 0.05
-                t_end = self.map_timepoint_idx_to_ms(self.timepoint_max) / 1000  # 0.058
-                timepoints = np.linspace(t_start, t_end, 1)  
+                #t_start = self.map_timepoint_idx_to_ms(0) / 1000  # 0.05
+                #t_end = self.map_timepoint_idx_to_ms(self.timepoint_max-self.timepoint_min) / 1000  # 0.058
+                #timepoints = np.linspace(t_start, t_end, 1)  
+                t_start = 0
+                timepoints = [0]
             else:
                 # Timepoints need to be converted from indices to seconds. map_timepoint_idx_to_ms maps only maps to ms, /1000 converts to seconds
                 timepoints = np.array([float(self.map_timepoint_idx_to_ms(timepoint_idx)/1000) for timepoint_idx in timepoint_indices])
@@ -4016,10 +4071,11 @@ class VisualizationHelper(GLMHelper):
             if data_type == "drift":
                 fig.suptitle(f'Drift on Sensor Level. Negative correlations (drift) are in blue, positive correlations are in red. \n Min r: {min_corr}. Max r: {max_corr}', fontsize=18)
             else:
-                fig.suptitle(f'Self-Pred Variance Explained on Sensor Level. Negative values (drift) are in blue, positive values are in red. \n Min var_explained: {min_var_explained}. Max var_explained: {max_var_explained}', fontsize=18)
+                fig.suptitle(f'Self-Pred Variance Explained on Sensor Level. Negative values are in blue, positive values are in red. \n Min var_explained: {min_var_explained}. Max var_explained: {max_var_explained}', fontsize=18)
 
             plot_folder =  f"data_files/{self.lock_event}/visualizations/topographic_plots/{data_type}/subject_{self.subject_id}/"
-            plot_file = f"{data_type}_topo_plot.png"
+            all_timepoints_name_addition = "_all_timepoints" if all_timepoints_combined else ""
+            plot_file = f"{data_type}_topo_plot{all_timepoints_name_addition}.png"
             self.save_plot_as_file(plt=fig, plot_folder=plot_folder, plot_file=plot_file)
 
             # Plot channel locations
@@ -4507,6 +4563,87 @@ class VisualizationHelper(GLMHelper):
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
     
+    def visualize_source_self_pred_pca(self, regions_of_interest:list, source_pca_type:str, plot_pcs_seperate:bool, whiten:str):
+        assert source_pca_type == "voxels_and_timepoints"
+        pc_storage_folder = "/pcs_separate" if plot_pcs_seperate else ""
+        whiten_folder = "/whiten" if whiten else ""
+        pca_folder = f"/voxels_and_timepoints_pca_reduced{whiten_folder}"
+
+        def plot_region_self_preds_plots(session_fit_measures:dict, glaser_region:str, pca_folder:str, normalization:str):
+            # Collect fit_measures for models on predictions on the own session
+            self_pred_fit_measures_by_session= {"session": {}}
+            for session_id in session_fit_measures['session_mapping']:
+                fit_measure_session = session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]
+                self_pred_fit_measures_by_session["session"][session_id] = fit_measure_session
+
+            # Plot all sessions in one plot
+            session_labels = [session_id for session_id in self_pred_fit_measures_by_session.keys()]
+            session_values = [session_id for session_id in self_pred_fit_measures_by_session.values()]
+
+            plt.figure(figsize=(10, 6))
+            plt.bar(session_labels, session_values, color='blue')
+            plt.title(f'Variance Explained per Session, averaged across PCs (PCA over timepoints and voxels). \n {glaser_region}.')
+            plt.xlabel(f'Session ID')
+            plt.ylabel(f'Variance Explained')
+            plt.grid(True)
+
+            plot_folder = f"data_files/{self.lock_event}/visualizations/model_comparison/source_space/{pca_folder}/{glaser_region}/subject_{self.subject_id}/norm_{normalization}"
+            plot_file = f"Model_comparison_voxels_and_timepoints_pca_reduced_{normalization}.png"
+            self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+            plt.close()
+
+        def plot_pcas_region_self_preds_plots(session_fit_measures:dict, glaser_region:str, pca_folder:str, normalization:str):
+            # Collect fit_measures for models on predictions on the own session
+            self_pred_fit_measures_by_session = self.recursive_defaultdict()
+            for pc, pc_fit_measures in session_fit_measures["pcs"].items():
+                for session_id in pc_fit_measures['session_mapping']:
+                    fit_measure_pc_session = pc_fit_measures['session_mapping'][session_id]["session_pred"][session_id]
+                    self_pred_fit_measures_by_session["session"][session_id][pc] = fit_measure_pc_session
+
+            
+            n_pcs = len(session_fit_measures["pcs"].keys())
+            n_sessions = len(self_pred_fit_measures_by_session["session"].keys())
+            session_labels = [f"Session {session_id}" for session_id in self.session_ids_num]
+            pc_labels = [f"PC {pc_idx+1}" for pc_idx in range(n_pcs)]
+            bar_width = 0.15
+
+            fig, ax = plt.subplots(figsize=(10, 6))
+            for session_idx, session_id in enumerate(self.session_ids_num):
+                x_positions = [session_idx + pc * bar_width for pc in range(n_pcs)]
+                y_positions = [session_pc_val for session_pc_val in self_pred_fit_measures_by_session["session"][session_id].values()]
+                ax.bar(x_positions, y_positions, width=bar_width)  # , label=pc_labels
+
+            ax.set_xlabel('Session ID')
+            ax.set_ylabel('Variance Explained')
+            ax.set_title('Model comparison PCA over Voxels and Timepoints')
+            ticks_loc = [session_idx + bar_width * (n_pcs - 1)/2 for session_idx in range(n_sessions)]
+            print(f"n_sessions: {n_sessions}")
+            print(f"ticks_loc: {ticks_loc}")
+            ax.set_xticks(ticks_loc)
+            ax.set_xticklabels(session_labels)
+            ax.legend()
+            plt.tight_layout()
+
+            plot_folder = f"data_files/{self.lock_event}/visualizations/model_comparison/source_space/{pca_folder}/pcs_separate/{glaser_region}/subject_{self.subject_id}/norm_{normalization}"
+            plot_file = f"Model_comparison_voxels_and_timepoints_pca_reduced_{normalization}.png"
+            self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+            plt.close()
+            
+
+        for normalization in self.normalizations:
+            for glaser_region in regions_of_interest:
+                storage_folder = f"data_files/{self.lock_event}/var_explained/source_space{pca_folder}{pc_storage_folder}/{glaser_region}/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                json_storage_file = f"var_explained_dict.json"
+                json_storage_path = os.path.join(storage_folder, json_storage_file)
+                with open(json_storage_path, 'r') as file:
+                    fit_measures_by_session = json.load(file)
+                        
+                if not plot_pcs_seperate:
+                    plot_region_self_preds_plots(session_fit_measures=fit_measures_by_session, glaser_region=glaser_region, pca_folder=pca_folder, normalization=normalization)
+                else:
+                    plot_pcas_region_self_preds_plots(session_fit_measures=fit_measures_by_session, glaser_region=glaser_region, pca_folder=pca_folder, normalization=normalization)
+                    # TODO: need new function, PCAs next to each other
+
 
 class DebuggingHelper(VisualizationHelper):
     def __init__(self, norms:list, subject_id: str = "02"):

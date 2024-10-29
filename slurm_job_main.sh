@@ -1,18 +1,16 @@
 #!/bin/bash
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 #SBATCH --nodes 1
 
-#SBATCH -p klab-cpu
+#SBATCH -p klab-l40s  # klab-cpu
 #SBATCH -n 1
 #SBATCH -c 32
 #SBATCH --mem 20G
-#SBATCH --gres=gpu:0
+#SBATCH --gres=gpu:1
 
 #SBATCH --error=logs/slurm_logs/errors/error.o%j
 #SBATCH --output=logs/slurm_logs/outputs/output.o%j
-#SBATCH --job-name rsa-all-sess-combs
-#SBATCH --mail-user=dmasurek@uos.de
-#SBATCH --mail-type=ALL
+#SBATCH --job-name drift-pipeline
 
 echo "running in shell: " "$SHELL"
 echo "*** loading spack modules ***"
