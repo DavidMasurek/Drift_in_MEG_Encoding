@@ -80,8 +80,9 @@ class BasicOperationsHelper:
         p_0_05_corr = np.percentile(null_distribution_corrs, 5)
         p_0_95_corr = np.percentile(null_distribution_corrs, 95)
 
-        print(f"p_0_05_corr: {p_0_05_corr}")
-        print(f"p_0_95_corr: {p_0_95_corr}")
+        #print(f"p_0_05_corr: {p_0_05_corr}")
+        #print(f"p_0_95_corr: {p_0_95_corr}")
+        #print(f"empirical_corr: {empirical_corr}")
 
         # Compute (directed) p-value: proportion of permutations yielding a correlation lower than the empirical correlation
         if direction == "left":
@@ -91,8 +92,6 @@ class BasicOperationsHelper:
         else: 
             # beidseitig
             num_corrs_greater_empirical = np.sum(np.abs(null_distribution_corrs) > abs(empirical_corr))
-
-        print(f"num_corrs_greater_empirical: {num_corrs_greater_empirical}")
         p_value = num_corrs_greater_empirical / n_permutations
 
         if generate_plot:
@@ -1605,7 +1604,7 @@ class DatasetHelper(MetadataHelper):
                 cluster_id_trial = extract_cluster_from_scene_id(scene_id)
                 n_scenes_per_cluster[cluster_id_trial] += 1
             n_scenes_per_cluster_sessions.append(n_scenes_per_cluster)
-            print(f"Session {session_id}: {n_scenes_per_cluster[cluster_of_interest_idx]}")
+            print(f"Session {session_id}: \n {n_scenes_per_cluster[cluster_of_interest_idx]}")
         n_scenes_per_cluster_sessions = np.sum(np.array(n_scenes_per_cluster_sessions), axis=0)
         print(f"n_scenes_per_cluster all sessions added: \n {n_scenes_per_cluster_sessions[cluster_of_interest_idx]} \n")
         ### Clusters are evently distributed within subjects (64 to 68 scenes per cluster per subject), but unevenly within sessions! ###
@@ -1930,7 +1929,6 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
         self.ann_features_type = "ann_features_pca" if pca_features else "ann_features"
 
 
-
     def train_mapping(self, all_sessions_combined:bool=False, shuffle_train_labels:bool=False, downscale_features:bool=False, regions_of_interest:list=None, source_pca_type:str=None, whiten:bool=False):
         """
         Trains a mapping from ANN features to MEG data over all sessions.
@@ -2131,34 +2129,11 @@ class GLMHelper(DatasetHelper, ExtractionHelper):
                                     # Save fit measure for selected sensor and timepoint
                                     variance_explained_dict["sensor"][str(sensor_idx)]["session_mapping"][session_id_model]["session_pred"][session_id_pred]["timepoint"][str(timepoint_idx)] = var_explained_sensor_timepoint
                         else:
-                            # Calculate the mean squared error across all flattened features and timepoints
-                            mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
-
-                            # Calculate variance explained 
-                            var_explained = r2_score(Y_test.reshape(-1), predictions.reshape(-1))  # .reshape(-1)
-
                             raise ValueError(f"fit_measure_storage_distinction {fit_measure_storage_distinction} deprecated. Flattening biases variance explained.")
-                            """
-                            TODO: Investigate effects of flattening; consider alternatives
-                            logger.custom_info(f"Y_test.shape: {Y_test.shape}")
-                            Y_test_reshaped = Y_test.reshape(-1, 102)
-                            logger.custom_info(f"Y_test_reshaped.shape: {Y_test_reshaped.shape}")
-                            first_sensor_pre_reshape = Y_test[:, 0, :].reshape(-1)
-                            first_sensor_post_reshape = Y_test_reshaped[:,0]
-                            print("shape first_sensor_pre_reshape", first_sensor_pre_reshape.shape)
-                            print("shape first_sensor_post_reshape:", first_sensor_post_reshape.shape)
-                            print("Sum first sensor pre reshape:", np.sum(first_sensor_pre_reshape))
-                            print("Sum first sensor post reshape:", np.sum(first_sensor_post_reshape))
-                            """
 
-                            # Calculate the Pearson correlation coefficient
+                            mse = mean_squared_error(Y_test.reshape(-1), predictions.reshape(-1))
+                            var_explained = r2_score(Y_test.reshape(-1), predictions.reshape(-1))  
                             r_pearson, _ = pearsonr(Y_test.reshape(-1), predictions.reshape(-1))
-
-                            # Control values
-                            #if var_explained < 0:
-                            #    raise ValueError("Contains negative values for Variance Explained.")
-                            #elif var_explained > 1:
-                            #    raise ValueError("Contains values larger 1 for Variance Explained.")
 
                             # Save loss and variance explained
                             mse_session_losses["session_mapping"][session_id_model]["session_pred"][session_id_pred] = mse
@@ -2536,11 +2511,6 @@ class VisualizationHelper(GLMHelper):
         self.n_grad = n_grad
         self.n_mag = n_mag
 
-        #self.calculate_and_visualize_cluster_geometry_RSMs_simulated_responses(image_level=True, omit_sessions_from_corr=[])
-        #self.calculate_and_visualize_between_sessions_RSMs_simulated_responses(image_level=True, omit_sessions_from_corr=[])
-        #self.visualize_arousal_mean_over_sessions()
-        #self.investigate_source_df()
-
 
     def investigate_source_df(self):
         """
@@ -2591,7 +2561,8 @@ class VisualizationHelper(GLMHelper):
         """
         Visualizes the average pupil dialation for each session as recorded by the eye-tracking software.
         """
-        mean_pupil_dilations_by_session = {}
+        mean_pupil_dilations_by_day = {}
+        session_date_differences = self.get_session_date_differences()
         for session_id in self.session_ids_num:
             # Read eye-tracking df
             session_double_char_id = f"0{session_id}" if session_id != "10" else session_id
@@ -2602,27 +2573,27 @@ class VisualizationHelper(GLMHelper):
             # Filter events for only fixation events then calculate mean pupil dilations over all fixations, averaged over start and end of epoch
             events_df = events_df[events_df["type"] == "fixation"]
             mean_pupil_dilations = np.mean(np.array([events_df['supd_x'].to_numpy(), events_df['eupd_x'].to_numpy()]), axis=0)   # pupil dilations of all fixations, averaged between start and end of the fixation 
-            mean_pupil_dilations_by_session[int(session_id)] = mean_pupil_dilations
+            
+            # aggregate values by distance in days from first session
+            days_from_session_1 = session_date_differences["1"][session_id]
+            mean_pupil_dilations_by_day[days_from_session_1] = mean_pupil_dilations
 
-        global_mean_pupil_dilations_for_sessions = [np.mean(mean_pupil_dilations_by_session[session_id_int]) for session_id_int in sorted(mean_pupil_dilations_by_session, key=int)]
+        global_mean_pupil_dilations_for_sessions = [np.mean(mean_pupil_dilations_by_day[session_id_int]) for session_id_int in sorted(mean_pupil_dilations_by_day, key=int)]
 
         # Plot average pupil dilation across sessions
         plt.figure(figsize=(8, 6))
-        x_values, y_values = self.extract_x_y_arrays(mean_pupil_dilations_by_session, losses_averaged_within_distances=False)
+        x_values, y_values = self.extract_x_y_arrays(mean_pupil_dilations_by_day, losses_averaged_within_distances=False)
         x_values_set = np.array(list(set(x_values)))
         
         slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
         trend_line = slope * x_values_set + intercept
         r_value = "{:.3f}".format(r_value) 
-        print(f"x_values: {x_values}")
-        print(f"y_values: {y_values}")
-        print(f"x_values.shape, y_values.shape: {x_values.shape, y_values.shape}")
-        p_value = "{:.4f}".format(self.perform_permutation_test(x_values, y_values, n_permutations))
+        p_value = "{:.4f}".format(self.perform_permutation_test(x_values, y_values, direction="both"))
         
         plt.plot(x_values_set, trend_line, color='green' , label=f"r={r_value}, p={p_value}", linestyle='-', linewidth=3)
         plt.plot(x_values_set, global_mean_pupil_dilations_for_sessions, marker='o', linestyle='', markersize=3)
         plt.title(f'Pupil dilation across sessions subject {self.subject_id}. \n Averaged across all start and end timepoints of fixation events in the session.')
-        plt.xlabel('Session')
+        plt.xlabel('Days since Session 1')
         plt.ylabel('Pupil Dilation')
         plt.legend()
         #plt.xticks(x_values) 
@@ -3103,8 +3074,7 @@ class VisualizationHelper(GLMHelper):
         Helper function that insert scattered fit measures (mostly variance explained) over distances into a given plot
         """
         x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances, losses_averaged_within_distances=False)
-
-        permutation_p_value = self.perform_permutation_test(x_values, y_values, n_permutations=10000)
+        
         """
         if subject_id is not None:  # Called from drift_distance_all_subjects
 
@@ -3130,6 +3100,8 @@ class VisualizationHelper(GLMHelper):
         else:
             filtered_x_values = x_values
             filtered_y_values = y_values
+
+        permutation_p_value = self.perform_permutation_test(filtered_x_values, filtered_y_values, n_permutations=10000)
         
         filtered_x_values_set = np.array(list(set(filtered_x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
         slope, intercept, r_value, p_value, std_err = linregress(x=filtered_x_values, y=filtered_y_values)
@@ -3159,7 +3131,7 @@ class VisualizationHelper(GLMHelper):
         ax1.plot(filtered_x_values_set, trend_line, color=trend_color, label=label, linestyle='-', linewidth=3)
 
     
-    def _plot_drift_distance_based(self, fit_measures_by_distances:dict, omitted_sessions:list, self_pred_normalized:bool, losses_averaged_within_distances:bool, all_windows_one_plot:bool, timepoint_window_start_idx:int = None, include_0_distance:bool = False):
+    def _plot_drift_distance_based(self, fit_measures_by_distances:dict, omitted_sessions:list, self_pred_normalized:bool, losses_averaged_within_distances:bool, all_windows_one_plot:bool, timepoint_window_start_idx:int = None, include_0_distance:bool = False, distance_type:str="days"):
         """
         Creates drift plot based on fit measures data by distance. Expects keys of distance in days as string number, each key containing keys "fit_measure" and "num_measures"
         """
@@ -3180,7 +3152,7 @@ class VisualizationHelper(GLMHelper):
                 color = colors[timepoint_idx]
                 self._plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances_window, ax1, color=color, include_0_distance=include_0_distance, timepoint_window_start_idx=timepoint_window_start_idx) 
 
-        ax1.set_xlabel(f'Distance in days between "train" and "test" Session')
+        ax1.set_xlabel(f'Distance in {distance_type} between "train" and "test" Session')
         ax1.set_ylabel(f'Variance Explained')
         #plt.legend(loc="upper right")  # , bbox_to_anchor=(1.5, 1))
         ax1.tick_params(axis='y', labelcolor='b')
@@ -3200,19 +3172,19 @@ class VisualizationHelper(GLMHelper):
             labels = labels + labels2
 
         ax1.legend(lines, labels, loc='upper right')
-        ax1.set_title(f'Averaged Normalized Variance Explained vs Distance in days. \n Self-Pred Normalized?: {self_pred_normalized} \n, omitted_sessions: {omitted_sessions}, {date.today()}')
+        ax1.set_title(f'Averaged Normalized Variance Explained vs Distance in {distance_type}. \n Self-Pred Normalized?: {self_pred_normalized} \n, omitted_sessions: {omitted_sessions}, {date.today()}')
         plt.grid(True)
         
         # plt.show required?
         return fig
 
-    def visualize_self_prediction(self, var_explained:bool=True, pred_splits:list=["train","test"], all_sessions_combined:bool=False, plot_outliers:bool=False):
-        if var_explained:
-            type_of_fit_measure = "Variance Explained"
-            type_of_content = "var_explained"
+    def visualize_self_prediction(self, fit_measure_type:str, pred_splits:list=["train","test"], all_sessions_combined:bool=False, plot_outliers:bool=False):
+        assert fit_measure_type in ["var_explained_timepoint", "pearson_r_timepoint"]
+
+        if fit_measure_type == "var_explained_timepoint":
+            fit_measure_name = "Variance Explained"
         else:
-            type_of_fit_measure = "MSE"
-            type_of_content = "mse_losses"
+            fit_measure_name = "Pearson correlation"
 
         color_and_marker_by_split = {"train": {"markertype": '*', "color": '#1f77b4'}, "test": {"markertype": 'o', "color": '#FF8C00'}}
         
@@ -3220,27 +3192,33 @@ class VisualizationHelper(GLMHelper):
             for normalization in self.normalizations:
                 self_pred_measures = {}
                 for pred_split in pred_splits:
-                    self_pred_measures[pred_split] = {}
-                for pred_type in self_pred_measures:
-                    predict_train_data = True if pred_type == "train" else False
-                    # Load loss/var explained dict
-                    self_pred_measures[pred_type] = {"sessions": {}}
-                    for session_id in self.session_ids_num:
-                        # Read fit measures for each session
-                        session_fit_measures = self.read_dict_from_json(type_of_content=type_of_content, type_of_norm=normalization, predict_train_data=predict_train_data)
-                        for session_id in session_fit_measures['session_mapping']:
-                            fit_measure = session_fit_measures['session_mapping'][session_id]['session_pred'][session_id]
-                            self_pred_measures[pred_type]["sessions"][session_id] = fit_measure
+                    predict_train_data = True if pred_split == "train" else False
+                    self_pred_measures[pred_split] = {"sessions": {}}
+                    storage_folder = f"data_files/{self.lock_event}/{fit_measure_type}s/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{normalization}/"
+                    json_storage_file = f"{fit_measure_type}s_dict.json"
+                    json_storage_path = os.path.join(storage_folder, json_storage_file)
+
+                    with open(json_storage_path, 'r') as file:
+                        session_fit_measures_timepoints = json.load(file)
+
+                    #print(f"session_fit_measures_timepoints['session_mapping']['2']['session_pred']['2'].values(): {session_fit_measures_timepoints['session_mapping']['2']['session_pred']['2'].values()}")
+
+                    session_fit_measures = self.average_timepoint_data_per_session(session_fit_measures_timepoints)
+
+                    for session_id in session_fit_measures['session_mapping']:
+                        fit_measure = session_fit_measures['session_mapping'][session_id]['session_pred'][session_id]
+                        self_pred_measures[pred_split]["sessions"][session_id] = fit_measure
+                
 
                 # Plot values for test prediction
                 plt.figure(figsize=(10, 6))
-                for pred_type in self_pred_measures:
-                    markertype = color_and_marker_by_split[pred_type]["markertype"]
-                    color = color_and_marker_by_split[pred_type]["color"]
-                    plt.plot(self_pred_measures[pred_type]["sessions"].keys(), self_pred_measures[pred_type]["sessions"].values(), marker=markertype, color=color, label=f'{pred_type} pred')
+                for pred_split in self_pred_measures:
+                    markertype = color_and_marker_by_split[pred_split]["markertype"]
+                    color = color_and_marker_by_split[pred_split]["color"]
+                    plt.plot(self_pred_measures[pred_split]["sessions"].keys(), self_pred_measures[pred_split]["sessions"].values(), marker=markertype, color=color, label=f'{pred_split} pred')
             
                 plt.xlabel(f'Number of Sesssion')
-                plt.ylabel(f'{type_of_fit_measure}')
+                plt.ylabel(f'{fit_measure_name}')
                 plt.grid(True)
                 plt.legend(loc='upper right')
 
@@ -3250,18 +3228,18 @@ class VisualizationHelper(GLMHelper):
                         1: 2649, 2: 5443, 3: 1018, 4: 9134, 5: 1618, 6: 4535, 7: 9993, 8: 2696, 9: 6025, 10: 6911
                     }
                     ax2 = plt.gca().twinx()
-                    ax2.plot(self_pred_measures[pred_type]["sessions"].keys(), outliers.values(), color='green', marker='d', linestyle='-', label='Number of Values greater +- 3z')
+                    ax2.plot(self_pred_measures[pred_split]["sessions"].keys(), outliers.values(), color='green', marker='d', linestyle='-', label='Number of Values greater +- 3z')
                     ax2.set_ylabel('Number of Outliers')
                     ax2.legend(loc='upper right')
 
-                plt.title(f'{type_of_fit_measure} Session Self-prediction with Norm {normalization}, {date.today()}')
+                plt.title(f'{fit_measure_name} Session Self-prediction with Norm {normalization}, {date.today()}')
                 plt.grid(True)
                 #plt.show()
 
                 # Save the plot to a file
                 plot_folder = f"data_files/{self.lock_event}/visualizations/encoding_performance/subject_{self.subject_id}/norm_{normalization}"
-                pred_split_addition = pred_split[0] if len(pred_splits) == 1 else "both"
-                plot_file = f"{type_of_fit_measure}_session_self_prediction_{normalization}_pred_splits_{pred_split_addition}.png"
+                pred_split_addition = pred_splits[0] if len(pred_splits) == 1 else "both"
+                plot_file = f"{fit_measure_name}_session_self_prediction_{normalization}_pred_splits_{pred_split_addition}.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
                 #plt.close()
 
@@ -3294,17 +3272,17 @@ class VisualizationHelper(GLMHelper):
                 plt.plot(self_pred_measures.keys(), self_pred_vals, marker=markertype, color=color, label=f'{pred_type} pred')
 
                 plt.xlabel(f'Predicted Datasplit')
-                plt.ylabel(f'{type_of_fit_measure}')
+                plt.ylabel(f'{fit_measure_name}')
                 plt.grid(True)
                 plt.legend(loc='upper right')
-                plt.title(f'{type_of_fit_measure} Self-prediction combined over all Sessions with Norm {normalization}, {date.today()}')
+                plt.title(f'{fit_measure_name} Self-prediction combined over all Sessions with Norm {normalization}, {date.today()}')
                 plt.grid(True)
                 #plt.show()
 
                 # Save the plot to a file
                 plot_folder = f"data_files/{self.lock_event}/visualizations/encoding_performance/subject_{self.subject_id}/all_sessions_combined/norm_{normalization}"
                 pred_split_addition = pred_split[0] if len(pred_splits) == 1 else "both"
-                plot_file = f"{type_of_fit_measure}_all_sessions_combined_self_prediction_{normalization}_pred_splits_{pred_split_addition}.png"
+                plot_file = f"{fit_measure_name}_all_sessions_combined_self_prediction_{normalization}_pred_splits_{pred_split_addition}.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
                 
 
@@ -3772,8 +3750,20 @@ class VisualizationHelper(GLMHelper):
                 # Plot a histogram capturing the results of the permutation test
                 x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances_subject, losses_averaged_within_distances=False)
 
-                observed_corr = "{:.3f}".format(pearsonr(x_values,y_values)[0])
-                permutation_p_value, permutation_plot, permutation_ax = self.perform_permutation_test(x_values, y_values, n_permutations=10000, generate_plot=True)
+                if include_0_distance:
+                    # Don't include the self predictions in the trend line calculation (i.e. filter x and y values where x = 0)
+                    filtered_tuple_values = [x_y_pair for x_y_pair in zip(x_values, y_values) if x_y_pair[0] != 0]
+                    filtered_x_values, filtered_y_values = zip(*filtered_tuple_values)
+                    filtered_x_values = list(filtered_x_values)
+                    filtered_y_values = list(filtered_y_values)
+                else:
+                    filtered_x_values = x_values
+                    filtered_y_values = y_values
+
+                # Calculate trend line 
+                observed_corr = "{:.3f}".format(pearsonr(filtered_x_values,filtered_y_values)[0])
+
+                permutation_p_value, permutation_plot, permutation_ax = self.perform_permutation_test(filtered_x_values, filtered_y_values, n_permutations=10000, generate_plot=True)
                 permutation_ax.set_title(f'Permutation Test for Subject {subject_id} \n r={observed_corr}, p={permutation_p_value}')
 
                 plot_folder = f"data_files/{self.lock_event}/visualizations/distance_drift/permutation_test/{fit_measure}/{normalization}"
@@ -3888,7 +3878,40 @@ class VisualizationHelper(GLMHelper):
 
             storage_filename = f"drift_plot_{pca_filename_addition}{sensor_filename_addition}all_timepoints"
             self.save_plot_as_file(plt=drift_plot_all_timepoints, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
-            #plt.close(drift_plot_all_timepoints)
+
+            
+            def calculate_fit_by_session_distance(fit_measures_by_session_by_timepoint:dict, include_0_distance:bool):
+                if self.subject_id == "02":
+                    # Adjust for repeated session 04
+                    new_session_ids = ["1", "2", "3", "10", "4", "5", "6", "7", "8", "9"]
+                    session_mapping = dict(zip(self.session_ids_num, new_session_ids))
+
+                fit_measures_by_session = self.average_timepoint_data_per_session(fit_measures_by_session_by_timepoint)
+
+                # Calculate fit measures relative to distance in time between train and pred session
+                fit_by_session_distances = {}
+                for session_train_id, fit_measures_train_session in fit_measures_by_session['session_mapping'].items():
+                    for session_pred_id, fit_measure_pred_session in fit_measures_train_session["session_pred"].items():
+                        if include_0_distance or session_train_id != session_pred_id:
+                            if self.subject_id == "02":
+                                session_train_id = session_mapping[session_train_id]
+                                session_pred_id = session_mapping[session_pred_id]
+                            session_distance = abs(int(session_train_id) - int(session_pred_id))
+
+                            if session_distance not in fit_by_session_distances:
+                                fit_by_session_distances[session_distance] = [fit_measure_pred_session]
+                            else:
+                                fit_by_session_distances[session_distance].append(fit_measure_pred_session)
+
+                return fit_by_session_distances
+
+            # And plot by difference in session
+            fit_measures_by_session_distances_all_timepoints = calculate_fit_by_session_distance(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint, include_0_distance=include_0_distance)
+            drift_plot_all_timepoints_session_dists = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_session_distances_all_timepoints, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999, include_0_distance=include_0_distance, distance_type="sessions")  # 999 indicates that we are considering all timepoints
+
+            storage_filename = f"drift_plot_by_session_distances_all_timepoints"
+            self.save_plot_as_file(plt=drift_plot_all_timepoints_session_dists, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+            plt.close(drift_plot_all_timepoints_session_dists)
 
             # Debugging: average timepoint data to compare values to non-timepoint dict
             if debugging:
@@ -3954,9 +3977,11 @@ class VisualizationHelper(GLMHelper):
                     plot_timepoint_window_drift_for_timepoint_fit_measures(sensor_fit_measures_by_session_by_timepoint, sensor_name=sensor_name)
 
 
-    def mne_topo_plot_per_sensor(self, data_type:str, omitted_sessions:list, all_timepoints_combined:bool):
+    def mne_topo_plot_per_sensor(self, data_type:str, omitted_sessions:list, all_timepoints_combined:bool, sessions_separate:bool=False):
         if data_type not in ["self-pred", "drift"]:
             raise ValueError(f"visualize_topo_with_drift_per_sensor called with invalid argument for data_type {data_type}")
+        if sessions_separate and data_type == "drift":
+            raise NotImplementedError("mne_topo_plot_per_sensor not yet written for separate drift plots for each session.")
 
         for normalization in self.normalizations:
             # Load sensor- and timepoint-based variance explained
@@ -4019,25 +4044,44 @@ class VisualizationHelper(GLMHelper):
                 if all_timepoints_combined:
                     drift_correlations_sensors = drift_correlations_sensors.reshape(n_sensors_selected, 1)
             else:
-                # Aggregate self-pred values on sensor (and timepoint) level, averaged over sessions. I need one value per sensor, per timepoint
-                self_pred_values_sensors = []
-                n_considered_sessions = len(list(fit_measures_by_sensor_by_session_by_timepoint["sensor"]["0"]["session_mapping"].keys()))
-                for sensor_idx, sensor_name in enumerate(sensor_names):
-                    sensor_fit_measures_by_session_by_timepoint = fit_measures_by_sensor_by_session_by_timepoint["sensor"][str(sensor_idx)]
-                    sensor_self_preds_timepoints = []
-                    # Average self-preds for each timepoint over all considered sessions
-                    for timepoint_idx in timepoint_indices:
-                        sensor_timepoint_sum_over_sessions = 0
-                        for session_id in sensor_fit_measures_by_session_by_timepoint["session_mapping"]:
-                            sensor_timepoint_sum_over_sessions += sensor_fit_measures_by_session_by_timepoint["session_mapping"][str(session_id)]["session_pred"][str(session_id)]["timepoint"][str(timepoint_idx)]
+                if not sessions_separate:
+                    # Aggregate self-pred values on sensor (and timepoint) level, averaged over sessions. I need one value per sensor, per timepoint
+                    self_pred_values_sensors = []
+                    n_considered_sessions = len(list(fit_measures_by_sensor_by_session_by_timepoint["sensor"]["0"]["session_mapping"].keys()))
+                    for sensor_idx, sensor_name in enumerate(sensor_names):
+                        sensor_fit_measures_by_session_by_timepoint = fit_measures_by_sensor_by_session_by_timepoint["sensor"][str(sensor_idx)]
+                        sensor_self_preds_timepoints = []
+                        # Average self-preds for each timepoint over all considered sessions
+                        for timepoint_idx in timepoint_indices:
+                            sensor_timepoint_sum_over_sessions = 0
+                            for session_id in sensor_fit_measures_by_session_by_timepoint["session_mapping"]:
+                                sensor_timepoint_sum_over_sessions += sensor_fit_measures_by_session_by_timepoint["session_mapping"][str(session_id)]["session_pred"][str(session_id)]["timepoint"][str(timepoint_idx)]
 
-                        sensor_timepoint_self_pred = sensor_timepoint_sum_over_sessions / n_considered_sessions
-                        sensor_self_preds_timepoints.append(sensor_timepoint_self_pred)
-                    self_pred_values_sensors.append(np.array(sensor_self_preds_timepoints))
-                self_pred_values_sensors = np.array(self_pred_values_sensors)
-                    
-                min_var_explained = "{:.4f}".format(np.min(self_pred_values_sensors))
-                max_var_explained = "{:.4f}".format(np.max(self_pred_values_sensors)) 
+                            sensor_timepoint_self_pred = sensor_timepoint_sum_over_sessions / n_considered_sessions
+                            sensor_self_preds_timepoints.append(sensor_timepoint_self_pred)
+                        self_pred_values_sensors.append(np.array(sensor_self_preds_timepoints))
+                    self_pred_values_sensors = np.array(self_pred_values_sensors)
+                        
+                    min_var_explained = "{:.4f}".format(np.min(self_pred_values_sensors))
+                    max_var_explained = "{:.4f}".format(np.max(self_pred_values_sensors))
+                else:
+                    self_pred_values_sensors_by_session = {}
+                    min_var_explained_by_session = {}
+                    max_var_explained_by_session = {}
+                    # Seperate plot for each session
+                    for session_id in fit_measures_by_sensor_by_session_by_timepoint["sensor"]["0"]["session_mapping"]:
+                        self_pred_values_sensors = []
+                        for sensor_idx, sensor_name in enumerate(sensor_names):
+                            sensor_fit_measures_by_session_by_timepoint = fit_measures_by_sensor_by_session_by_timepoint["sensor"][str(sensor_idx)]
+                            sensor_self_preds_timepoints = []
+                            for timepoint_idx in timepoint_indices:
+                                sensor_timepoint_val = sensor_fit_measures_by_session_by_timepoint["session_mapping"][str(session_id)]["session_pred"][str(session_id)]["timepoint"][str(timepoint_idx)]
+                                sensor_self_preds_timepoints.append(sensor_timepoint_val)
+                            self_pred_values_sensors.append(np.array(sensor_self_preds_timepoints))
+                        self_pred_values_sensors = np.array(self_pred_values_sensors)
+                        self_pred_values_sensors_by_session[session_id] = self_pred_values_sensors
+                        min_var_explained_by_session[session_id] = "{:.4f}".format(np.min(self_pred_values_sensors))
+                        max_var_explained_by_session[session_id] = "{:.4f}".format(np.max(self_pred_values_sensors))
 
             # Create mne info object
             fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/saccade_evoked_{self.subject_id}_01_.fif'
@@ -4048,9 +4092,6 @@ class VisualizationHelper(GLMHelper):
             # Get arr of timepoints to plot
             if all_timepoints_combined:
                 # These are dummy values, we average across all timepoints but mne requires a timepoint value
-                #t_start = self.map_timepoint_idx_to_ms(0) / 1000  # 0.05
-                #t_end = self.map_timepoint_idx_to_ms(self.timepoint_max-self.timepoint_min) / 1000  # 0.058
-                #timepoints = np.linspace(t_start, t_end, 1)  
                 t_start = 0
                 timepoints = [0]
             else:
@@ -4058,25 +4099,38 @@ class VisualizationHelper(GLMHelper):
                 timepoints = np.array([float(self.map_timepoint_idx_to_ms(timepoint_idx)/1000) for timepoint_idx in timepoint_indices])
                 t_start = timepoints[0]
 
-            if data_type == "drift":
-                data_array_to_plot = drift_correlations_sensors
+            if not sessions_separate:
+                if data_type == "drift":
+                    data_array_to_plot = drift_correlations_sensors
+                else:
+                    data_array_to_plot = self_pred_values_sensors
+
+                # Create new Evoked object with correct drift data and timepoint metadata
+                evoked = mne.EvokedArray(data_array_to_plot, selected_mag_info, tmin=t_start)
+                logger.custom_info(f"Topo plot time range: {evoked.times[0]} - {evoked.times[-1]}")
+
+                fig = evoked.plot_topomap(timepoints, ch_type="mag", colorbar=False)  # , axes=axes)
+                if data_type == "drift":
+                    fig.suptitle(f'Drift on Sensor Level. Negative correlations (drift) are in blue, positive correlations are in red. \n Min r: {min_corr}. Max r: {max_corr}', fontsize=18)
+                else:
+                    fig.suptitle(f'Self-Pred Variance Explained on Sensor Level. Negative values are in blue, positive values are in red. \n Min var_explained: {min_var_explained}. Max var_explained: {max_var_explained}', fontsize=18)
+
+                plot_folder =  f"data_files/{self.lock_event}/visualizations/topographic_plots/{data_type}/subject_{self.subject_id}/"
+                all_timepoints_name_addition = "_all_timepoints" if all_timepoints_combined else ""
+                plot_file = f"{data_type}_topo_plot{all_timepoints_name_addition}.png"
+                self.save_plot_as_file(plt=fig, plot_folder=plot_folder, plot_file=plot_file)
             else:
-                data_array_to_plot = self_pred_values_sensors
+                for session_id, self_pred_values_sensors in self_pred_values_sensors_by_session.items():                    
+                    # Create new Evoked object with correct drift data and timepoint metadata
+                    evoked = mne.EvokedArray(self_pred_values_sensors, selected_mag_info, tmin=t_start)
+                    fig = evoked.plot_topomap(timepoints, ch_type="mag", colorbar=False)  # , axes=axes)
+                    fig.suptitle(f'Session {session_id} Self-Pred Variance Explained on Sensor Level. Negative values are in blue, positive values are in red. \n Min var_explained: {min_var_explained_by_session[session_id]}. Max var_explained: {max_var_explained_by_session[session_id]}', fontsize=18)
 
-            # Create new Evoked object with correct drift data and timepoint metadata
-            evoked = mne.EvokedArray(data_array_to_plot, selected_mag_info, tmin=t_start)
-            logger.custom_info(f"Topo plot time range: {evoked.times[0]} - {evoked.times[-1]}")
+                    plot_folder =  f"data_files/{self.lock_event}/visualizations/topographic_plots/{data_type}/sessions_separate/subject_{self.subject_id}/"
+                    all_timepoints_name_addition = "_all_timepoints" if all_timepoints_combined else ""
+                    plot_file = f"Session_{session_id}_{data_type}_topo_plot{all_timepoints_name_addition}.png"
+                    self.save_plot_as_file(plt=fig, plot_folder=plot_folder, plot_file=plot_file)
 
-            fig = evoked.plot_topomap(timepoints, ch_type="mag", colorbar=False)  # , axes=axes)
-            if data_type == "drift":
-                fig.suptitle(f'Drift on Sensor Level. Negative correlations (drift) are in blue, positive correlations are in red. \n Min r: {min_corr}. Max r: {max_corr}', fontsize=18)
-            else:
-                fig.suptitle(f'Self-Pred Variance Explained on Sensor Level. Negative values are in blue, positive values are in red. \n Min var_explained: {min_var_explained}. Max var_explained: {max_var_explained}', fontsize=18)
-
-            plot_folder =  f"data_files/{self.lock_event}/visualizations/topographic_plots/{data_type}/subject_{self.subject_id}/"
-            all_timepoints_name_addition = "_all_timepoints" if all_timepoints_combined else ""
-            plot_file = f"{data_type}_topo_plot{all_timepoints_name_addition}.png"
-            self.save_plot_as_file(plt=fig, plot_folder=plot_folder, plot_file=plot_file)
 
             # Plot channel locations
             #fig = og_evoked.plot_sensors(show_names=True, ch_type="mag")
@@ -4373,7 +4427,7 @@ class VisualizationHelper(GLMHelper):
                     plot_file = f"Session-{session_id_num}_Sensor-{sensor_type}_timepoint-overview.png"
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
-    def new_visualize_model_perspective(self, plot_norms:list, source_pca_type:str, whiten:bool, regions_of_interest:list=None):
+    def new_visualize_model_perspective(self, plot_norms:list=None, before_preprocessing:bool=False, regions_of_interest:list=None, source_pca_type:str=None, whiten:bool=None):
         """
         Visualizes meg data from the regression models perspective. This means, we plot the values over the epochs for each timepoint, one line for each selected sensor.
         """
@@ -4391,9 +4445,6 @@ class VisualizationHelper(GLMHelper):
                 # Filter meg for timepoint
                 meg_timepoint = meg_data_complete[:,:,timepoint_idx]  # [epochs, channels, timepoints]
 
-                # Count outliers
-                n_outliers = sum(1 for meg_value in np.nditer(meg_timepoint) if abs(meg_value) > 2.5) if glaser_region is None else ""
-
                 if channel_names_by_indices is not None:
                     second_dim = "sensor"
                     source_folder_addition = ""
@@ -4401,7 +4452,7 @@ class VisualizationHelper(GLMHelper):
                     for channel_idx in range(n_channels):
                         # Filter meg for channel
                         meg_timepoint_channel = meg_timepoint[:,channel_idx] # [epochs, channels]
-                        plt.plot(list(range(n_epochs_total)), meg_timepoint_channel, linewidth=0.2, color=colormap(channel_idx))
+                        plt.plot(list(range(n_epochs_total)), meg_timepoint_channel, linewidth=0.2, alpha=0.6, color=colormap(channel_idx))
 
                         legend_elements.append(Line2D([0], [0], color=colormap(channel_idx), lw=4, label=channel_names_by_indices[channel_idx]))
                 elif voxel_indices is not None:
@@ -4425,7 +4476,7 @@ class VisualizationHelper(GLMHelper):
                 plt.xlabel('Epochs in Session)')
                 plt.ylabel('MEG Value')
                 plt.axvline(x=n_epochs_train, color='r', linestyle='--', linewidth=1, label='Train/Test Split')
-                plt.title(f'MEG Signal over Epochs for {second_dim}s. \n Session: {session_id}. Timepoint: {timepoint_name} Norm: {normalization} \n N Outliers: {n_outliers}')
+                plt.title(f'MEG Signal over Epochs for {second_dim}s. \n Session: {session_id}. Timepoint: {timepoint_name} Norm: {normalization}')
                 plt.legend(handles=legend_elements, title=f"{second_dim}")
                 
                 # Save plot
@@ -4434,12 +4485,17 @@ class VisualizationHelper(GLMHelper):
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
         if regions_of_interest is None:
-            for session_id in self.session_ids_num:
-                # Use defaultdict to automatically create missing keys
-                session_dict = self.recursive_defaultdict()
-                for normalization in plot_norms:
-                    # Load meg data and split into grad and mag
-                    meg_data = self.load_split_data_from_file(session_id_num=session_id, type_of_content="meg_data", type_of_norm=normalization)
+            if before_preprocessing:
+                normalization = "no_norm"
+                for session_id in self.session_ids_num:
+                    session_dict = self.recursive_defaultdict()
+                    # Load meg data without any preprocessing (normalization or clipping)
+                    meg_data = {"train": None, "test": None}
+                    for split in meg_data:
+                        storage_folder = f"data_files/{self.lock_event}/meg_data/norm_{normalization}/subject_{self.subject_id}/session_{session_id}/{split}"  
+                        storage_file = "meg_data.npy"
+                        storage_path = os.path.join(storage_folder, storage_file)
+                        meg_data[split] = np.load(storage_path)
                     meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
 
                     n_epochs_train = len(meg_data["train"])
@@ -4465,6 +4521,37 @@ class VisualizationHelper(GLMHelper):
                     n_plot_timepoints = len(plot_timepoints)
 
                     plot_model_perspective(meg_data_complete=meg_data_complete, session_id=session_id, normalization=normalization, plot_timepoints=plot_timepoints, n_epochs_total=n_epochs_total, n_epochs_train=n_epochs_train, channel_names_by_indices=channel_names_by_indices)
+            else:
+                for session_id in self.session_ids_num:
+                    session_dict = self.recursive_defaultdict()
+                    for normalization in plot_norms:
+                        # Load meg data and split into grad and mag
+                        meg_data = self.load_split_data_from_file(session_id_num=session_id, type_of_content="meg_data", type_of_norm=normalization)
+                        meg_data_complete = np.concatenate((meg_data["train"], meg_data["test"]))
+
+                        n_epochs_train = len(meg_data["train"])
+                        n_epochs_total = n_epochs_train + len(meg_data["test"])
+
+                        # Extract channel names for indices
+                        selected_channel_indices = self.get_relevant_meg_channels(chosen_channels=self.chosen_channels)
+                        channel_names_by_indices = {}
+                        ch_ix = 0
+                        for sensor_type in selected_channel_indices:
+                            for sensor_index_within_type in selected_channel_indices[sensor_type]["sensor_index_within_type"]:
+                                channel_names_by_indices[ch_ix] = selected_channel_indices[sensor_type]["sensor_index_within_type"][sensor_index_within_type]
+                                ch_ix += 1
+                        
+                        timepoints = np.array(list(range(1 + self.timepoint_max - self.timepoint_min)))
+
+                        # Select timepoints to plot (f.e. 10 total, every 60th)
+                        plot_timepoints = []
+                        timepoint_plot_interval = 20
+
+                        for timepoint_index in range(min(timepoints), max(timepoints)+1, timepoint_plot_interval):
+                            plot_timepoints.append(timepoint_index)
+                        n_plot_timepoints = len(plot_timepoints)
+
+                        plot_model_perspective(meg_data_complete=meg_data_complete, session_id=session_id, normalization=normalization, plot_timepoints=plot_timepoints, n_epochs_total=n_epochs_total, n_epochs_train=n_epochs_train, channel_names_by_indices=channel_names_by_indices)
         else:
             if source_pca_type == 'voxels':
                 pca_folder = f"/voxels_pca_reduced{whiten_folder}"
@@ -4512,14 +4599,30 @@ class VisualizationHelper(GLMHelper):
                         plot_model_perspective(meg_data_complete=meg_data_complete, session_id=session_id, normalization=normalization, plot_timepoints=plot_timepoints, n_epochs_total=n_epochs_total, n_epochs_train=n_epochs_train, voxel_indices=voxel_indices, glaser_region=glaser_region, pca_folder=pca_folder)
                 
 
-    def visualize_meg_means_stds(self):
+    def visualize_meg_means_stds(self, x_value_days:bool=False):
         """
         Visualizes mean (and if selected std) of meg data for 3 exemplary timepoints comparing all sessions, as requested by Carmen.
         """
+        if self.subject_id == "02" and not x_value_days:
+            # Adjust for repeated session 04
+            new_session_ids = ["1", "2", "3", "10", "4", "5", "6", "7", "8", "9"]
+            session_mapping = dict(zip(self.session_ids_num, new_session_ids))
+            subject_02_title_addition = "\n Repeated Session 4 inserted as final session."
+        else:
+            subject_02_title_addition = ""
+        session_date_differences = self.get_session_date_differences()
         for normalization in self.normalizations:
             # Collect means and stds of sessions
             mean_and_std_dict_by_timepoints = self.recursive_defaultdict()
             for session_id in self.session_ids_num:
+                # aggregate values by distance in days from first session
+                if x_value_days:
+                    x_value = session_date_differences["1"][session_id]
+                else:
+                    if self.subject_id != "02":
+                        x_value = int(session_id)
+                    else:
+                        x_value = int(session_mapping[session_id])
                 # Get session meg data (train and test split combined)
                 session_meg_data = []
                 for split in ["train", "test"]:
@@ -4536,25 +4639,25 @@ class VisualizationHelper(GLMHelper):
                     timepoint_mean = np.mean(session_meg_data[:,:,timepoint_idx])
                     timepoint_std = np.std(session_meg_data[:,:,timepoint_idx])
 
-                    if session_id == "1":
-                        mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["means"] = [timepoint_mean]
-                        mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["stds"] = [timepoint_std]
-                    else:
-                        mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["means"].append(timepoint_mean)
-                        mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["stds"].append(timepoint_std)
-                    
+                    mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["means"][x_value] = timepoint_mean
+                    mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["stds"][x_value] = timepoint_std
+            
             # Plot means and stds
+            for timepoint_idx, timepoint_dict in mean_and_std_dict_by_timepoints["timepoint"].items():
+                for data_type, data_dict in timepoint_dict.items():
+                    mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx][data_type] = {x_value: data_dict[x_value] for x_value in sorted(data_dict, key=int)}
+
             for plot_type in ["means", "stds"]:
                 measure_name = "Mean Value" if plot_type == "means" else "Standard Deviation Value"
                 timepoints_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in mean_and_std_dict_by_timepoints["timepoint"].keys()]
                 plt.figure(figsize=(10, 6))
                 for timepoint_number, timepoint_idx in enumerate(mean_and_std_dict_by_timepoints["timepoint"]):
-                    sessions_list = [session_id for session_id in self.session_ids_num]
-                    plt.plot(sessions_list, mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx][plot_type], label=f'{timepoints_ms[timepoint_number]} ms')
+                    plt.plot(list(mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx][plot_type].keys()), list(mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx][plot_type].values()), label=f'{timepoints_ms[timepoint_number]} ms')
 
-                plt.xlabel('Session')
+                x_label_str = "Days since Session 1" if x_value_days else "Session ID"
+                plt.xlabel(x_label_str)
                 plt.ylabel(measure_name)
-                plt.title(f'{measure_name} for each Session. \n Subject: {self.subject_id}, Norm: {normalization}')
+                plt.title(f'{measure_name} for each Session. \n Subject: {self.subject_id}, Norm: {normalization} {subject_02_title_addition}')
                 plt.legend(title="Timepoints (ms)")  
 
                 # Save plot
