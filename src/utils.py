@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 import itertools
 import imageio
+from PIL import Image
 import mne
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -59,6 +60,7 @@ class BasicOperationsHelper:
             max_ms = 500
 
         self.all_ms_values = np.linspace(min_ms, max_ms, num=651)  # space containing the ms values for all 651 timepoints
+
         #logger.custom_debug(f"all_ms_values linspace: {self.all_ms_values}")
 
        
@@ -595,7 +597,8 @@ class MetadataHelper(BasicOperationsHelper):
         super().__init__(**kwargs)
 
         self.crop_size = crop_size
-        self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{crop_size}/metadata/as{self.subject_id}_crops_metadata.csv"
+        #self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{crop_size}/metadata/as{self.subject_id}_crops_metadata.csv"
+        self.crop_metadata_path = f"/share/klab/camme/avs-encoding/data/image_patches/crops_{crop_size}/as{self.subject_id}/metadata/as{self.subject_id}_crops_metadata.csv"
         self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/erf/filter_0.2_200/ica"  # f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
 
 
@@ -778,7 +781,8 @@ class DatasetHelper(MetadataHelper):
         self.timepoint_min = timepoint_min
         self.timepoint_max = timepoint_max
 
-        self.crop_folder_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{self.crop_size}/crops/as{self.subject_id}"
+        #self.crop_folder_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{self.crop_size}/crops/as{self.subject_id}"
+        self.crop_folder_path = f"/share/klab/camme/avs-encoding/data/image_patches/crops_{self.crop_size}/as{self.subject_id}/crops/original/as{self.subject_id}"
         self.coco_scenes_path = "/share/klab/psulewski/psulewski/active-visual-semantics/input/mscoco_scenes"
 
 
@@ -999,7 +1003,7 @@ class DatasetHelper(MetadataHelper):
             # Convert to numpy array
             for split in crop_split:
                 crop_split[split] = np.stack(crop_split[split], axis=0)
-                logger.custom_debug(f"[Session {session_id}][{split} split]: Crop Numpy dataset is array of shape {crop_split[split].shape}")
+                logger.custom_info(f"[Session {session_id}][{split} split]: Crop Numpy dataset is array of shape {crop_split[split].shape}")
 
             # Export numpy array to .npz
             self.export_split_data_as_file(session_id=session_id, 
@@ -1403,6 +1407,8 @@ class DatasetHelper(MetadataHelper):
         if self.lock_event == "saccade":
             raise ValueError("Only fixation-centered source reconstructed meg data available atm.")
 
+        raise NotImplementedError("Before using this again try different (source-specific?) meg metadata.")
+
         # Read metadata and meg data
         combined_metadata = self.read_dict_from_json(type_of_content="combined_metadata")
         meg_metadata = self.read_dict_from_json(type_of_content="meg_metadata")
@@ -1672,7 +1678,7 @@ class DatasetHelper(MetadataHelper):
 
 
 
-class ExtractionHelper(BasicOperationsHelper):
+class ExtractionHelper(DatasetHelper):  # previously inherited only from BasicOperationsHelper
     def __init__(self, ann_model:str, module_name:str, batch_size:int, pca_components:int, **kwargs):
         super().__init__(**kwargs)
 
@@ -1781,20 +1787,47 @@ class ExtractionHelper(BasicOperationsHelper):
             pretrained=True
         )
 
+        logger.custom_info(f"model_name: {model_name}")
+        logger.custom_info(f"self.module_name: {self.module_name} \n")
+
         for session_id in self.session_ids_num:
+            print(f"session_id: {session_id}")
             # Load torch datasets for session
             #torch_crop_ds = self.load_split_data_from_file(session_id_num=session_id, type_of_content="torch_dataset")
 
             # Load numpy datasets for session
-            crop_ds = self.load_split_data_from_file(session_id_num=session_id, type_of_content="crop_data")
+            crop_ds = self.load_split_data_from_file(session_id_num=session_id, type_of_content="crop_data") # shape (n_images, crop_size,crop_size,3)
 
-            # Convert arrays to PyTorch tensors and create Dataset
-            train_tensors = torch.tensor(crop_ds['train'], dtype=torch.float32)
-            test_tensors = torch.tensor(crop_ds['test'], dtype=torch.float32)
+            # Permute to match (n_images, C, H, W) instead of (n_images, H, W, C) and convert to tensor
+            for split, image_array in crop_ds.items():
+                crop_ds[split] = torch.from_numpy(np.transpose(image_array, (0, 3, 1, 2)))
 
-            # Transpose dimensions to match (channels, height, width) (instead of height,width,channels as before)
-            train_tensors = train_tensors.permute(0, 3, 1, 2)
-            test_tensors = test_tensors.permute(0, 3, 1, 2)
+            if self.crop_size != 224:
+                # Resize the image to 224x224
+                transform = transforms.Compose([
+                    transforms.Resize((224, 224)), 
+                ])
+
+                train_images_resized = [transform(img_tensor) for img_tensor in crop_ds["train"]]
+                test_images_resized = [transform(img_tensor) for img_tensor in crop_ds["test"]]
+
+                train_tensors = torch.stack(train_images_resized).type(torch.float32)
+                test_tensors = torch.stack(test_images_resized).type(torch.float32)
+            else:
+                # Simply convert arrays to PyTorch tensors
+                train_tensors = torch.tensor(crop_ds['train'], dtype=torch.float32)
+                test_tensors = torch.tensor(crop_ds['test'], dtype=torch.float32)
+
+                raise NotImplementedError(f"Check correct shapes first: channels, height width: {train_tensors.shape}")
+
+            # Debugging: Store example resized images
+            if session_id == "1":
+                for sample_index in range(100, 110):
+                    sample_image = np.transpose(train_tensors[sample_index].numpy(), (1, 2, 0)).astype(np.uint8)
+                    imageio.imwrite(f'data_files/{self.lock_event}/visualizations/test_image_pre_extract/test_image_{sample_index}.png', sample_image)
+
+            logger.custom_debug(f"Shape of train tensors: {train_tensors.shape}")
+            logger.custom_debug(f"Shape of test tensors: {test_tensors.shape}")
 
             # Create a DataLoader to handle batching
             model_input = {}
@@ -1811,7 +1844,7 @@ class ExtractionHelper(BasicOperationsHelper):
                 )
 
                 # Debugging
-                logger.custom_debug(f"Session {session_id}: {split}_features.shape: {features_split[split].shape}")
+                logger.custom_info(f"Session {session_id}: {split}_features.shape: {features_split[split].shape}")
 
             # Export numpy array to .npz
             self.export_split_data_as_file(session_id=session_id, type_of_content="ann_features", array_dict=features_split, ann_model=self.ann_model, module=self.module_name)
@@ -1837,8 +1870,12 @@ class ExtractionHelper(BasicOperationsHelper):
             # Combine all features into a single array to apply z-score to and fit PCA on
             all_session_split_features_combined = np.concatenate([np.concatenate((features_train, features_test)) for features_train, features_test in all_session_split_features_combined], axis=0)
 
+            print(f"all_session_split_features_combined.shape: {all_session_split_features_combined.shape}")
+            print(f"n PCA components: {self.pca_components}")
+
             # Apply z-scoring and fit PCA on combined sessions and splits
             if z_score_features_before_pca:
+                raise ValueError("do NOT z-score features for the moment.")
                 all_session_split_features_combined = self.normalize_array(data=all_session_split_features_combined, normalization="z_score")
             pca = PCA(n_components=self.pca_components)
             pca.fit(all_session_split_features_combined)
@@ -1919,7 +1956,7 @@ class ExtractionHelper(BasicOperationsHelper):
 
 
 
-class GLMHelper(DatasetHelper, ExtractionHelper):
+class GLMHelper(ExtractionHelper):
     def __init__(self, fractional_grid:list, alphas:list, pca_features:bool, fractional_ridge:bool = True, **kwargs):
         super().__init__(**kwargs)
 

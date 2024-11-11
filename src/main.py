@@ -24,14 +24,14 @@ subject_ids = ["02"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05"
 
 lock_event = "saccade" # "saccade" "fixation"
 
-crop_size = 112  # 224 112
+crop_size = 100  # 224 112
 # Size 224 crops not available for subject 03
 
 ann_model = "Alexnet"  # "Resnet50"
 module_name =  "features.12" # "fc" # features.12 has 9216 dimensions
 batch_size = 32
 
-pca_components = 30
+pca_components = 400
 
 best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 999, "timepoint_max": 999}, 
                                             "02": {"timepoint_min": 195, "timepoint_max": 235},  # source: {"timepoint_min": 195, "timepoint_max": 235}, non source: "02": {"timepoint_min": 290, "timepoint_max": 330},
@@ -40,7 +40,7 @@ best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 999, "timepo
                             # ! Saccade: Currently testing smaller windows due to sensor-level encoding differences.
                             # Best overall: 460 to 490
                               "saccade":   {"01": {"timepoint_min": 460, "timepoint_max": 490},  # Best: 465 to 495; Old range: "01": {"timepoint_min": 425, "timepoint_max": 530}
-                                            "02": {"timepoint_min": 460, "timepoint_max": 490},  # Best: 445 to 505; Old range: "02": {"timepoint_min": 425, "timepoint_max": 525}
+                                            "02": {"timepoint_min": 0, "timepoint_max": 650},  # Best: 445 to 505; Old range: "02": {"timepoint_min": 425, "timepoint_max": 525}
                                             "03": {"timepoint_min": 460, "timepoint_max": 490},  # Best: 455 to 490; Old range: "03": {"timepoint_min": 400, "timepoint_max": 600}
                                             "04": {"timepoint_min": 460, "timepoint_max": 490},  # Best: 460 to 490; Old range: "04": {"timepoint_min": 430, "timepoint_max": 515}
                                             "05": {"timepoint_min": 460, "timepoint_max": 490},} # Best: 460 to 480; Old range: "05": {"timepoint_min": 420, "timepoint_max": 510}
@@ -51,7 +51,7 @@ timepoint_max = 650  # fixation: 250, saccade: 375
 normalizations = ["global_robust_scaling"]  # "global_robust_scaling, mean_centered_voxel_then_global_robust_scaling, mean_centered_ch_then_global_robust_scaling"]  # "mean_centered_ch_then_global_robust_scaling"]  #  ["mean_centered_ch_then_global_robust_scaling"] # , "no_norm", "mean_centered_ch_t", "robust_scaling", "global_robust_scaling"]  # ,  # ["min_max", , "median_centered_ch_t", "robust_scaling", "no_norm"]
 
 fractional_grid = np.array([fraction/100 for fraction in range(1, 100, 3)]) # range from 0.01 to 1 in steps or 0.03
-alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
+alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000, 100_000_000_000_000_000, 100_000_000_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
 
                                                     # originally discarded sessions # newest with mean_centered_ch_then_global_robust_scaling # no_norm
 omit_sessions_by_subject = {"01": ["1", "6", "7", "8"],         # ["1"] # ["1", "7", "8"] # ["1", "7"] (6 and 8 are close)
@@ -65,13 +65,13 @@ logger_level = 25
 debugging = True if logger_level <= 23 else False  # TODO: Use this as class attribute rather than passing it to every function
 
 # Choose Calculations to be performed
-create_metadata = False
-create_train_test_split = False  # Careful! Everytime this is set to true, all subsequently stored data will be misalligned with previous data
-create_crop_datset_numpy = False
-create_meg_dataset = False
-extract_features = False
-perform_pca = False
-train_GLM = False
+create_metadata = True
+create_train_test_split = True  # Careful! Everytime this is set to true, all subsequently stored data will be misalligned with previous data
+create_crop_datset_numpy = True
+create_meg_dataset = True
+extract_features = True
+perform_pca = True
+train_GLM = True
 generate_predictions_with_GLM = True
 visualization = True
 simulate_scene_responses = False
@@ -86,10 +86,10 @@ else:
     if "mean_centered_ch_then_global_robust_scaling" in normalizations:
         raise ValueError(f"Normalization mean_centered_ch_then_global_robust_scaling is not valid for source drift analysis.")
 
-z_score_features_before_pca = True
+z_score_features_before_pca = False
 use_pca_features = True
 
-use_all_mag_sensors = True
+use_all_mag_sensors = False
 use_ica_cleaned_data = True
 clip_outliers = True
 interpolate_outliers = False  # Currently only implemented for mean_centered_ch_then_global_z! Cuts off everything over +-3 std
@@ -205,7 +205,7 @@ for run in range(run_pipeline_n_times):
 
         ##### Extract features from crops and perform pca #####
         if extract_features or perform_pca:
-            extraction_helper = ExtractionHelper(subject_id=subject_id, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, lock_event=lock_event)
+            extraction_helper = ExtractionHelper(subject_id=subject_id, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, lock_event=lock_event, normalizations=normalizations, chosen_channels=meg_channels, timepoint_min=timepoint_min, timepoint_max=timepoint_max, crop_size=crop_size)
 
             if extract_features:
                 # Extract ANN features of images
@@ -230,8 +230,8 @@ for run in range(run_pipeline_n_times):
 
             # Generate meg predictions 
             if generate_predictions_with_GLM:
-                #####glm_helper.predict_from_mapping_all_sessions(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
-                glm_helper.predict_from_mapping_all_sessions(fit_measure_storage_distinction="timepoint_sensor_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
+                glm_helper.predict_from_mapping_all_sessions(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
+                #glm_helper.predict_from_mapping_all_sessions(fit_measure_storage_distinction="timepoint_sensor_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
 
                 #glm_helper.predict_from_mapping_all_sessions(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=True, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
                 #glm_helper.predict_from_mapping_all_sessions(fit_measure_storage_distinction="timepoint_sensor_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
@@ -260,13 +260,13 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
-            ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
+            visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="pearson_r_timepoint", by_timepoints=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
             # Visuzalize distance based predictions at timepoint scale
             ###visualization_helper.three_dim_timepoint_predictions(subtract_self_pred=subtract_self_pred) 
-            ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True)  
+            visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True)  
             # sensor level true:
             ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=True, include_0_distance=True)  
             
@@ -275,7 +275,7 @@ for run in range(run_pipeline_n_times):
             ###visualization_helper.mne_topo_plot_per_sensor(data_type="drift", omitted_sessions=sessions_to_omit, all_timepoints_combined=False)  
             ###visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", omitted_sessions=sessions_to_omit, all_timepoints_combined=True)  
             ###visualization_helper.mne_topo_plot_per_sensor(data_type="drift", omitted_sessions=sessions_to_omit, all_timepoints_combined=True) 
-            visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", omitted_sessions=sessions_to_omit, all_timepoints_combined=False, sessions_separate=True)
+            ####visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", omitted_sessions=sessions_to_omit, all_timepoints_combined=False, sessions_separate=True)
 
             # Visualize model perspective (values by timepoint)
             ###visualization_helper.new_visualize_model_perspective(before_preprocessing=True)  # plot_norms=normalizations
@@ -368,3 +368,4 @@ logger.custom_info("Pipeline completed.")
 logger.warning("Using saccade for .fif file regardless of used lock_event for session date differences because files does not exist for fixations.")
 if use_ica_cleaned_data:
     logger.warning("idx to ms timepoints mapping in plots is currently based on ica cleaned metadata. Validation is required before generalizing to other data files.")
+logger.warning("Currently testing with carmens 100 crops.")
