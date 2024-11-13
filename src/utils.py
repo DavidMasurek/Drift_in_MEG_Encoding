@@ -26,6 +26,7 @@ from datetime import date
 import torch
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 from torchvision import transforms
+from torchvision.utils import save_image
 from thingsvision import get_extractor
 
 from sklearn.decomposition import PCA
@@ -1786,45 +1787,39 @@ class ExtractionHelper(DatasetHelper):  # previously inherited only from BasicOp
             device=device,
             pretrained=True
         )
+        transform_resize_normalize = extractor.get_transformations()
+
+        logger.custom_info(f"transform_resize_normalize: {transform_resize_normalize}")
 
         logger.custom_info(f"model_name: {model_name}")
         logger.custom_info(f"self.module_name: {self.module_name} \n")
 
         for session_id in self.session_ids_num:
-            print(f"session_id: {session_id}")
-            # Load torch datasets for session
-            #torch_crop_ds = self.load_split_data_from_file(session_id_num=session_id, type_of_content="torch_dataset")
-
             # Load numpy datasets for session
             crop_ds = self.load_split_data_from_file(session_id_num=session_id, type_of_content="crop_data") # shape (n_images, crop_size,crop_size,3)
 
-            # Permute to match (n_images, C, H, W) instead of (n_images, H, W, C) and convert to tensor
-            for split, image_array in crop_ds.items():
-                crop_ds[split] = torch.from_numpy(np.transpose(image_array, (0, 3, 1, 2)))
+            # Perform preprocessing
+            # Conver to PIL IMG 
+            train_images = [Image.fromarray(img_arr.astype('uint8')) for img_arr in crop_ds["train"]]
+            test_images = [Image.fromarray(img_arr.astype('uint8')) for img_arr in crop_ds["test"]]
+            # Perform dimension permutation, rescaling and normalization
+            train_images_resized = [transform_resize_normalize(img_arr) for img_arr in train_images]
+            test_images_resized = [transform_resize_normalize(img_arr) for img_arr in test_images]
 
-            if self.crop_size != 224:
-                # Resize the image to 224x224
-                transform = transforms.Compose([
-                    transforms.Resize((224, 224)), 
-                ])
-
-                train_images_resized = [transform(img_tensor) for img_tensor in crop_ds["train"]]
-                test_images_resized = [transform(img_tensor) for img_tensor in crop_ds["test"]]
-
-                train_tensors = torch.stack(train_images_resized).type(torch.float32)
-                test_tensors = torch.stack(test_images_resized).type(torch.float32)
-            else:
-                # Simply convert arrays to PyTorch tensors
-                train_tensors = torch.tensor(crop_ds['train'], dtype=torch.float32)
-                test_tensors = torch.tensor(crop_ds['test'], dtype=torch.float32)
-
-                raise NotImplementedError(f"Check correct shapes first: channels, height width: {train_tensors.shape}")
-
+            train_tensors = torch.stack(train_images_resized).type(torch.float32)
+            test_tensors = torch.stack(test_images_resized).type(torch.float32)
+            
             # Debugging: Store example resized images
             if session_id == "1":
+                # Unnormalize before visualizing, based on norm performed in ecoset pretrained alexnet from thingsvision
+                invert_norm = transforms.Normalize(
+                        mean=[-0.485 / 0.229, -0.456 / 0.224, -0.406 / 0.225],
+                        std=[1 / 0.229, 1 / 0.224, 1 / 0.225]
+                    )
                 for sample_index in range(100, 110):
-                    sample_image = np.transpose(train_tensors[sample_index].numpy(), (1, 2, 0)).astype(np.uint8)
-                    imageio.imwrite(f'data_files/{self.lock_event}/visualizations/test_image_pre_extract/test_image_{sample_index}.png', sample_image)
+                    img_tensor = invert_norm(test_tensors[sample_index])
+                    save_folder = f"data_files/{self.lock_event}/visualizations/test_image_pre_extract/test_image_{sample_index}.png"
+                    save_image(img_tensor, save_folder)
 
             logger.custom_debug(f"Shape of train tensors: {train_tensors.shape}")
             logger.custom_debug(f"Shape of test tensors: {test_tensors.shape}")
@@ -3564,6 +3559,9 @@ class VisualizationHelper(GLMHelper):
                             fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"][timepoint] = fit_measure_timepoint
 
                     num_timepoints = len([timepoint for timepoint in fit_measures_by_session_by_timepoint["session"]["3"]["timepoint"]])
+
+                    logger.custom_info(f"num_timepoints: {num_timepoints}")
+
                     timepoint_average_fit_measure = {}
                     if not separate_plots:
                         # Plot results averaged over all sessions

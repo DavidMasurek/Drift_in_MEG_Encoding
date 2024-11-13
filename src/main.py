@@ -31,7 +31,7 @@ ann_model = "Alexnet"  # "Resnet50"
 module_name =  "features.12" # "fc" # features.12 has 9216 dimensions
 batch_size = 32
 
-pca_components = 400
+pca_components = 800
 
 best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 999, "timepoint_max": 999}, 
                                             "02": {"timepoint_min": 195, "timepoint_max": 235},  # source: {"timepoint_min": 195, "timepoint_max": 235}, non source: "02": {"timepoint_min": 290, "timepoint_max": 330},
@@ -40,7 +40,7 @@ best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 999, "timepo
                             # ! Saccade: Currently testing smaller windows due to sensor-level encoding differences.
                             # Best overall: 460 to 490
                               "saccade":   {"01": {"timepoint_min": 460, "timepoint_max": 490},  # Best: 465 to 495; Old range: "01": {"timepoint_min": 425, "timepoint_max": 530}
-                                            "02": {"timepoint_min": 0, "timepoint_max": 650},  # Best: 445 to 505; Old range: "02": {"timepoint_min": 425, "timepoint_max": 525}
+                                            "02": {"timepoint_min": 460, "timepoint_max": 490},  # Best: 445 to 505; Old range: "02": {"timepoint_min": 425, "timepoint_max": 525}
                                             "03": {"timepoint_min": 460, "timepoint_max": 490},  # Best: 455 to 490; Old range: "03": {"timepoint_min": 400, "timepoint_max": 600}
                                             "04": {"timepoint_min": 460, "timepoint_max": 490},  # Best: 460 to 490; Old range: "04": {"timepoint_min": 430, "timepoint_max": 515}
                                             "05": {"timepoint_min": 460, "timepoint_max": 490},} # Best: 460 to 480; Old range: "05": {"timepoint_min": 420, "timepoint_max": 510}
@@ -65,12 +65,12 @@ logger_level = 25
 debugging = True if logger_level <= 23 else False  # TODO: Use this as class attribute rather than passing it to every function
 
 # Choose Calculations to be performed
-create_metadata = True
-create_train_test_split = True  # Careful! Everytime this is set to true, all subsequently stored data will be misalligned with previous data
-create_crop_datset_numpy = True
-create_meg_dataset = True
-extract_features = True
-perform_pca = True
+create_metadata = False
+create_train_test_split = False  # Careful! Everytime this is set to true, all subsequently stored data will be misalligned with previous data
+create_crop_datset_numpy = False
+create_meg_dataset = False
+extract_features = False
+perform_pca = False
 train_GLM = True
 generate_predictions_with_GLM = True
 visualization = True
@@ -253,14 +253,14 @@ for run in range(run_pipeline_n_times):
 
             # Visualize encoding model performance
             ###visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["train","test"], all_sessions_combined=all_sessions_combined)
-            ###visualization_helper.visualize_self_prediction(fit_measure_type="var_explained_timepoint", pred_splits=["test"], all_sessions_combined=all_sessions_combined)
+            visualization_helper.visualize_self_prediction(fit_measure_type="var_explained_timepoint", pred_splits=["test"], all_sessions_combined=all_sessions_combined)
 
             # Visualize prediction results
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
-            visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
+            ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="pearson_r_timepoint", by_timepoints=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
