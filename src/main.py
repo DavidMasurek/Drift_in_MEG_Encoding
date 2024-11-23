@@ -22,21 +22,22 @@ subject_ids = ["02"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05"
 # Subject 05 only contains 4 scenes for cluster 28 in all sessions test sets
 # --> Switched to 3 scenes per cluster for subject 03 and 05
 
-lock_event = "saccade" # "saccade" "fixation"
+lock_event = "fixation" # "saccade" "fixation"
 
-crop_size = 100  # 224 112
+crop_size = 112  # 224 112 (or 100)
 # Size 224 crops not available for subject 03
 
-ann_model = "Alexnet"  # "Resnet50"
-module_name =  "features.12" # "fc" # features.12 has 9216 dimensions
+ann_model = "Alexnet"  # "Alexnet", "Resnet50"
+module_name =  "features.12" # "fc" # Alexnet features.12 has 9216 dimensions; Resnet "avgpool" has 2048 dimensions, "layer4.2.conv3" is last conv layer and has 100000+ flattened dimensions
 batch_size = 32
 
-pca_components = 800
+pca_components = 400  # 400 for alexnet features.12 (~65% explained variance); 80 for resnet explain 72%
 
-best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 999, "timepoint_max": 999}, 
-                                            "02": {"timepoint_min": 195, "timepoint_max": 235},  # source: {"timepoint_min": 195, "timepoint_max": 235}, non source: "02": {"timepoint_min": 290, "timepoint_max": 330},
-                                            "03": {"timepoint_min": 999, "timepoint_max": 999},
-                                            "05": {"timepoint_min": 999, "timepoint_max": 999},},
+best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 290, "timepoint_max": 330}, 
+                                            "02": {"timepoint_min": 290, "timepoint_max": 330},  # source: {"timepoint_min": 195, "timepoint_max": 235}, non source (is it ica?): "02": {"timepoint_min": 290, "timepoint_max": 330},
+                                            "03": {"timepoint_min": 290, "timepoint_max": 330},
+                                            "04": {"timepoint_min": 290, "timepoint_max": 330},
+                                            "05": {"timepoint_min": 290, "timepoint_max": 330},},
                             # ! Saccade: Currently testing smaller windows due to sensor-level encoding differences.
                             # Best overall: 460 to 490
                               "saccade":   {"01": {"timepoint_min": 460, "timepoint_max": 490},  # Best: 465 to 495; Old range: "01": {"timepoint_min": 425, "timepoint_max": 530}
@@ -54,11 +55,11 @@ fractional_grid = np.array([fraction/100 for fraction in range(1, 100, 3)]) # ra
 alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000, 100_000_000_000_000_000, 100_000_000_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
 
                                                     # originally discarded sessions # newest with mean_centered_ch_then_global_robust_scaling # no_norm
-omit_sessions_by_subject = {"01": ["1", "6", "7", "8"],         # ["1"] # ["1", "7", "8"] # ["1", "7"] (6 and 8 are close)
+omit_sessions_by_subject = {"01": ["1", "6", "7", "9"],         # ["1"] # ["1", "7", "8"] # ["1", "7"] (6 and 8 are close)
                             "02": [],                           # ["4"]  # [] # [] # Source: ["1", "3", "5", "8", "9"]
-                            "03": ["1", "2", "7", "8", "10"],   # ["1", "2", "5", "7", "10"] # ["1", "2", "5", "7", "10"]
-                            "04": [],                           # [] # ["6"] # ["6"]
-                            "05": ["7", "9"],                   # ["9"] # ["4", "7", "9"] # ["4", "7", "9"]
+                            "03": ["4"],   # ["1", "2", "5", "7", "10"] # ["1", "2", "5", "7", "10"]
+                            "04": ["1", "6"],                           # [] # ["6"] # ["6"]
+                            "05": ["7"],                   # ["9"] # ["4", "7", "9"] # ["4", "7", "9"]
                             }
 
 logger_level = 25
@@ -70,7 +71,7 @@ create_train_test_split = False  # Careful! Everytime this is set to true, all s
 create_crop_datset_numpy = False
 create_meg_dataset = False
 extract_features = False
-perform_pca = False
+perform_pca = True
 train_GLM = True
 generate_predictions_with_GLM = True
 visualization = True
@@ -253,14 +254,14 @@ for run in range(run_pipeline_n_times):
 
             # Visualize encoding model performance
             ###visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["train","test"], all_sessions_combined=all_sessions_combined)
-            visualization_helper.visualize_self_prediction(fit_measure_type="var_explained_timepoint", pred_splits=["test"], all_sessions_combined=all_sessions_combined)
+            ###visualization_helper.visualize_self_prediction(fit_measure_type="var_explained_timepoint", pred_splits=["test"], all_sessions_combined=all_sessions_combined)
 
             # Visualize prediction results
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
-            ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
+            visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="pearson_r_timepoint", by_timepoints=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
@@ -368,4 +369,3 @@ logger.custom_info("Pipeline completed.")
 logger.warning("Using saccade for .fif file regardless of used lock_event for session date differences because files does not exist for fixations.")
 if use_ica_cleaned_data:
     logger.warning("idx to ms timepoints mapping in plots is currently based on ica cleaned metadata. Validation is required before generalizing to other data files.")
-logger.warning("Currently testing with carmens 100 crops.")

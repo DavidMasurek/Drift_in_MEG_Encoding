@@ -56,9 +56,8 @@ class BasicOperationsHelper:
             max_ms = 500
         else:
             # AVS ICA-claned: Fixation: 651 timepoints, -500 to 800.  Old, Andrej: Fixation: 401 timepoints, -300 to 500
-            #TODO: Validate timepoints. -500 to 800 for ica cleaned?
-            min_ms = -800
-            max_ms = 500
+            min_ms = -500
+            max_ms = 800
 
         self.all_ms_values = np.linspace(min_ms, max_ms, num=651)  # space containing the ms values for all 651 timepoints
 
@@ -78,24 +77,30 @@ class BasicOperationsHelper:
         null_distribution_corrs = []
         for i in range(n_permutations):
             np.random.shuffle(x_array_permutate)
-            null_distribution_corrs.append(correlation_statistic(x_array_permutate, y_array))
+            permute_corr = correlation_statistic(x_array_permutate, y_array)
+            null_distribution_corrs.append(permute_corr)
+            #if i % 500 == 0:
+            #    print(f"permute_corr {i}: {permute_corr}")
         null_distribution_corrs = np.array(null_distribution_corrs)
         p_0_05_corr = np.percentile(null_distribution_corrs, 5)
         p_0_95_corr = np.percentile(null_distribution_corrs, 95)
 
+        #print(f"len(x_array): {len(x_array)}")
         #print(f"p_0_05_corr: {p_0_05_corr}")
         #print(f"p_0_95_corr: {p_0_95_corr}")
         #print(f"empirical_corr: {empirical_corr}")
 
-        # Compute (directed) p-value: proportion of permutations yielding a correlation lower than the empirical correlation
+        # Compute (directed) p-value: proportion of permutations yielding a correlation not greater (left-sided) or not smaller (right-sided) than the empirical correlation
         if direction == "left":
-            num_corrs_greater_empirical = np.sum(null_distribution_corrs < empirical_corr)
+            num_corrs_stronger_equal_empirical = np.sum(null_distribution_corrs <= empirical_corr)
         elif direction == "right":
-            num_corrs_greater_empirical = np.sum(null_distribution_corrs > empirical_corr)
+            num_corrs_stronger_equal_empirical = np.sum(null_distribution_corrs >= empirical_corr)
         else: 
             # beidseitig
-            num_corrs_greater_empirical = np.sum(np.abs(null_distribution_corrs) > abs(empirical_corr))
-        p_value = num_corrs_greater_empirical / n_permutations
+            num_corrs_stronger_equal_empirical = np.sum(np.abs(null_distribution_corrs) >= abs(empirical_corr))
+        p_value = num_corrs_stronger_equal_empirical / n_permutations
+
+        #print(f"num_corrs_stronger_equal_empirical: {num_corrs_stronger_equal_empirical}")
 
         if generate_plot:
             # Create figure illustration permutation test result: Empirical correlation in comparison to null distribution
@@ -258,6 +263,7 @@ class BasicOperationsHelper:
             file_path = f"data_files/{self.lock_event}/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/predict_train_data_{predict_train_data}/var_explained_{type_of_norm}_dict.json"
         else:
             file_path = f"data_files/{self.lock_event}/metadata/{type_of_content}/subject_{self.subject_id}/{type_of_content}_dict.json"
+            logger.custom_info(f"Loading {type_of_content} from {file_path}.")
             
         try:
             with open(file_path, 'r') as data_file:
@@ -295,6 +301,7 @@ class BasicOperationsHelper:
         elif type_of_content in ["combined_metadata", "meg_metadata", "crop_metadata"]:
             storage_folder = f'data_files/{self.lock_event}/metadata/{type_of_content}/subject_{self.subject_id}'
             name_addition = ""
+            logger.custom_debug(f"Storing {type_of_content} in {storage_folder}.")
 
         os.makedirs(storage_folder, exist_ok=True)
         json_storage_file = f"{type_of_content}{name_addition}_dict.json"
@@ -598,8 +605,11 @@ class MetadataHelper(BasicOperationsHelper):
         super().__init__(**kwargs)
 
         self.crop_size = crop_size
-        #self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{crop_size}/metadata/as{self.subject_id}_crops_metadata.csv"
-        self.crop_metadata_path = f"/share/klab/camme/avs-encoding/data/image_patches/crops_{crop_size}/as{self.subject_id}/metadata/as{self.subject_id}_crops_metadata.csv"
+        if crop_size == 100:
+            self.crop_metadata_path = f"/share/klab/camme/avs-encoding/data/image_patches/crops_{crop_size}/as{self.subject_id}/metadata/as{self.subject_id}_crops_metadata.csv"
+        else:
+            self.crop_metadata_path = f"/share/klab/datasets/avs/input/fixation_crops/avs_meg_fixation_crops_scene_{crop_size}/metadata/as{self.subject_id}_crops_metadata.csv"
+            #self.crop_metadata_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{crop_size}/metadata/as{self.subject_id}_crops_metadata.csv"
         self.meg_metadata_folder = f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/erf/filter_0.2_200/ica"  # f"/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200"
 
 
@@ -682,6 +692,8 @@ class MetadataHelper(BasicOperationsHelper):
         # Define which column holds the relevant data to match crops and meg epochs
         time_column = "end_time" if self.lock_event == "saccade" else "time_in_trial"
 
+        logger.custom_debug(f"reading meg metadata from {self.meg_metadata_folder}.")
+
         data_dict = {"sessions": {}}
         # Read metadata for each session from csv
         for session_id_letter in self.session_ids_char:
@@ -723,6 +735,8 @@ class MetadataHelper(BasicOperationsHelper):
         """
         # Define which column holds the relevant data to match crops and meg epochs
         time_column = "start_time" if self.lock_event == "saccade" else "time_in_trial"
+
+        logger.custom_debug(f"reading crop metadata from {self.crop_metadata_path}.")
 
         df = pd.read_csv(self.crop_metadata_path, index_col = 'crop_filename')  # Read data from csv and set index to crop filename (crop_identifier before .png)
         df = df[df.index.notnull()]  # Remove rows/fixations without crop identifiers
@@ -782,8 +796,11 @@ class DatasetHelper(MetadataHelper):
         self.timepoint_min = timepoint_min
         self.timepoint_max = timepoint_max
 
-        #self.crop_folder_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{self.crop_size}/crops/as{self.subject_id}"
-        self.crop_folder_path = f"/share/klab/camme/avs-encoding/data/image_patches/crops_{self.crop_size}/as{self.subject_id}/crops/original/as{self.subject_id}"
+        if self.crop_size == 100:
+            self.crop_folder_path = f"/share/klab/camme/avs-encoding/data/image_patches/crops_{self.crop_size}/as{self.subject_id}/crops/original/as{self.subject_id}"
+        else:
+            self.crop_folder_path = f"/share/klab/datasets/avs/input/fixation_crops/avs_meg_fixation_crops_scene_{self.crop_size}/crops/as{self.subject_id}"
+            #self.crop_folder_path = f"/share/klab/psulewski/psulewski/active-visual-semantics/input/fixation_crops/avs_meg_fixation_crops_scene_{self.crop_size}/crops/as{self.subject_id}"
         self.coco_scenes_path = "/share/klab/psulewski/psulewski/active-visual-semantics/input/mscoco_scenes"
 
 
@@ -1159,6 +1176,10 @@ class DatasetHelper(MetadataHelper):
 
                     if meg_timepoints_in_dataset != num_combined_metadata_timepoints:
                         raise ValueError("Number of timepoints in meg dataset and in combined metadata are not identical.")
+
+                    if session_id_num == "1":
+                        for split in meg_split:
+                            logger.custom_debug(f"[Session {session_id_num}]: {split} split shape: {meg_split[split].shape}")
 
 
                     # Clip out outliers based percentile (except for normals with global, here it will be done later)
@@ -1787,6 +1808,7 @@ class ExtractionHelper(DatasetHelper):  # previously inherited only from BasicOp
             device=device,
             pretrained=True
         )
+        #print(F"extractor.show_model(): {extractor.show_model()}")
         transform_resize_normalize = extractor.get_transformations()
 
         logger.custom_info(f"transform_resize_normalize: {transform_resize_normalize}")
@@ -1872,7 +1894,6 @@ class ExtractionHelper(DatasetHelper):  # previously inherited only from BasicOp
             if z_score_features_before_pca:
                 raise ValueError("do NOT z-score features for the moment.")
                 all_session_split_features_combined = self.normalize_array(data=all_session_split_features_combined, normalization="z_score")
-            pca = PCA(n_components=self.pca_components)
             pca.fit(all_session_split_features_combined)
 
             explained_var_per_component = pca.explained_variance_ratio_
@@ -2604,6 +2625,18 @@ class VisualizationHelper(GLMHelper):
 
             # Filter events for only fixation events then calculate mean pupil dilations over all fixations, averaged over start and end of epoch
             events_df = events_df[events_df["type"] == "fixation"]
+
+            #TODO: Need to filter for only fixations considered in the encoding/drift analysis
+
+            if session_id == "2":
+                print(f"events_df['trial'].to_numpy()[:100]: {events_df['trial'].to_numpy()[:100]}")
+                print(f"events_df['time'].to_numpy()[:100]: {events_df['time'].to_numpy()[:100]}")
+                print(f"events_df['start'].to_numpy()[:100]: {events_df['start'].to_numpy()[:100]}")
+                print(f"events_df['end'].to_numpy()[:100]: {events_df['end'].to_numpy()[:100]}")
+                print(f"len(events_df['supd_x'].to_numpy()): {len(events_df['supd_x'].to_numpy())}")
+
+                sys.exit("Finished debugging.")
+
             mean_pupil_dilations = np.mean(np.array([events_df['supd_x'].to_numpy(), events_df['eupd_x'].to_numpy()]), axis=0)   # pupil dilations of all fixations, averaged between start and end of the fixation 
             
             # aggregate values by distance in days from first session
@@ -2617,7 +2650,7 @@ class VisualizationHelper(GLMHelper):
         x_values, y_values = self.extract_x_y_arrays(mean_pupil_dilations_by_day, losses_averaged_within_distances=False)
         x_values_set = np.array(list(set(x_values)))
         
-        slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
+        slope, intercept, r_value, _, std_err = linregress(x=x_values, y=y_values)
         trend_line = slope * x_values_set + intercept
         r_value = "{:.3f}".format(r_value) 
         p_value = "{:.4f}".format(self.perform_permutation_test(x_values, y_values, direction="both"))
@@ -3536,7 +3569,7 @@ class VisualizationHelper(GLMHelper):
                     sensor_folder_addition = f"/sensor_level/{sensor_name}" if sensor_name is not None else ""
                     pc_storage_folder = "/pcs_separate" if pc_num is not None else ""
                     region_folder_addition = f"/source_space{pca_folder}{pc_storage_folder}/{glaser_region}" if glaser_region is not None else ""
-                    plot_folder = f"data_files/{self.lock_event}/visualizations/timepoint_model_comparison{region_folder_addition}{sensor_folder_addition}/subject_{self.subject_id}/norm_{normalization}"
+                    plot_folder = f"data_files/{self.lock_event}/visualizations/timepoint_model_comparison/{self.ann_model}/{self.module_name}{region_folder_addition}{sensor_folder_addition}/subject_{self.subject_id}/norm_{normalization}"
                     if session_id is None:
                         plot_folder += "/all_sessions_combined"  
                         session_name_addition = "" if sensor_name is None else f"_sensor_{sensor_name}"

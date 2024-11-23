@@ -4,8 +4,8 @@
 
 #SBATCH -p klab-l40s  # klab-cpu
 #SBATCH -n 1
-#SBATCH -c 32
-#SBATCH --mem 20G
+#SBATCH -c 16
+#SBATCH --mem 25G
 #SBATCH --gres=gpu:1
 
 #SBATCH --error=logs/slurm_logs/errors/error.o%j
