@@ -263,7 +263,7 @@ class BasicOperationsHelper:
             file_path = f"data_files/{self.lock_event}/var_explained/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{type_of_norm}/predict_train_data_{predict_train_data}/var_explained_{type_of_norm}_dict.json"
         else:
             file_path = f"data_files/{self.lock_event}/metadata/{type_of_content}/subject_{self.subject_id}/{type_of_content}_dict.json"
-            logger.custom_info(f"Loading {type_of_content} from {file_path}.")
+            logger.custom_debug(f"Loading {type_of_content} from {file_path}.")
             
         try:
             with open(file_path, 'r') as data_file:
@@ -664,7 +664,7 @@ class MetadataHelper(BasicOperationsHelper):
         if investigate_missing_metadata:
             logger.custom_debug(f"Number of trials for which least one timepoint exists only in the meg-, but not in the crop metadata: {len(crop_missing_trials)}")
 
-        logger.custom_debug(f"total_combined_datapoints: {total_combined_datapoints}")
+        logger.custom_info(f"total_combined_datapoints: {total_combined_datapoints}")
 
         if investigate_missing_metadata:
             meg_missing_trials = []
@@ -689,8 +689,9 @@ class MetadataHelper(BasicOperationsHelper):
         """
         Creates the meg metadata dict for the participant and stores it.
         """
-        # Define which column holds the relevant data to match crops and meg epochs
-        time_column = "end_time" if self.lock_event == "saccade" else "time_in_trial"
+        # Define which column holds the relevant data to match crops and meg epoch based on a unique identifier within a trial
+        time_column = "fix_sequence"
+        #time_column = "end_time" if self.lock_event == "saccade" else "time_in_trial"  # deorecate, does not work for subject 04 due to measurement issue
 
         logger.custom_debug(f"reading meg metadata from {self.meg_metadata_folder}.")
 
@@ -733,8 +734,10 @@ class MetadataHelper(BasicOperationsHelper):
         """
         Creates the crop metadata dict for the participant and stores it.
         """
-        # Define which column holds the relevant data to match crops and meg epochs
-        time_column = "start_time" if self.lock_event == "saccade" else "time_in_trial"
+        # Define which column holds the relevant data to match crops and meg epoch based on a unique identifier within a trial
+        time_column = "fix_sequence"
+        #time_column = "start_time" if self.lock_event == "saccade" else "time_in_trial"  # deprecated, matching based on time_in_trial invalid for subject 04 where a measurement error occured
+        
 
         logger.custom_debug(f"reading crop metadata from {self.crop_metadata_path}.")
 
@@ -1894,6 +1897,7 @@ class ExtractionHelper(DatasetHelper):  # previously inherited only from BasicOp
             if z_score_features_before_pca:
                 raise ValueError("do NOT z-score features for the moment.")
                 all_session_split_features_combined = self.normalize_array(data=all_session_split_features_combined, normalization="z_score")
+            pca = PCA(n_components=self.pca_components)
             pca.fit(all_session_split_features_combined)
 
             explained_var_per_component = pca.explained_variance_ratio_
@@ -2564,6 +2568,52 @@ class VisualizationHelper(GLMHelper):
         self.n_grad = n_grad
         self.n_mag = n_mag
 
+        ### Calculate sessions which should be omitted from drift analysis ###
+        # TODO: Adjust session omittance in RDM drift etc based on this result
+        self.omit_sessions = self.determine_excluded_drift_sessions()
+
+
+    def determine_excluded_drift_sessions(self):
+        """
+        Calculates which sessions should be omitted from drift analysis for the current subject based on self-session encoding performances for sessions.
+        Sessions which show a negative deviation from the mean of more than 1.5 stds will be excluded.
+        """
+        assert "global_robust_scaling" in self.normalizations, "Session omittance calculation will always be performed based on global_robust_scaling normalization (and timepoint variance)."
+        
+        storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_global_robust_scaling/"
+        json_storage_file = f"var_explained_timepoints_dict.json"
+        json_storage_path = os.path.join(storage_folder, json_storage_file)
+        with open(json_storage_path, 'r') as file:
+            session_fit_measures = json.load(file)
+
+        # Extract self session encoding results and calculate respective average for each session
+        fit_measures_by_session_by_timepoint = {"session": {}}
+        avg_self_session_fit_measure_by_session = {}
+        num_timepoints = (self.timepoint_max - self.timepoint_min) + 1  # +1 because of index 0 ofc
+        for session_id in session_fit_measures['session_mapping']:
+            fit_measures_by_session_by_timepoint["session"][session_id] = {"timepoint":{}}
+            session_fit_measure_sum = 0
+            n_timepoints = len(list(session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]["timepoint"].keys()))
+            for timepoint, fit_measure_timepoint in session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]["timepoint"].items():
+                fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"][timepoint] = fit_measure_timepoint
+                session_fit_measure_sum += fit_measure_timepoint
+            avg_self_session_fit_measure_by_session[session_id] = session_fit_measure_sum / num_timepoints
+
+        all_session_encoding_vals = list(avg_self_session_fit_measure_by_session.values())
+        avg_all_sessions = np.sum(all_session_encoding_vals) / len(all_session_encoding_vals)
+        std_all_sessions = np.std(all_session_encoding_vals)
+        cutoff = avg_all_sessions - (std_all_sessions*2)
+        excluded_sessions = [session_id for session_id, session_encoding_val in avg_self_session_fit_measure_by_session.items() if session_encoding_val < cutoff]
+
+        logger.custom_info(f"Subject {self.subject_id}: omitting sessions {excluded_sessions}")
+        logger.custom_info(f"avg_self_session_fit_measure_by_session: {avg_self_session_fit_measure_by_session}")
+        logger.custom_info(f"avg_all_sessions: {avg_all_sessions}")
+        logger.custom_info(f"std_all_sessions: {std_all_sessions}")
+        logger.custom_info(f"cutoff: {cutoff} \n")
+        
+
+        return excluded_sessions
+
 
     def investigate_source_df(self):
         """
@@ -2621,7 +2671,7 @@ class VisualizationHelper(GLMHelper):
             session_double_char_id = f"0{session_id}" if session_id != "10" else session_id
             eyetracking_path = f"/share/klab/datasets/avs/results/as{self.subject_id}_{session_double_char_id}/as{self.subject_id[1]}_{session_id}_0_events.csv"
             events_df = pd.read_csv(eyetracking_path)
-            #events_df.info()
+            events_df.info()
 
             # Filter events for only fixation events then calculate mean pupil dilations over all fixations, averaged over start and end of epoch
             events_df = events_df[events_df["type"] == "fixation"]
@@ -2629,10 +2679,12 @@ class VisualizationHelper(GLMHelper):
             #TODO: Need to filter for only fixations considered in the encoding/drift analysis
 
             if session_id == "2":
-                print(f"events_df['trial'].to_numpy()[:100]: {events_df['trial'].to_numpy()[:100]}")
-                print(f"events_df['time'].to_numpy()[:100]: {events_df['time'].to_numpy()[:100]}")
-                print(f"events_df['start'].to_numpy()[:100]: {events_df['start'].to_numpy()[:100]}")
-                print(f"events_df['end'].to_numpy()[:100]: {events_df['end'].to_numpy()[:100]}")
+                #print(f"events_df['trial'].to_numpy()[:100]: {events_df['trial'].to_numpy()[:100]}")
+                #print(f"events_df['time'].to_numpy()[:100]: {events_df['time'].to_numpy()[:100]}")
+                #print(f"events_df['start'].to_numpy()[:100]: {events_df['start'].to_numpy()[:100]}")
+                #print(f"events_df['end'].to_numpy()[:100]: {events_df['end'].to_numpy()[:100]}")
+                print(f"events_df['supd_x'].to_numpy()[:100]: {events_df['supd_x'].to_numpy()[:100]}")
+                print(f"events_df['eupd_x'].to_numpy()[:100]: {events_df['eupd_x'].to_numpy()[:100]}")
                 print(f"len(events_df['supd_x'].to_numpy()): {len(events_df['supd_x'].to_numpy())}")
 
                 sys.exit("Finished debugging.")
@@ -3196,7 +3248,7 @@ class VisualizationHelper(GLMHelper):
         ax1.plot(filtered_x_values_set, trend_line, color=trend_color, label=label, linestyle='-', linewidth=3)
 
     
-    def _plot_drift_distance_based(self, fit_measures_by_distances:dict, omitted_sessions:list, self_pred_normalized:bool, losses_averaged_within_distances:bool, all_windows_one_plot:bool, timepoint_window_start_idx:int = None, include_0_distance:bool = False, distance_type:str="days"):
+    def _plot_drift_distance_based(self, fit_measures_by_distances:dict, self_pred_normalized:bool, losses_averaged_within_distances:bool, all_windows_one_plot:bool, timepoint_window_start_idx:int = None, include_0_distance:bool = False, distance_type:str="days"):
         """
         Creates drift plot based on fit measures data by distance. Expects keys of distance in days as string number, each key containing keys "fit_measure" and "num_measures"
         """
@@ -3237,7 +3289,7 @@ class VisualizationHelper(GLMHelper):
             labels = labels + labels2
 
         ax1.legend(lines, labels, loc='upper right')
-        ax1.set_title(f'Averaged Normalized Variance Explained vs Distance in {distance_type}. \n Self-Pred Normalized?: {self_pred_normalized} \n, omitted_sessions: {omitted_sessions}, {date.today()}')
+        ax1.set_title(f'Averaged Normalized Variance Explained vs Distance in {distance_type}. \n Self-Pred Normalized?: {self_pred_normalized} \n, omitted_sessions: {self.omit_sessions}, {date.today()}')
         plt.grid(True)
         
         # plt.show required?
@@ -3587,8 +3639,7 @@ class VisualizationHelper(GLMHelper):
                     fit_measures_by_session_by_timepoint = {"session": {}}
                     for session_id in session_fit_measures['session_mapping']:
                         fit_measures_by_session_by_timepoint["session"][session_id] = {"timepoint":{}}
-                        for timepoint in session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]["timepoint"]:
-                            fit_measure_timepoint = session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]["timepoint"][timepoint]
+                        for timepoint, fit_measure_timepoint in session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]["timepoint"].items():
                             fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"][timepoint] = fit_measure_timepoint
 
                     num_timepoints = len([timepoint for timepoint in fit_measures_by_session_by_timepoint["session"]["3"]["timepoint"]])
@@ -3855,7 +3906,7 @@ class VisualizationHelper(GLMHelper):
             plot_file = f"distance_drift_all_subjects_{fit_measure}.png"
             self.save_plot_as_file(fig, plot_folder=plot_folder, plot_file=plot_file)
 
-    def timepoint_window_drift(self, omitted_sessions:list, all_windows_one_plot:bool, subtract_self_pred:bool, sensor_level:bool, include_0_distance:bool, debugging:bool=False, regions_of_interest:list=None, source_pca_type:str=None, whiten:bool=False):
+    def timepoint_window_drift(self, all_windows_one_plot:bool, subtract_self_pred:bool, sensor_level:bool, include_0_distance:bool, debugging:bool=False, regions_of_interest:list=None, source_pca_type:str=None, whiten:bool=False):
         """
         Plots drift for seperate timepoint windows, as well as for all windows combined.
         """
@@ -3896,8 +3947,8 @@ class VisualizationHelper(GLMHelper):
             if subtract_self_pred:
                 # Normalize with self-predictions
                 fit_measures_by_session_by_timepoint = self.normalize_cross_session_preds_with_self_preds(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint)
-            if omitted_sessions:
-                fit_measures_by_session_by_timepoint = self.omit_selected_sessions_from_fit_measures(fit_measures_by_session=fit_measures_by_session_by_timepoint, omitted_sessions=omitted_sessions, sensors_seperated=False)
+            if self.omit_sessions:
+                fit_measures_by_session_by_timepoint = self.omit_selected_sessions_from_fit_measures(fit_measures_by_session=fit_measures_by_session_by_timepoint, omitted_sessions=self.omit_sessions, sensors_seperated=False)
 
             # Define storage folder for all plots in function
             sensor_folder_addition = "sensor_level/" if sensor_level else ""
@@ -3935,14 +3986,14 @@ class VisualizationHelper(GLMHelper):
 
             # Plot all timewindows in the same plot (with different colors)
             if all_windows_one_plot:
-                drift_plot_all_windows = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distance_by_time_window, omitted_sessions=omitted_sessions, self_pred_normalized=subtract_self_pred, losses_averaged_within_distances=False, all_windows_one_plot=True, include_0_distance=include_0_distance)
+                drift_plot_all_windows = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distance_by_time_window, self_pred_normalized=subtract_self_pred, losses_averaged_within_distances=False, all_windows_one_plot=True, include_0_distance=include_0_distance)
                 storage_filename = f"drift_plot_{pca_filename_addition}{sensor_filename_addition}all_windows_comparison"
                 self.save_plot_as_file(plt=drift_plot_all_windows, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
 
             # For control/comparison, plot the drift for the all timepoint values combined/averaged aswell
             logger.custom_debug(f"fit_measures_by_session_by_timepoint: {fit_measures_by_session_by_timepoint}")
             fit_measures_by_distances_all_timepoints = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False, include_0_distance=include_0_distance)
-            drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999, include_0_distance=include_0_distance)  # 999 indicates that we are considering all timepoints
+            drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999, include_0_distance=include_0_distance)  # 999 indicates that we are considering all timepoints
 
             storage_filename = f"drift_plot_{pca_filename_addition}{sensor_filename_addition}all_timepoints"
             self.save_plot_as_file(plt=drift_plot_all_timepoints, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
@@ -3975,7 +4026,7 @@ class VisualizationHelper(GLMHelper):
 
             # And plot by difference in session
             fit_measures_by_session_distances_all_timepoints = calculate_fit_by_session_distance(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint, include_0_distance=include_0_distance)
-            drift_plot_all_timepoints_session_dists = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_session_distances_all_timepoints, self_pred_normalized=subtract_self_pred, omitted_sessions=omitted_sessions, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999, include_0_distance=include_0_distance, distance_type="sessions")  # 999 indicates that we are considering all timepoints
+            drift_plot_all_timepoints_session_dists = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_session_distances_all_timepoints, self_pred_normalized=subtract_self_pred, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999, include_0_distance=include_0_distance, distance_type="sessions")  # 999 indicates that we are considering all timepoints
 
             storage_filename = f"drift_plot_by_session_distances_all_timepoints"
             self.save_plot_as_file(plt=drift_plot_all_timepoints_session_dists, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")

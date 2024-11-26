@@ -33,11 +33,11 @@ batch_size = 32
 
 pca_components = 400  # 400 for alexnet features.12 (~65% explained variance); 80 for resnet explain 72%
 
-best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 290, "timepoint_max": 330}, 
-                                            "02": {"timepoint_min": 290, "timepoint_max": 330},  # source: {"timepoint_min": 195, "timepoint_max": 235}, non source (is it ica?): "02": {"timepoint_min": 290, "timepoint_max": 330},
-                                            "03": {"timepoint_min": 290, "timepoint_max": 330},
-                                            "04": {"timepoint_min": 290, "timepoint_max": 330},
-                                            "05": {"timepoint_min": 290, "timepoint_max": 330},},
+best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 290, "timepoint_max": 329}, 
+                                            "02": {"timepoint_min": 290, "timepoint_max": 329},  # source: {"timepoint_min": 195, "timepoint_max": 235}, non source (is it ica?): "02": {"timepoint_min": 290, "timepoint_max": 330},
+                                            "03": {"timepoint_min": 290, "timepoint_max": 329},
+                                            "04": {"timepoint_min": 290, "timepoint_max": 329},
+                                            "05": {"timepoint_min": 290, "timepoint_max": 329},},
                             # ! Saccade: Currently testing smaller windows due to sensor-level encoding differences.
                             # Best overall: 460 to 490
                               "saccade":   {"01": {"timepoint_min": 460, "timepoint_max": 490},  # Best: 465 to 495; Old range: "01": {"timepoint_min": 425, "timepoint_max": 530}
@@ -54,13 +54,13 @@ normalizations = ["global_robust_scaling"]  # "global_robust_scaling, mean_cente
 fractional_grid = np.array([fraction/100 for fraction in range(1, 100, 3)]) # range from 0.01 to 1 in steps or 0.03
 alphas = [1, 10, 100, 1000 ,10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000, 10_000_000_000, 100_000_000_000, 1_000_000_000_000, 10_000_000_000_000, 100_000_000_000_000, 100_000_000_000_000_000, 100_000_000_000_000_000_000] #, 10_000_000, 100_000_000, 1_000_000_000]  # ,10,100,1000 ,10000 ,100000,1000000
 
-                                                    # originally discarded sessions # newest with mean_centered_ch_then_global_robust_scaling # no_norm
-omit_sessions_by_subject = {"01": ["1", "6", "7", "9"],         # ["1"] # ["1", "7", "8"] # ["1", "7"] (6 and 8 are close)
-                            "02": [],                           # ["4"]  # [] # [] # Source: ["1", "3", "5", "8", "9"]
-                            "03": ["4"],   # ["1", "2", "5", "7", "10"] # ["1", "2", "5", "7", "10"]
-                            "04": ["1", "6"],                           # [] # ["6"] # ["6"]
-                            "05": ["7"],                   # ["9"] # ["4", "7", "9"] # ["4", "7", "9"]
-                            }
+# DEPRECATED: will now be calculated automatically. Kept as overview 
+# omit_sessions_by_subject = {"01": ["1", "6", "7", "9"],         # ["1"] # ["1", "7", "8"] # ["1", "7"] (6 and 8 are close)
+                            # "02": [],                           # ["4"]  # [] # [] # Source: ["1", "3", "5", "8", "9"]
+                            # "03": ["4"],   # ["1", "2", "5", "7", "10"] # ["1", "2", "5", "7", "10"]
+                            # "04": ["1", "6"],                           # [] # ["6"] # ["6"]
+                            # "05": ["7"],                   # ["9"] # ["4", "7", "9"] # ["4", "7", "9"]
+                            # }
 
 logger_level = 25
 debugging = True if logger_level <= 23 else False  # TODO: Use this as class attribute rather than passing it to every function
@@ -71,9 +71,9 @@ create_train_test_split = False  # Careful! Everytime this is set to true, all s
 create_crop_datset_numpy = False
 create_meg_dataset = False
 extract_features = False
-perform_pca = True
-train_GLM = True
-generate_predictions_with_GLM = True
+perform_pca = False
+train_GLM = False
+generate_predictions_with_GLM = False
 visualization = True
 simulate_scene_responses = False
 calculate_RSM_test_set_drift = False
@@ -161,10 +161,6 @@ for run in range(run_pipeline_n_times):
         if use_best_timepoints_for_subject:
             timepoint_min = best_timepoints_by_subject[lock_event][subject_id]["timepoint_min"]
             timepoint_max = best_timepoints_by_subject[lock_event][subject_id]["timepoint_max"]
-        if omit_non_generalizing_sessions:
-            sessions_to_omit = omit_sessions_by_subject[subject_id]
-        else:
-            sessions_to_omit = []
 
         logger.custom_info(f"Processing subject {subject_id}.\n \n \n")
 
@@ -258,7 +254,7 @@ for run in range(run_pipeline_n_times):
 
             # Visualize prediction results
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
-            #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=sessions_to_omit)
+            #visualization_helper.visualize_GLM_results(only_distance=True)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
             visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
@@ -267,16 +263,16 @@ for run in range(run_pipeline_n_times):
 
             # Visuzalize distance based predictions at timepoint scale
             ###visualization_helper.three_dim_timepoint_predictions(subtract_self_pred=subtract_self_pred) 
-            visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True)  
+            visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True)  
             # sensor level true:
-            ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=True, include_0_distance=True)  
+            ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, all_windows_one_plot=all_windows_one_plot, sensor_level=True, include_0_distance=True)  
             
             # Visualize drift topographically with mne based on sensor level data 
-            ###visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", omitted_sessions=sessions_to_omit, all_timepoints_combined=False)  # data_type="self-pred" or "drift"
-            ###visualization_helper.mne_topo_plot_per_sensor(data_type="drift", omitted_sessions=sessions_to_omit, all_timepoints_combined=False)  
-            ###visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", omitted_sessions=sessions_to_omit, all_timepoints_combined=True)  
-            ###visualization_helper.mne_topo_plot_per_sensor(data_type="drift", omitted_sessions=sessions_to_omit, all_timepoints_combined=True) 
-            ####visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", omitted_sessions=sessions_to_omit, all_timepoints_combined=False, sessions_separate=True)
+            ###visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=False)  # data_type="self-pred" or "drift"
+            ###visualization_helper.mne_topo_plot_per_sensor(data_type="drift", all_timepoints_combined=False)  
+            ###visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=True)  
+            ###visualization_helper.mne_topo_plot_per_sensor(data_type="drift", all_timepoints_combined=True) 
+            ####visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=False, sessions_separate=True)
 
             # Visualize model perspective (values by timepoint)
             ###visualization_helper.new_visualize_model_perspective(before_preprocessing=True)  # plot_norms=normalizations
@@ -309,16 +305,16 @@ for run in range(run_pipeline_n_times):
             #glm_helper.predict_from_mapping_simulation_scene_dataset()
 
             # Calculate and visualize cluster geometry RSMs and their distance correlation plot
-            visualization_helper.calculate_and_visualize_cluster_geometry_RSMs_simulated_responses(image_level=True, omit_sessions_from_corr=sessions_to_omit)
+            visualization_helper.calculate_and_visualize_cluster_geometry_RSMs_simulated_responses(image_level=True)
 
             # Calculate and session similarity RSMs for each cluster, their average and their distance correlation plot
-            visualization_helper.calculate_and_visualize_between_sessions_RSMs_simulated_responses(image_level=True, omit_sessions_from_corr=sessions_to_omit)
+            visualization_helper.calculate_and_visualize_between_sessions_RSMs_simulated_responses(image_level=True)
 
         # Investigate RDM drift based on test sets of all sessions: Calculate distance between true RDM and RDM of predicted values
         if calculate_RSM_test_set_drift:
             visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
 
-            visualization_helper.calculate_RSM_test_set_drift(omit_sessions_from_calc=sessions_to_omit, calculate_anew=False)
+            visualization_helper.calculate_RSM_test_set_drift(calculate_anew=False)
 
         if calculate_source_drift:
             dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations, chosen_channels=meg_channels, lock_event=lock_event, timepoint_min=timepoint_min, timepoint_max=timepoint_max, crop_size=crop_size)
@@ -346,13 +342,13 @@ for run in range(run_pipeline_n_times):
             # Plot self-prediction timepoint comparison for all regions and drift
             if source_pca_type != "voxels_and_timepoints":
                 visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, result_stored_by_pc=store_result_by_pc, whiten=whiten_pcs)
-                visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)
+                visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)
             else:
                 visualization_helper.visualize_source_self_pred_pca(regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, plot_pcs_seperate=store_result_by_pc, whiten=whiten_pcs)
-                ###visualization_helper.visualize_source_drift_pca(omitted_sessions=sessions_to_omit, include_0_distance=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type)
+                ###visualization_helper.visualize_source_drift_pca(include_0_distance=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type)
             
             # Accumulate losses by distance and plot drift
-            ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, omitted_sessions=sessions_to_omit, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type)
+            ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type)
 
 if plot_distance_drift_all_subjects:
     global_visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
