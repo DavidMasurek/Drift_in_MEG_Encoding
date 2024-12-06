@@ -2602,8 +2602,8 @@ class VisualizationHelper(GLMHelper):
         all_session_encoding_vals = list(avg_self_session_fit_measure_by_session.values())
         avg_all_sessions = np.sum(all_session_encoding_vals) / len(all_session_encoding_vals)
         std_all_sessions = np.std(all_session_encoding_vals)
-        cutoff = avg_all_sessions - (std_all_sessions*2)
-        excluded_sessions = [session_id for session_id, session_encoding_val in avg_self_session_fit_measure_by_session.items() if session_encoding_val < cutoff]
+        cutoff = avg_all_sessions - (std_all_sessions*1.5)
+        excluded_sessions = [session_id for session_id, session_encoding_val in avg_self_session_fit_measure_by_session.items() if session_encoding_val < cutoff or session_encoding_val < 0]
 
         logger.custom_info(f"Subject {self.subject_id}: omitting sessions {excluded_sessions}")
         logger.custom_info(f"avg_self_session_fit_measure_by_session: {avg_self_session_fit_measure_by_session}")
@@ -2667,33 +2667,67 @@ class VisualizationHelper(GLMHelper):
         mean_pupil_dilations_by_day = {}
         session_date_differences = self.get_session_date_differences()
         for session_id in self.session_ids_num:
-            # Read eye-tracking df
             session_double_char_id = f"0{session_id}" if session_id != "10" else session_id
-            eyetracking_path = f"/share/klab/datasets/avs/results/as{self.subject_id}_{session_double_char_id}/as{self.subject_id[1]}_{session_id}_0_events.csv"
-            events_df = pd.read_csv(eyetracking_path)
-            events_df.info()
+            events_eyetracking_path = f"/share/klab/datasets/avs/results/as{self.subject_id}_{session_double_char_id}/preprocessed/as_s{self.subject_id[1]}_el_events.csv"
+            samples_eyetracking_path = f"/share/klab/datasets/avs/results/as{self.subject_id}_{session_double_char_id}/preprocessed/as_s{self.subject_id[1]}_el_samples.csv"
+           
+            events_df = pd.read_csv(events_eyetracking_path)
+            samples_df = pd.read_csv(samples_eyetracking_path)
 
-            # Filter events for only fixation events then calculate mean pupil dilations over all fixations, averaged over start and end of epoch
-            events_df = events_df[events_df["type"] == "fixation"]
+            #print(f"samples_eyetracking_path: {samples_eyetracking_path}")
+            #events_df.info()
+            #samples_df.info()            
 
-            #TODO: Need to filter for only fixations considered in the encoding/drift analysis
+            # Filter events for only fixation events and reset index
+            events_df = events_df[events_df["type"] == "fixation"].reset_index(drop=True)
+            samples_df = samples_df[samples_df["type"] == "fixation"].reset_index(drop=True)
 
-            if session_id == "2":
-                #print(f"events_df['trial'].to_numpy()[:100]: {events_df['trial'].to_numpy()[:100]}")
-                #print(f"events_df['time'].to_numpy()[:100]: {events_df['time'].to_numpy()[:100]}")
-                #print(f"events_df['start'].to_numpy()[:100]: {events_df['start'].to_numpy()[:100]}")
-                #print(f"events_df['end'].to_numpy()[:100]: {events_df['end'].to_numpy()[:100]}")
-                print(f"events_df['supd_x'].to_numpy()[:100]: {events_df['supd_x'].to_numpy()[:100]}")
-                print(f"events_df['eupd_x'].to_numpy()[:100]: {events_df['eupd_x'].to_numpy()[:100]}")
-                print(f"len(events_df['supd_x'].to_numpy()): {len(events_df['supd_x'].to_numpy())}")
+            # Debugging
+            #print(f"samples_df['smpl_time'].to_numpy()[:100]: {samples_df['smpl_time'].to_numpy()[:100]}")
+            #print(f"events_df['start_time'].to_numpy()[:100]: {events_df['start_time'].to_numpy()[:100]}")
+            #sys.exit()
 
-                sys.exit("Finished debugging.")
+            events_start_ordered = events_df['start_time'].is_monotonic_increasing
+            events_end_ordered = events_df['end_time'].is_monotonic_increasing
+            samples_ordered = samples_df['smpl_time'].is_monotonic_increasing
+            assert events_start_ordered and events_end_ordered and samples_ordered, "Timepoint values for at least one df are not sorted."
 
-            mean_pupil_dilations = np.mean(np.array([events_df['supd_x'].to_numpy(), events_df['eupd_x'].to_numpy()]), axis=0)   # pupil dilations of all fixations, averaged between start and end of the fixation 
-            
+            # Extract values from samples only for fixations in the events_df. smpl_time needs to be between a given start_time and end_time belonging to a fixation.
+            pupil_vals_by_fixation = defaultdict(list)
+            start_sample_idx = 0
+            for fixation_index, fixation_df_row in events_df.iterrows():
+                start_time = fixation_df_row['start_time']
+                end_time = fixation_df_row['end_time']
+                for _, simpl_time in samples_df['smpl_time'].iloc[start_sample_idx:].items():
+                    if start_time > simpl_time:
+                        # We are not far enough in the samples dataframe
+                        start_sample_idx += 1
+                    elif simpl_time <= end_time:
+                        # simpl_time is greater than start_time and smaller than or equal to end_time of current fixation --> match
+                        pupil_vals_by_fixation[fixation_index].append(simpl_time)
+                        start_sample_idx += 1
+                    else:
+                        # simpl_time is greater than start_time AND greater than end_time: We are not far enough in the events dataframe
+                        break
+            # Compute mean per fixation and per session
+            mean_pupil_vals_by_fixation = {fixation_index: np.mean(fixation_values) for fixation_index, fixation_values in pupil_vals_by_fixation.items()}
+            mean_val_session = np.mean(list(mean_pupil_vals_by_fixation.values()))
+            median_val_session = np.median(list(mean_pupil_vals_by_fixation.values()))
+            std_val_session = np.std([pupil_val for fixation_values in pupil_vals_by_fixation.values() for pupil_val in fixation_values])
+
+            n_total_pupil_vals_session = 0
+            for pupil_vals_fixation in pupil_vals_by_fixation.values():
+                n_total_pupil_vals_session += len(pupil_vals_fixation)
+    
+            print(f"session [{session_id}]: Extracted pupil values for {len(pupil_vals_by_fixation.keys())} fixations. Total pupil values: {n_total_pupil_vals_session}")
+            print(f"session [{session_id}]: Standard deviation of pupil dilation is {std_val_session}.")
+            print(f"session [{session_id}]: Median pupil dilation is {median_val_session}.")
+            print(f"session [{session_id}]: Mean pupil dilation is {mean_val_session}. \n")
+           
+
             # aggregate values by distance in days from first session
             days_from_session_1 = session_date_differences["1"][session_id]
-            mean_pupil_dilations_by_day[days_from_session_1] = mean_pupil_dilations
+            mean_pupil_dilations_by_day[days_from_session_1] = list(mean_pupil_vals_by_fixation.values())
 
         global_mean_pupil_dilations_for_sessions = [np.mean(mean_pupil_dilations_by_day[session_id_int]) for session_id_int in sorted(mean_pupil_dilations_by_day, key=int)]
 
@@ -2709,24 +2743,24 @@ class VisualizationHelper(GLMHelper):
         
         plt.plot(x_values_set, trend_line, color='green' , label=f"r={r_value}, p={p_value}", linestyle='-', linewidth=3)
         plt.plot(x_values_set, global_mean_pupil_dilations_for_sessions, marker='o', linestyle='', markersize=3)
-        plt.title(f'Pupil dilation across sessions subject {self.subject_id}. \n Averaged across all start and end timepoints of fixation events in the session.')
+        plt.title(f'Pupil dilation across sessions subject {self.subject_id}. \n Averaged across measurements within each fixation in each session.')
         plt.xlabel('Days since Session 1')
         plt.ylabel('Pupil Dilation')
         plt.legend()
         #plt.xticks(x_values) 
         plt.grid(True)
 
-        save_folder = f"data_files/{self.lock_event}/visualizations/pupil_dilation/subject_{self.subject_id}"  
-        save_file = f"pupil_dilations_across_sessions.png"
+        save_folder = f"data_files/{self.lock_event}/visualizations/pupil_dilation"  
+        save_file = f"pupil_dilations_across_sessions_subject_{self.subject_id}.png"
         self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
         plt.close()
      
 
-    def calculate_RSM_test_set_drift(self, omit_sessions_from_calc:list, calculate_anew:bool):
+    def calculate_RSM_test_set_drift(self, calculate_anew:bool):
         """
         Investigate RSM drift based on test sets of all sessions: Calculate distance between true RSM and RSM of predicted values.
         """
-        session_ids = np.array([session_id for session_id in self.session_ids_num if session_id not in omit_sessions_from_calc])
+        session_ids = np.array([session_id for session_id in self.session_ids_num if session_id not in self.omit_sessions])
         session_day_differences = self.get_session_date_differences()
 
         for normalization in self.normalizations:
@@ -2734,7 +2768,8 @@ class VisualizationHelper(GLMHelper):
                 ### Calculate (true) RSM of responses (for each sessions test set) ###
                 true_rsms_by_session = {"sessions": {}}
                 for session_id in session_ids:
-                    session_test_data = self.load_split_data_from_file(session_id_num=session_id, type_of_content="meg_data", type_of_norm=normalization)['test']  # shape: (n_epochs, n_channels, n_timepoints)
+                    session_test_split_path = f"data_files/{self.lock_event}/meg_data/norm_{normalization}/subject_{self.subject_id}/session_{session_id}/test/meg_data.npy"  
+                    session_test_data = np.load(session_test_split_path)  # shape: (n_epochs, n_channels, n_timepoints)
                     n_epochs, n_channels, n_timepoints = session_test_data.shape  # epochs = crops
 
                     rsm_matrix_session = np.zeros(shape=(n_epochs, n_epochs))
@@ -3205,8 +3240,7 @@ class VisualizationHelper(GLMHelper):
             
             print(f"subject_id {subject_id} p value: {permutation_p_value}")
             print(f"subject_id {subject_id} observed_corr: {observed_corr}")
-        """
-
+        """        
         # Calculate trend line 
         if include_0_distance:
             # Don't include the self predictions in the trend line calculation (i.e. filter x and y values where x = 0)
@@ -3226,16 +3260,19 @@ class VisualizationHelper(GLMHelper):
         r_value = "{:.3f}".format(r_value)  # limit to three decimals
 
         if timepoint_window_start_idx not in [None, 999]:
+            # A timepoint window was specified (regular case)
             timepoint_start_ms = self.map_timepoint_idx_to_ms(timepoint_window_start_idx)
-            timepoint_end_ms = timepoint_start_ms + (self.time_window_n_indices * 2)  # each timepoint is equivalent to 2ms (i.e. )
+            timepoint_end_ms = timepoint_start_ms + ((self.time_window_n_indices - 1) * 2)  # each timepoint is equivalent to 2ms, 5 timepoints result in an 8ms range
             label = f"{timepoint_start_ms} to {timepoint_end_ms}ms, (r={r_value}, p={permutation_p_value})" 
         elif timepoint_window_start_idx == 999:
-            # In this case we are plotting all timepoints
+            # In this case we are plotting all timepoints for one subject
             min_index = 0  # 0 because timepoint_min is added in the mapping
             max_index = self.timepoint_max - self.timepoint_min
             #logger.custom_info(f"max_index: {max_index}")
-            label = f"{self.map_timepoint_idx_to_ms(min_index)} to {self.map_timepoint_idx_to_ms(max_index)}ms, (r={r_value}, p={permutation_p_value})"   
+            #label = f"{self.map_timepoint_idx_to_ms(min_index)} to {self.map_timepoint_idx_to_ms(max_index)}ms, (r={r_value}, p={permutation_p_value})"   
+            label = f"r={r_value}, p={permutation_p_value}"
         elif subject_id != None:
+            # Part of a plot for all participants (timepoints not mentioned)
             label = f"Subject {subject_id}: r={r_value}, p={permutation_p_value}"
         else:
             label = None

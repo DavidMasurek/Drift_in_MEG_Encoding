@@ -17,7 +17,7 @@ sys.path.append(str(__location__))
 os.chdir(__location__)
 
 # Choose params
-subject_ids = ["02"]  # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
+subject_ids = ["01", "02", "03", "04", "05"]   # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
 # Subject 03 only contains 3 scenes for cluster 46 in all sessions test sets
 # Subject 05 only contains 4 scenes for cluster 28 in all sessions test sets
 # --> Switched to 3 scenes per cluster for subject 03 and 05
@@ -90,7 +90,7 @@ else:
 z_score_features_before_pca = False
 use_pca_features = True
 
-use_all_mag_sensors = False
+use_all_mag_sensors = True
 use_ica_cleaned_data = True
 clip_outliers = True
 interpolate_outliers = False  # Currently only implemented for mean_centered_ch_then_global_z! Cuts off everything over +-3 std
@@ -257,21 +257,21 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_GLM_results(only_distance=True)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
-            visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
+            #####visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="pearson_r_timepoint", by_timepoints=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
             # Visuzalize distance based predictions at timepoint scale
             ###visualization_helper.three_dim_timepoint_predictions(subtract_self_pred=subtract_self_pred) 
-            visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True)  
+            #####visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True)  
             # sensor level true:
             ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, all_windows_one_plot=all_windows_one_plot, sensor_level=True, include_0_distance=True)  
             
             # Visualize drift topographically with mne based on sensor level data 
-            ###visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=False)  # data_type="self-pred" or "drift"
-            ###visualization_helper.mne_topo_plot_per_sensor(data_type="drift", all_timepoints_combined=False)  
-            ###visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=True)  
-            ###visualization_helper.mne_topo_plot_per_sensor(data_type="drift", all_timepoints_combined=True) 
+            #####visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=False)  # data_type="self-pred" or "drift"
+            #####visualization_helper.mne_topo_plot_per_sensor(data_type="drift", all_timepoints_combined=False)  
+            #####visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=True)  
+            #####visualization_helper.mne_topo_plot_per_sensor(data_type="drift", all_timepoints_combined=True) 
             ####visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=False, sessions_separate=True)
 
             # Visualize model perspective (values by timepoint)
@@ -280,7 +280,7 @@ for run in range(run_pipeline_n_times):
             # Visualize session means and stds
             ###visualization_helper.visualize_meg_means_stds()
 
-            ###visualization_helper.visualize_arousal_mean_over_sessions()
+            visualization_helper.visualize_arousal_mean_over_sessions()
 
             logger.custom_info("Visualization completed. \n \n")
 
@@ -314,7 +314,7 @@ for run in range(run_pipeline_n_times):
         if calculate_RSM_test_set_drift:
             visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
 
-            visualization_helper.calculate_RSM_test_set_drift(calculate_anew=False)
+            visualization_helper.calculate_RSM_test_set_drift(calculate_anew=True)
 
         if calculate_source_drift:
             dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations, chosen_channels=meg_channels, lock_event=lock_event, timepoint_min=timepoint_min, timepoint_max=timepoint_max, crop_size=crop_size)

@@ -1,6 +1,7 @@
 data_files/*
 logs/*
 backup/*
+src/__pycache__/
 
 # Exclude uniquely extracted session metadata
 !data_files/session_metadata/

@@ -2,11 +2,11 @@
 #SBATCH --time=24:00:00
 #SBATCH --nodes 1
 
-#SBATCH -p klab-l40s  # klab-cpu
+#SBATCH -p klab-gpu  # klab-cpu, klab-gpu 
 #SBATCH -n 1
 #SBATCH -c 16
 #SBATCH --mem 25G
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:1  # 0, 1
 
 #SBATCH --error=logs/slurm_logs/errors/error.o%j
 #SBATCH --output=logs/slurm_logs/outputs/output.o%j
