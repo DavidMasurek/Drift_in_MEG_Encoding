@@ -2146,8 +2146,8 @@ class GLMHelper(ExtractionHelper):
                         else:
                             X_test, Y_test = ann_features['test'], meg_data['test']
 
-                        #logger.custom_debug(f"predict_from_mapping_all_sessions: X_test.shape: {X_test.shape}")
-                        #logger.custom_debug(f"predict_from_mapping_all_sessions: Y_test.shape: {Y_test.shape}")
+                        #logger.custom_info(f"predict_from_mapping_all_sessions: X_test.shape: {X_test.shape}")
+                        #logger.custom_info(f"predict_from_mapping_all_sessions: Y_test.shape: {Y_test.shape}")
 
                         if shuffle_test_labels:
                             np.random.shuffle(Y_test)
@@ -2571,6 +2571,8 @@ class VisualizationHelper(GLMHelper):
         ### Calculate sessions which should be omitted from drift analysis ###
         # TODO: Adjust session omittance in RDM drift etc based on this result
         self.omit_sessions = self.determine_excluded_drift_sessions()
+        #if self.subject_id == "02" and "4" not in self.omit_sessions:
+        #    self.omit_sessions.append("4")
 
 
     def determine_excluded_drift_sessions(self):
@@ -2739,9 +2741,9 @@ class VisualizationHelper(GLMHelper):
         slope, intercept, r_value, _, std_err = linregress(x=x_values, y=y_values)
         trend_line = slope * x_values_set + intercept
         r_value = "{:.3f}".format(r_value) 
-        p_value = "{:.4f}".format(self.perform_permutation_test(x_values, y_values, direction="both"))
+        #p_value = "{:.4f}".format(self.perform_permutation_test(x_values, y_values, direction="both"))
         
-        plt.plot(x_values_set, trend_line, color='green' , label=f"r={r_value}, p={p_value}", linestyle='-', linewidth=3)
+        plt.plot(x_values_set, trend_line, color='green' , label=f"r={r_value}", linestyle='-', linewidth=3)
         plt.plot(x_values_set, global_mean_pupil_dilations_for_sessions, marker='o', linestyle='', markersize=3)
         plt.title(f'Pupil dilation across sessions subject {self.subject_id}. \n Averaged across measurements within each fixation in each session.')
         plt.xlabel('Days since Session 1')
@@ -2836,30 +2838,30 @@ class VisualizationHelper(GLMHelper):
                 with open(storage_path, 'r') as file:
                     rsm_corr_by_distance = json.load(file)
 
+            # DEPRECATED: shortcut to exclude session 4 for subject 2 based on distance
+            #if self.subject_id == "02":
+            #    rsm_corr_by_distance = {distance: rsm_corr for distance, rsm_corr in rsm_corr_by_distance.items() if int(distance) < 60}
+
 
             # Plot drift
             plt.figure(figsize=(8, 6))
             x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances=rsm_corr_by_distance, losses_averaged_within_distances=False)
             filtered_x_values_set = np.array(list(set(x_values)))
 
-            print(f"x_values: {x_values}")
-            print(f"y_values: {y_values}")
-
             slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
             trend_line = slope * filtered_x_values_set + intercept
             r_value = "{:.3f}".format(r_value)  # limit to three decimals
             p_value = self.perform_permutation_test(x_values, y_values, direction="both")
+            plt.plot(x_values, y_values, marker='o', linestyle='none')
             plt.plot(filtered_x_values_set, trend_line, color='green' , label=f"r={r_value}, p={p_value}", linestyle='-', linewidth=3)
-            plt.plot(x_values, y_values, marker='o', linestyle='')
-            plt.title(f'Correlations of (upper triangular) true RSMs and predicted RSMs by distance.')
+            plt.title(f'Correlations of (upper triangular) true RSMs and predicted RSMs by distance. \n Subject {self.subject_id}. Omitted Sessions: {self.omit_sessions}')
             plt.xlabel('Distance in days between test set session and model session')
             plt.ylabel('Spearman Correlation')
             plt.legend()
-            plt.xticks(x_values) 
             plt.grid(True)
 
-            save_folder = f"data_files/{self.lock_event}/visualizations/RSM_Test_Set_Drift/Distance_Plots/subject_{self.subject_id}/{normalization}"  
-            save_file = f"RSM_Test_Set_Drift.png"
+            save_folder = f"data_files/{self.lock_event}/visualizations/RSM_Test_Set_Drift/Distance_Plots/{normalization}"  
+            save_file = f"RSM_Test_Set_Drift_subject_{self.subject_id}.png"
             self.save_plot_as_file(plt=plt, plot_folder=save_folder, plot_file=save_file)
             plt.close()
 
@@ -3221,26 +3223,12 @@ class VisualizationHelper(GLMHelper):
         return x_values, y_values
 
     
-    def _plot_scattered_fit_measures_by_distance_with_trend(self, fit_measures_by_distances:dict, ax1, color:str, include_0_distance:bool, timepoint_window_start_idx:str = None, subject_id:str = None):
+    def _plot_scattered_fit_measures_by_distance_with_trend(self, fit_measures_by_distances:dict, ax1, color:str, include_0_distance:bool, timepoint_window_start_idx:str = None, plot_permutation_test:bool=False, curr_norm:str=None, subject_id:str = None):
         """
         Helper function that insert scattered fit measures (mostly variance explained) over distances into a given plot
         """
         x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances, losses_averaged_within_distances=False)
-        
-        """
-        if subject_id is not None:  # Called from drift_distance_all_subjects
 
-            observed_corr = "{:.3f}".format(pearsonr(x_values,y_values)[0])
-            permutation_p_value, _, _ = self.perform_permutation_test(x_values, y_values, n_permutations=10000)
-            permutation_ax.set_title(f'Permutation Test for Subject {subject_id} \n r={observed_corr}, p={permutation_p_value}')
-
-            plot_folder = f"data_files/{self.lock_event}/visualizations/distance_drift/permutation_test"
-            plot_file = f"permutation_test_results_{subject_id}.png"
-            self.save_plot_as_file(plt=permutation_plot, plot_folder=plot_folder, plot_file=plot_file)
-            
-            print(f"subject_id {subject_id} p value: {permutation_p_value}")
-            print(f"subject_id {subject_id} observed_corr: {observed_corr}")
-        """        
         # Calculate trend line 
         if include_0_distance:
             # Don't include the self predictions in the trend line calculation (i.e. filter x and y values where x = 0)
@@ -3252,18 +3240,32 @@ class VisualizationHelper(GLMHelper):
             filtered_x_values = x_values
             filtered_y_values = y_values
 
-        permutation_p_value = self.perform_permutation_test(filtered_x_values, filtered_y_values, n_permutations=10000)
-        
         filtered_x_values_set = np.array(list(set(filtered_x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
         slope, intercept, r_value, p_value, std_err = linregress(x=filtered_x_values, y=filtered_y_values)
         trend_line = slope * filtered_x_values_set + intercept
         r_value = "{:.3f}".format(r_value)  # limit to three decimals
+
+        if not plot_permutation_test:
+            permutation_p_value = self.perform_permutation_test(filtered_x_values, filtered_y_values, n_permutations=10000, generate_plot=plot_permutation_test)
+        else:
+            assert curr_norm is not None, "Atemmpting to store permutation test but norm is not specified."
+            # Also store a plot for the permutation test and the null distribution
+            permutation_p_value, permutation_fig, permutation_ax = self.perform_permutation_test(filtered_x_values, filtered_y_values, n_permutations=10000, generate_plot=plot_permutation_test)
+            permutation_ax.set_title(f'Permutation Test for Subject {self.subject_id} \n r={r_value}, p={permutation_p_value}')
+            permutation_plot_folder = f"data_files/{self.lock_event}/visualizations/only_distance/timepoint_windows/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_{curr_norm}"
+            
+            
 
         if timepoint_window_start_idx not in [None, 999]:
             # A timepoint window was specified (regular case)
             timepoint_start_ms = self.map_timepoint_idx_to_ms(timepoint_window_start_idx)
             timepoint_end_ms = timepoint_start_ms + ((self.time_window_n_indices - 1) * 2)  # each timepoint is equivalent to 2ms, 5 timepoints result in an 8ms range
             label = f"{timepoint_start_ms} to {timepoint_end_ms}ms, (r={r_value}, p={permutation_p_value})" 
+
+            if plot_permutation_test:
+                permutation_filename = f"permutation_test_mswindow_{timepoint_start_ms}_{timepoint_end_ms}.png"
+                self.save_plot_as_file(plt=permutation_fig, plot_folder=permutation_plot_folder, plot_file=permutation_filename)
+
         elif timepoint_window_start_idx == 999:
             # In this case we are plotting all timepoints for one subject
             min_index = 0  # 0 because timepoint_min is added in the mapping
@@ -3271,11 +3273,21 @@ class VisualizationHelper(GLMHelper):
             #logger.custom_info(f"max_index: {max_index}")
             #label = f"{self.map_timepoint_idx_to_ms(min_index)} to {self.map_timepoint_idx_to_ms(max_index)}ms, (r={r_value}, p={permutation_p_value})"   
             label = f"r={r_value}, p={permutation_p_value}"
+
+            if plot_permutation_test:
+                permutation_filename = f"permutation_test_all_timepoints.png"
+                self.save_plot_as_file(plt=permutation_fig, plot_folder=permutation_plot_folder, plot_file=permutation_filename)
         elif subject_id != None:
             # Part of a plot for all participants (timepoints not mentioned)
             label = f"Subject {subject_id}: r={r_value}, p={permutation_p_value}"
+
+            if plot_permutation_test:
+                raise NotImplementedError("Invalid parameter configuration.")
         else:
             label = None
+
+            if plot_permutation_test:
+                raise NotImplementedError("Invalid parameter configuration.")
 
         if subject_id != "All Subjects":
             ax1.plot(x_values, y_values, color=color, marker='o', linestyle='none', markersize=4)
@@ -3285,16 +3297,18 @@ class VisualizationHelper(GLMHelper):
         ax1.plot(filtered_x_values_set, trend_line, color=trend_color, label=label, linestyle='-', linewidth=3)
 
     
-    def _plot_drift_distance_based(self, fit_measures_by_distances:dict, self_pred_normalized:bool, losses_averaged_within_distances:bool, all_windows_one_plot:bool, timepoint_window_start_idx:int = None, include_0_distance:bool = False, distance_type:str="days"):
+    def _plot_drift_distance_based(self, fit_measures_by_distances:dict, self_pred_normalized:bool, losses_averaged_within_distances:bool, all_windows_one_plot:bool, timepoint_window_start_idx:int = None, include_0_distance:bool = False, distance_type:str="days", curr_norm:str=None):
         """
         Creates drift plot based on fit measures data by distance. Expects keys of distance in days as string number, each key containing keys "fit_measure" and "num_measures"
         """
+        plot_permutation_test = True if curr_norm is not None else False  # Permutation plot should only be generated if norm is given
+
         # Plot loss as a function of distance of predicted session from "training" session
         fig, ax1 = plt.subplots(figsize=(12, 8))
 
         # Insert scatter values based on distance into plot
         if not all_windows_one_plot:
-            self._plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances, ax1, color='C0', include_0_distance=include_0_distance, timepoint_window_start_idx=timepoint_window_start_idx)  # using default blue color
+            self._plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances, ax1, color='C0', include_0_distance=include_0_distance, timepoint_window_start_idx=timepoint_window_start_idx, plot_permutation_test=plot_permutation_test, curr_norm=curr_norm)  # using default blue color
         else:
             # Create colormap to differentiate time-windows
             n_windows = len(fit_measures_by_distances["timewindow_start"].keys())
@@ -3304,7 +3318,7 @@ class VisualizationHelper(GLMHelper):
             for timepoint_idx, timepoint_window_start_idx in enumerate(fit_measures_by_distances["timewindow_start"]):
                 fit_measures_by_distances_window = fit_measures_by_distances["timewindow_start"][timepoint_window_start_idx]["fit_measures_by_distances"]
                 color = colors[timepoint_idx]
-                self._plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances_window, ax1, color=color, include_0_distance=include_0_distance, timepoint_window_start_idx=timepoint_window_start_idx) 
+                self._plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances_window, ax1, color=color, include_0_distance=include_0_distance, timepoint_window_start_idx=timepoint_window_start_idx, plot_permutation_test=plot_permutation_test, curr_norm=curr_norm) 
 
         ax1.set_xlabel(f'Distance in {distance_type} between "train" and "test" Session')
         ax1.set_ylabel(f'Variance Explained')
@@ -3976,7 +3990,7 @@ class VisualizationHelper(GLMHelper):
             
             return fit_measures_by_session_by_chosen_timepoints
 
-        def plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint:dict, sensor_name:str=None, glaser_region:str=None, pca_folder:str="") -> None:
+        def plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint:dict, sensor_name:str=None, glaser_region:str=None, pca_folder:str="", curr_norm:str=None) -> None:
             sensor_filename_addition = f"sensor_{sensor_name}_" if sensor_name is not None else ""
             glaser_region_filename_addition = f"{glaser_region}" if glaser_region is not None else ""
             pca_filename_addition = "voxels_pca_reduced_" if pca_folder.startswith("/voxels_pca_reduced") else ""
@@ -4023,14 +4037,14 @@ class VisualizationHelper(GLMHelper):
 
             # Plot all timewindows in the same plot (with different colors)
             if all_windows_one_plot:
-                drift_plot_all_windows = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distance_by_time_window, self_pred_normalized=subtract_self_pred, losses_averaged_within_distances=False, all_windows_one_plot=True, include_0_distance=include_0_distance)
+                drift_plot_all_windows = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distance_by_time_window, self_pred_normalized=subtract_self_pred, losses_averaged_within_distances=False, all_windows_one_plot=True, include_0_distance=include_0_distance, curr_norm=curr_norm)
                 storage_filename = f"drift_plot_{pca_filename_addition}{sensor_filename_addition}all_windows_comparison"
                 self.save_plot_as_file(plt=drift_plot_all_windows, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
 
             # For control/comparison, plot the drift for the all timepoint values combined/averaged aswell
             logger.custom_debug(f"fit_measures_by_session_by_timepoint: {fit_measures_by_session_by_timepoint}")
             fit_measures_by_distances_all_timepoints = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False, include_0_distance=include_0_distance)
-            drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999, include_0_distance=include_0_distance)  # 999 indicates that we are considering all timepoints
+            drift_plot_all_timepoints = self._plot_drift_distance_based(fit_measures_by_distances=fit_measures_by_distances_all_timepoints, self_pred_normalized=subtract_self_pred, losses_averaged_within_distances=False, all_windows_one_plot=False, timepoint_window_start_idx=999, include_0_distance=include_0_distance, curr_norm=curr_norm)  # 999 indicates that we are considering all timepoints
 
             storage_filename = f"drift_plot_{pca_filename_addition}{sensor_filename_addition}all_timepoints"
             self.save_plot_as_file(plt=drift_plot_all_timepoints, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
@@ -4047,13 +4061,13 @@ class VisualizationHelper(GLMHelper):
                 # Calculate fit measures relative to distance in time between train and pred session
                 fit_by_session_distances = {}
                 for session_train_id, fit_measures_train_session in fit_measures_by_session['session_mapping'].items():
+                    if self.subject_id == "02":
+                        session_train_id = session_mapping[session_train_id]
                     for session_pred_id, fit_measure_pred_session in fit_measures_train_session["session_pred"].items():
+                        if self.subject_id == "02":
+                            session_pred_id = session_mapping[session_pred_id]
                         if include_0_distance or session_train_id != session_pred_id:
-                            if self.subject_id == "02":
-                                session_train_id = session_mapping[session_train_id]
-                                session_pred_id = session_mapping[session_pred_id]
                             session_distance = abs(int(session_train_id) - int(session_pred_id))
-
                             if session_distance not in fit_by_session_distances:
                                 fit_by_session_distances[session_distance] = [fit_measure_pred_session]
                             else:
@@ -4102,7 +4116,7 @@ class VisualizationHelper(GLMHelper):
                         logger.custom_debug(f"var_explained_timepoints loaded from {json_storage_path}")
                         fit_measures_by_session_by_timepoint = json.load(file)
 
-                    plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint)
+                    plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint, curr_norm=normalization)
                 else:
                     for glaser_region in regions_of_interest:
                         # Load timepoint-based variance explained
@@ -4133,11 +4147,11 @@ class VisualizationHelper(GLMHelper):
                     plot_timepoint_window_drift_for_timepoint_fit_measures(sensor_fit_measures_by_session_by_timepoint, sensor_name=sensor_name)
 
 
-    def mne_topo_plot_per_sensor(self, data_type:str, omitted_sessions:list, all_timepoints_combined:bool, sessions_separate:bool=False):
+    def mne_topo_plot_per_sensor(self, data_type:str, all_timepoints_combined:bool, sessions_separate:bool=False):
         if data_type not in ["self-pred", "drift"]:
             raise ValueError(f"visualize_topo_with_drift_per_sensor called with invalid argument for data_type {data_type}")
-        if sessions_separate and data_type == "drift":
-            raise NotImplementedError("mne_topo_plot_per_sensor not yet written for separate drift plots for each session.")
+        if (sessions_separate and data_type == "drift") or (sessions_separate and all_timepoints_combined):
+            raise NotImplementedError("Invalid parameter configuration.")
 
         for normalization in self.normalizations:
             # Load sensor- and timepoint-based variance explained
@@ -4147,8 +4161,8 @@ class VisualizationHelper(GLMHelper):
             with open(json_storage_path, 'r') as file:
                 fit_measures_by_sensor_by_session_by_timepoint = json.load(file)
 
-            if omitted_sessions:
-                fit_measures_by_sensor_by_session_by_timepoint = self.omit_selected_sessions_from_fit_measures(fit_measures_by_session=fit_measures_by_sensor_by_session_by_timepoint, omitted_sessions=omitted_sessions, sensors_seperated=True)
+            if self.omit_sessions:
+                fit_measures_by_sensor_by_session_by_timepoint = self.omit_selected_sessions_from_fit_measures(fit_measures_by_session=fit_measures_by_sensor_by_session_by_timepoint, omitted_sessions=self.omit_sessions, sensors_seperated=True)
            
             # Get sensor names (maybe not needed)
             sensor_index_name_dict = self.get_relevant_meg_channels(self.chosen_channels)
@@ -4167,10 +4181,9 @@ class VisualizationHelper(GLMHelper):
                     sensor_fit_measures_by_session_by_timepoint = fit_measures_by_sensor_by_session_by_timepoint["sensor"][str(sensor_idx)]
                     logger.custom_debug(f"Processing sensor {sensor_name}")
                     
-                    sensor_fit_measures_by_distances = self.calculate_fit_by_distances(fit_measures_by_session=sensor_fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
-
                     if all_timepoints_combined:
                         # Calculate drift correlation (correlation between distance and fit measure)
+                        sensor_fit_measures_by_distances = self.calculate_fit_by_distances(fit_measures_by_session=sensor_fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False)
                         x_values, y_values = self.extract_x_y_arrays(sensor_fit_measures_by_distances, losses_averaged_within_distances=False)
                         x_values_set = np.array(list(set(x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
                         slope, intercept, r_value, p_value, std_err = linregress(x=x_values, y=y_values)
@@ -4220,6 +4233,10 @@ class VisualizationHelper(GLMHelper):
                         
                     min_var_explained = "{:.4f}".format(np.min(self_pred_values_sensors))
                     max_var_explained = "{:.4f}".format(np.max(self_pred_values_sensors))
+
+                    if all_timepoints_combined:
+                        # Average across all timepoint values
+                        self_pred_values_sensors = np.array([np.mean(sensor_self_preds_timepoints) for sensor_self_preds_timepoints in self_pred_values_sensors]).reshape(n_sensors_selected, 1)
                 else:
                     self_pred_values_sensors_by_session = {}
                     min_var_explained_by_session = {}
@@ -4770,9 +4787,10 @@ class VisualizationHelper(GLMHelper):
         for normalization in self.normalizations:
             # Collect means and stds of sessions
             mean_and_std_dict_by_timepoints = self.recursive_defaultdict()
+            mean_and_std_dict_timepoint_avg = self.recursive_defaultdict()
             for session_id in self.session_ids_num:
-                # aggregate values by distance in days from first session
                 if x_value_days:
+                    # aggregate values by distance in days from first session
                     x_value = session_date_differences["1"][session_id]
                 else:
                     if self.subject_id != "02":
@@ -4797,11 +4815,17 @@ class VisualizationHelper(GLMHelper):
 
                     mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["means"][x_value] = timepoint_mean
                     mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["stds"][x_value] = timepoint_std
+
+                # Calculate mean and std across all timepoints in session
+                mean_and_std_dict_timepoint_avg["means"][x_value] = np.mean(session_meg_data[:,:,:])
+                mean_and_std_dict_timepoint_avg["stds"][x_value] = np.std(session_meg_data[:,:,:])
             
-            # Plot means and stds
+            # Sort by key (session id or distance)
             for timepoint_idx, timepoint_dict in mean_and_std_dict_by_timepoints["timepoint"].items():
                 for data_type, data_dict in timepoint_dict.items():
                     mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx][data_type] = {x_value: data_dict[x_value] for x_value in sorted(data_dict, key=int)}
+            for data_type, data_dict in mean_and_std_dict_timepoint_avg.items():
+                mean_and_std_dict_timepoint_avg[data_type] = {x_value: data_dict[x_value] for x_value in sorted(data_dict, key=int)}
 
             for plot_type in ["means", "stds"]:
                 measure_name = "Mean Value" if plot_type == "means" else "Standard Deviation Value"
@@ -4809,7 +4833,8 @@ class VisualizationHelper(GLMHelper):
                 plt.figure(figsize=(10, 6))
                 for timepoint_number, timepoint_idx in enumerate(mean_and_std_dict_by_timepoints["timepoint"]):
                     plt.plot(list(mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx][plot_type].keys()), list(mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx][plot_type].values()), label=f'{timepoints_ms[timepoint_number]} ms')
-
+                plt.plot(list(mean_and_std_dict_timepoint_avg[plot_type].keys()), list(mean_and_std_dict_timepoint_avg[plot_type].values()), label=f'Average across {self.map_timepoint_idx_to_ms(0)} to {self.map_timepoint_idx_to_ms(self.timepoint_max-self.timepoint_min)}', color="black", linewidth=5)
+                
                 x_label_str = "Days since Session 1" if x_value_days else "Session ID"
                 plt.xlabel(x_label_str)
                 plt.ylabel(measure_name)
@@ -4817,8 +4842,8 @@ class VisualizationHelper(GLMHelper):
                 plt.legend(title="Timepoints (ms)")  
 
                 # Save plot
-                plot_folder = f"data_files/{self.lock_event}/visualizations/meg_data/session_comparison/{plot_type}/subject_{self.subject_id}/{normalization}/"
-                plot_file = f"Session_Comparison_{measure_name}.png"
+                plot_folder = f"data_files/{self.lock_event}/visualizations/meg_data/session_comparison/{plot_type}/{normalization}/"
+                plot_file = f"Session_Comparison_{measure_name}_subject_{self.subject_id}.png"
                 self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
 
     

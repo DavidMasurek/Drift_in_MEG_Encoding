@@ -228,7 +228,7 @@ for run in range(run_pipeline_n_times):
             # Generate meg predictions 
             if generate_predictions_with_GLM:
                 glm_helper.predict_from_mapping_all_sessions(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
-                #glm_helper.predict_from_mapping_all_sessions(fit_measure_storage_distinction="timepoint_sensor_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
+                glm_helper.predict_from_mapping_all_sessions(fit_measure_storage_distinction="timepoint_sensor_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
 
                 #glm_helper.predict_from_mapping_all_sessions(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=True, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
                 #glm_helper.predict_from_mapping_all_sessions(fit_measure_storage_distinction="timepoint_sensor_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
@@ -268,19 +268,19 @@ for run in range(run_pipeline_n_times):
             ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, all_windows_one_plot=all_windows_one_plot, sensor_level=True, include_0_distance=True)  
             
             # Visualize drift topographically with mne based on sensor level data 
-            #####visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=False)  # data_type="self-pred" or "drift"
-            #####visualization_helper.mne_topo_plot_per_sensor(data_type="drift", all_timepoints_combined=False)  
-            #####visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=True)  
-            #####visualization_helper.mne_topo_plot_per_sensor(data_type="drift", all_timepoints_combined=True) 
+            ###visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=False)  # data_type="self-pred" or "drift"
+            ###visualization_helper.mne_topo_plot_per_sensor(data_type="drift", all_timepoints_combined=False)  
+            visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=True)  
+            ###visualization_helper.mne_topo_plot_per_sensor(data_type="drift", all_timepoints_combined=True) 
             ####visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=False, sessions_separate=True)
 
             # Visualize model perspective (values by timepoint)
             ###visualization_helper.new_visualize_model_perspective(before_preprocessing=True)  # plot_norms=normalizations
 
             # Visualize session means and stds
-            ###visualization_helper.visualize_meg_means_stds()
+            #####visualization_helper.visualize_meg_means_stds()
 
-            visualization_helper.visualize_arousal_mean_over_sessions()
+            #####visualization_helper.visualize_arousal_mean_over_sessions()
 
             logger.custom_info("Visualization completed. \n \n")
 
