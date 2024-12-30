@@ -2582,6 +2582,61 @@ class VisualizationHelper(GLMHelper):
         logger.custom_info(f"Subject {self.subject_id}: Differences in days between recording of sessions 1 and 10: {session_diff_1_10}")
 
 
+    def visualize_selected_sensor_positions(self):
+        """
+        Visualizes the positions of the selected MEG sensors on the scalp.
+        """
+        fif_file_path = f'/share/klab/datasets/avs/population_codes/as{self.subject_id}/sensor/filter_0.2_200/saccade_evoked_02_05_.fif'
+        og_evoked = mne.read_evokeds(fif_file_path)[0]
+        fig = og_evoked.plot_sensors(show_names=True, ch_type="mag")
+
+        chosen_sensor_names = [f"MEG{channel_id}" for channel_id in self.chosen_channels]
+        sensor_points = fig.axes[0].collections[0]
+        n_sensors = len(fig.axes[0].texts)
+        text_positions_chosen_chs_by_name = {text.get_text(): text.get_position() for text in fig.axes[0].texts if text.get_text() in chosen_sensor_names}
+
+        # Because of missing allignment: Find indices for dots/collection based on closest text values
+        sensor_positions_from_plot = sensor_points.get_offsets()
+        dot_indices_selected_chs = []
+        for sensor_name, text_pos in text_positions_chosen_chs_by_name.items():
+            closest_distance_dot_idx = (None, None)
+            for dot_idx, dot_pos in enumerate(sensor_positions_from_plot):
+                distance_text_dot = np.linalg.norm(dot_pos - text_pos)
+                if closest_distance_dot_idx[0] is None or distance_text_dot < closest_distance_dot_idx[0]:
+                    closest_distance_dot_idx = distance_text_dot, dot_idx
+            dot_indices_selected_chs.append(closest_distance_dot_idx[1])
+
+        # Change color and size of selected dots
+        dot_colors = sensor_points.get_facecolor()
+        dot_colors[dot_indices_selected_chs] = [1, 0, 0, 1]  # Change to red (RGBA)
+        sensor_points.set_facecolor(dot_colors)
+
+        dot_size = sensor_points.get_sizes()
+        dot_sizes = np.full(shape=n_sensors, fill_value=dot_size)  # previously stored as single number because identical for all, reformat to array
+        dot_sizes[dot_indices_selected_chs] = 100  
+        sensor_points.set_sizes(dot_sizes)
+   
+        # Only keep and modify text for selected sensors
+        for sensor_text in fig.axes[0].texts:
+            sensor_name = sensor_text.get_text()
+            if sensor_name not in chosen_sensor_names:
+                sensor_text.set_text("")  # dont show names of non-selected sensors
+            else:
+                # Adjust font, size and position so that text is below dots
+                sensor_id = sensor_text.get_text()[3:]  # exclude 'MEG'
+                sensor_text.set_text(sensor_id)
+                sensor_text.set_fontsize(11)  
+                sensor_text.set_fontweight('demibold')
+                x, y = sensor_text.get_position()
+                x -= 0.014
+                y -= 0.01
+                sensor_text.set_position((x,y))
+
+        plot_folder =  f"data_files/{self.lock_event}/visualizations/sensor_locs/"
+        plot_file = "sensor_locations.png"
+        self.save_plot_as_file(plt=fig, plot_folder=plot_folder, plot_file=plot_file)
+
+
     def visualize_session_distances(self):
         """
         Visualizes distance session recordings from recording of first session in days for all participants.
