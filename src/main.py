@@ -17,7 +17,7 @@ sys.path.append(str(__location__))
 os.chdir(__location__)
 
 # Choose params
-subject_ids = ["01", "02", "03", "04", "05"]   # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
+subject_ids = ["02"]   # "01", "02", "03", "05"]  # "01", "02", "03", "04", "05" 
 # Subject 03 only contains 3 scenes for cluster 46 in all sessions test sets
 # Subject 05 only contains 4 scenes for cluster 28 in all sessions test sets
 # --> Switched to 3 scenes per cluster for subject 03 and 05
@@ -27,11 +27,11 @@ lock_event = "fixation" # "saccade" "fixation"
 crop_size = 112  # 224 112 (or 100)
 # Size 224 crops not available for subject 03
 
-ann_model = "Alexnet"  # "Alexnet", "Resnet50"
-module_name =  "features.12" # "fc" # Alexnet features.12 has 9216 dimensions; Resnet "avgpool" has 2048 dimensions, "layer4.2.conv3" is last conv layer and has 100000+ flattened dimensions
+ann_model = "Resnet50"  # "Alexnet", "Resnet50"
+module_name =  "avgpool" # "fc" # Alexnet features.12 has 9216 dimensions; Resnet "avgpool" has 2048 dimensions, "layer4.2.conv3" is last conv layer and has 100000+ flattened dimensions
 batch_size = 32
 
-pca_components = 400  # 400 for alexnet features.12 (~65% explained variance); 80 for resnet explain 72%
+pca_components = 80  # 400 for alexnet features.12 (~65% explained variance); 80 for resnet explain 72%
 
 best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 290, "timepoint_max": 329}, 
                                             "02": {"timepoint_min": 290, "timepoint_max": 329},  # source: {"timepoint_min": 195, "timepoint_max": 235}, non source (is it ica?): "02": {"timepoint_min": 290, "timepoint_max": 330},
@@ -90,7 +90,7 @@ else:
 z_score_features_before_pca = False
 use_pca_features = True
 
-use_all_mag_sensors = True
+use_all_mag_sensors = False
 use_ica_cleaned_data = True
 clip_outliers = True
 interpolate_outliers = False  # Currently only implemented for mean_centered_ch_then_global_z! Cuts off everything over +-3 std
@@ -111,12 +111,12 @@ n_scenes_per_cluster = 3
 
 # Source config
 # ! different timepoints processed for V1, V2, V3 recently !
-regions_of_interest = ["V1", "V2", "V3"]  # ["V1", "V2", "V3", "V3A", "V3B", "V3CD", "V4", "V4t", "V6", "V6A", "V7", "V8", "FFC"]
-source_pca_type = "voxels_and_timepoints"  
+regions_of_interest = ["V1", "V2", "V3", "V4", "V6", "V7", "V8"]  # ["V1", "V2", "V3", "V3A", "V3B", "V3CD", "V4", "V4t", "V6", "V6A", "V7", "V8", "FFC"]
+source_pca_type = "voxels"  # voxels_and_timepoints or voxels
 
 source_q_bottom, source_q_top = 0.5, 90.0  # asymmetric, due bias towards positive outliers
-store_result_by_pc = True
-whiten_pcs = True  # whether or not PCs should be scaled to unit variance
+store_result_by_pc = False
+whiten_pcs = False  # whether or not PCs should be scaled to unit variance
 
 assert source_pca_type in ["voxels", "voxels_and_timepoints", None], f"Invalid argument for source_pca_type: {source_pca_type}."
 if store_result_by_pc:
@@ -241,6 +241,10 @@ for run in range(run_pipeline_n_times):
         if visualization:
             visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
 
+
+            # Visualize session distances
+            visualization_helper.visualize_session_distances()
+
             # Visualize meg data with mne
             #visualization_helper.visualize_meg_epochs_mne()
 
@@ -250,27 +254,28 @@ for run in range(run_pipeline_n_times):
 
             # Visualize encoding model performance
             ###visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["train","test"], all_sessions_combined=all_sessions_combined)
-            ###visualization_helper.visualize_self_prediction(fit_measure_type="var_explained_timepoint", pred_splits=["test"], all_sessions_combined=all_sessions_combined)
+            #####visualization_helper.visualize_self_prediction(fit_measure_type="var_explained_timepoint", pred_splits=["test"], all_sessions_combined=all_sessions_combined)
+            #####visualization_helper.visualize_self_prediction(fit_measure_type="var_explained_timepoint", pred_splits=["test"], all_sessions_combined=all_sessions_combined, all_subjects=True)
 
             # Visualize prediction results
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
-            ###visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
+            #visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
             #####visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="pearson_r_timepoint", by_timepoints=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
             # Visuzalize distance based predictions at timepoint scale
             ###visualization_helper.three_dim_timepoint_predictions(subtract_self_pred=subtract_self_pred) 
-            #####visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True)  
+            ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True)  
             # sensor level true:
             ###visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, all_windows_one_plot=all_windows_one_plot, sensor_level=True, include_0_distance=True)  
             
             # Visualize drift topographically with mne based on sensor level data 
             ###visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=False)  # data_type="self-pred" or "drift"
             ###visualization_helper.mne_topo_plot_per_sensor(data_type="drift", all_timepoints_combined=False)  
-            visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=True)  
+            ###visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=True)  
             ###visualization_helper.mne_topo_plot_per_sensor(data_type="drift", all_timepoints_combined=True) 
             ####visualization_helper.mne_topo_plot_per_sensor(data_type="self-pred", all_timepoints_combined=False, sessions_separate=True)
 
@@ -318,31 +323,31 @@ for run in range(run_pipeline_n_times):
 
         if calculate_source_drift:
             dataset_helper = DatasetHelper(subject_id=subject_id, normalizations=normalizations, chosen_channels=meg_channels, lock_event=lock_event, timepoint_min=timepoint_min, timepoint_max=timepoint_max, crop_size=crop_size)
-            extraction_helper = ExtractionHelper(subject_id=subject_id, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, lock_event=lock_event)
+            extraction_helper = ExtractionHelper(subject_id=subject_id, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, lock_event=lock_event, normalizations=normalizations, chosen_channels=meg_channels, timepoint_min=timepoint_min, timepoint_max=timepoint_max, crop_size=crop_size)
             glm_helper = GLMHelper(fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, lock_event=lock_event, ann_model=ann_model, module_name=module_name, batch_size=batch_size, crop_size=crop_size)
             visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
 
             
             # Create one dataset (containing all sessions) for each region of interest (lets start with visual cortex)
-            #####dataset_helper.create_source_meg_dataset(regions_of_interest=regions_of_interest, clip_outliers=clip_outliers, q_bottom=source_q_bottom, q_top=source_q_top)
-            #####if source_pca_type != None:
+            ####dataset_helper.create_source_meg_dataset(regions_of_interest=regions_of_interest, clip_outliers=clip_outliers, q_bottom=source_q_bottom, q_top=source_q_top)
+            if source_pca_type != None:
             # TODO: Change number of PCs in case of source_pca_type (currently too many)
-            #####    dataset_helper.apply_pca_to_voxels(regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)
-
+                dataset_helper.apply_pca_to_voxels(regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)
+            
             # Debug: Plot source meg values      
             #####visualization_helper.new_visualize_model_perspective(plot_norms=normalizations, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)  # , "no_norm"
             ###visualization_helper.plot_ERPs(plot_norms=normalizations, regions_of_interest=regions_of_interest, non_preprocessed=False)  
 
             # Train GLM for each region for each session
-            #####glm_helper.train_mapping(all_sessions_combined=all_sessions_combined, shuffle_train_labels=shuffle_train_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)
+            glm_helper.train_mapping(all_sessions_combined=all_sessions_combined, shuffle_train_labels=shuffle_train_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)
 
             # Generate predictions for each region for each train_session for each pred_session
-            #####glm_helper.predict_from_mapping_source_all_sessions(predict_train_data=False, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, store_result_by_pc=store_result_by_pc, whiten=whiten_pcs)
-
+            glm_helper.predict_from_mapping_source_all_sessions(predict_train_data=False, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, store_result_by_pc=store_result_by_pc, whiten=whiten_pcs)
+        
             # Plot self-prediction timepoint comparison for all regions and drift
             if source_pca_type != "voxels_and_timepoints":
                 visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, result_stored_by_pc=store_result_by_pc, whiten=whiten_pcs)
-                visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)
+                ####visualization_helper.timepoint_window_drift(subtract_self_pred=subtract_self_pred, all_windows_one_plot=all_windows_one_plot, sensor_level=False, include_0_distance=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, whiten=whiten_pcs)
             else:
                 visualization_helper.visualize_source_self_pred_pca(regions_of_interest=regions_of_interest, source_pca_type=source_pca_type, plot_pcs_seperate=store_result_by_pc, whiten=whiten_pcs)
                 ###visualization_helper.visualize_source_drift_pca(include_0_distance=True, regions_of_interest=regions_of_interest, source_pca_type=source_pca_type)
@@ -361,7 +366,5 @@ if plot_distance_drift_all_subjects:
 
 logger.custom_info("Pipeline completed.")
 
-
-logger.warning("Using saccade for .fif file regardless of used lock_event for session date differences because files does not exist for fixations.")
 if use_ica_cleaned_data:
     logger.warning("idx to ms timepoints mapping in plots is currently based on ica cleaned metadata. Validation is required before generalizing to other data files.")
