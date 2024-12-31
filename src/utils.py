@@ -18,7 +18,7 @@ import random
 from matplotlib.lines import Line2D  
 from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes, zoomed_inset_axes, mark_inset
 from collections import defaultdict, Counter
 from typing import Tuple, Dict
 import time
@@ -2582,6 +2582,105 @@ class VisualizationHelper(GLMHelper):
         logger.custom_info(f"Subject {self.subject_id}: Differences in days between recording of sessions 1 and 10: {session_diff_1_10}")
 
 
+    def visualize_timepoint_performance_across_session(self):
+        """
+        Visualizes the performance for each timepoint model averaged across sessions for all participants, for the full timespan and the zoom-in on the selected windows.
+        """
+        assert self.timepoint_min == 0 and self.timepoint_max == 650, "Function requires full range of timepoint encoding values."
+        subject_ids = ["01", "02", "03", "04", "05"]
+        n_subjects = len(subject_ids)
+
+        for color_mean in ["dimgray"]:  # ["#8da0cb", "lightsteelblue", "lightseagreen", "lavender", "lightgray", "silver", "#FFC8A2", "peachpuff", "navajowhite"]
+            # N rows for n subjects, each row with the full windowand the zoom in
+            fig, axes = plt.subplots(nrows=n_subjects, ncols=2,
+                                figsize=(10, 4 * n_subjects),
+                                sharex=False,
+                                sharey='col',
+                                dpi=1000)
+
+            for subj_idx, subj_id in enumerate(subject_ids):
+                # Load preds (all timepoints)
+                storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{subj_id}/norm_global_robust_scaling/"
+                json_storage_file = f"var_explained_timepoints_dict.json"
+                json_storage_path = os.path.join(storage_folder, json_storage_file)
+                with open(json_storage_path, 'r') as file:
+                    session_fit_measures = json.load(file)
+
+                # Collect self pred fit_measures for timepoint models
+                fit_measures_by_session_by_timepoint = {"session": {}}
+                for session_id in session_fit_measures['session_mapping']:
+                    fit_measures_by_session_by_timepoint["session"][session_id] = {"timepoint":{}}
+                    for timepoint, fit_measure_timepoint in session_fit_measures['session_mapping'][session_id]["session_pred"][session_id]["timepoint"].items():
+                        fit_measures_by_session_by_timepoint["session"][session_id]["timepoint"][timepoint] = fit_measure_timepoint
+                num_timepoints = len([timepoint for timepoint in fit_measures_by_session_by_timepoint["session"]["1"]["timepoint"]])
+
+                # Average timepoint preds over sessions
+                all_timepoints_in_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in list(range(num_timepoints))]
+                timepoint_avg_loss_list = []
+                for timepoint in range(num_timepoints):
+                    fit_measures = []
+                    for session in fit_measures_by_session_by_timepoint["session"]:
+                        timepoint_session_loss = fit_measures_by_session_by_timepoint["session"][session]["timepoint"][str(timepoint)]
+                        fit_measures.append(timepoint_session_loss)
+                    avg_loss = np.sum(fit_measures) / len(fit_measures)
+                    timepoint_avg_loss_list.append(avg_loss)
+
+                # Begin plotting for subject
+                ax_full = axes[subj_idx][0]
+                ax_zoom = axes[subj_idx][1]
+                
+                # Each row is labeled with participant, columns are labeled once with Full window and zoom in
+                ax_full.set_ylabel(f'P{subj_id[1]}')
+                if subj_idx == 0:
+                    ax_full.set_title('Full Time Window')
+                    ax_zoom.set_title('Zoom In')
+
+            
+                # Full time window axis
+                ax_full.bar(all_timepoints_in_ms, timepoint_avg_loss_list, width=1.8, color='royalblue', alpha=0.8)
+                #ax_full.plot(all_timepoints_in_ms, timepoint_avg_loss_list, color='royalblue')
+                ax_full.tick_params(left=False, bottom=False) 
+                ax_full.spines['top'].set_visible(False)
+                ax_full.spines['right'].set_visible(False)
+                ax_full.spines['bottom'].set_visible(False)
+                ax_full.grid(color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+                
+                # Show which range is zoomed in by shading or a rectangle
+                selected_timepoints_in_ms = all_timepoints_in_ms[290:330]
+                start_zoom, end_zoom = selected_timepoints_in_ms[0], selected_timepoints_in_ms[-1]
+                ax_full.axvspan(start_zoom, end_zoom, color='gray', alpha=0.3)
+
+                # Zoomed-in axis (right)
+                timepoint_avg_loss_list_zoom = timepoint_avg_loss_list[290:330]
+                ax_zoom.bar(selected_timepoints_in_ms, timepoint_avg_loss_list_zoom, width=1.9, color='royalblue', alpha=0.8)
+                #ax_zoom.plot(selected_timepoints_in_ms, timepoint_avg_loss_list[290:330], color='royalblue')
+                ax_zoom.tick_params(left=False, bottom=False) 
+                ax_zoom.spines['top'].set_visible(False)
+                ax_zoom.spines['right'].set_visible(False)
+                ax_zoom.spines['bottom'].set_visible(False)
+                ax_zoom.grid(color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+                mean_performance_zoom = np.mean(timepoint_avg_loss_list_zoom)
+                ax_zoom.axhline(mean_performance_zoom, color=color_mean, linestyle='--', linewidth=1, alpha=0.45)
+                ax_zoom.annotate(
+                    f"μ≈{mean_performance_zoom:.3f}",
+                    xy=(selected_timepoints_in_ms[0], mean_performance_zoom+0.001),   
+                    xytext=(selected_timepoints_in_ms[0]-3, mean_performance_zoom+0.001),  
+                    textcoords='data',
+                    ha='left', va='center',
+                    color=color_mean,
+                    alpha=0.75
+                )
+
+            fig.supxlabel("Time relative to fixation onset (ms)")
+            fig.supylabel("Variance Explained (R²)")
+            plt.tight_layout()
+            
+            plot_folder =  f"data_files/{self.lock_event}/visualizations/final_form/timepoint_encoding_all_sessions/subject_{self.subject_id}"
+            plot_file = f"timepoint_model_comparison_{color_mean}.png"
+            self.save_plot_as_file(plt=fig, plot_folder=plot_folder, plot_file=plot_file)
+            plt.close()
+
+
     def visualize_selected_sensor_positions(self):
         """
         Visualizes the positions of the selected MEG sensors on the scalp.
@@ -3788,18 +3887,22 @@ class VisualizationHelper(GLMHelper):
                 def plot_timepoint_fit_measure(timepoint_loss_list:list, num_timepoints:int, session_id:str=None, sensor_name:str=None, glaser_region:str=None, pca_folder:str="", pc_num:str=None):
                     plt.figure(figsize=(10, 6))
                     timepoints_in_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in list(range(num_timepoints))]
-                    #plt.bar(timepoints_in_ms, timepoint_loss_list, color='blue')
-                    #timepoints_indices = [timepoint_idx for timepoint_idx in list(range(num_timepoints))]
                     plt.bar(timepoints_in_ms, timepoint_loss_list, color='blue', width=1.6)
-                    #plt.bar(list(range(num_timepoints)), timepoint_loss_list, color='blue')
-                    #logger.custom_info(f"list(range(num_timepoints): {list(range(num_timepoints))}")
                     session_subtitle = "Averaged across all Sessions, predicting themselves" if session_id is None else f"Session {session_id}, predicting iteself"
                     sensor_subtitle = "Averaged across all sensors" if sensor_name is None else f"Sensor {sensor_name}"
                     region_subtitle = "" if glaser_region is None else f"Glaser region {glaser_region}"
-                    plt.title(f'{type_of_fit_measure} per Timepoint Model. \n {region_subtitle} {sensor_subtitle} {session_subtitle}.')
+                    #plt.title(f'{type_of_fit_measure} per Timepoint Model. \n {region_subtitle} {sensor_subtitle} {session_subtitle}.')
+                    
                     plt.xlabel(f'Time relative to {self.lock_event} onset in ms')
                     plt.ylabel(f'{type_of_fit_measure}')
-                    plt.grid(True)
+                    plt.tick_params(left=False, bottom=False) 
+
+                    ax = plt.gca()
+                    ax.spines['top'].set_visible(False)
+                    ax.spines['right'].set_visible(False)
+
+                    plt.grid(color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+                    plt.tight_layout()
 
                     # Save the plot to a file
                     sensor_folder_addition = f"/sensor_level/{sensor_name}" if sensor_name is not None else ""
@@ -3829,8 +3932,8 @@ class VisualizationHelper(GLMHelper):
 
                     logger.custom_info(f"num_timepoints: {num_timepoints}")
 
-                    timepoint_average_fit_measure = {}
                     if not separate_plots:
+                        timepoint_avg_loss_list = []
                         # Plot results averaged over all sessions
                         for timepoint in range(num_timepoints):
                             # Calculate average over all within session predictions for this timepoint
@@ -3839,9 +3942,7 @@ class VisualizationHelper(GLMHelper):
                                 timepoint_session_loss = fit_measures_by_session_by_timepoint["session"][session]["timepoint"][str(timepoint)]
                                 fit_measures.append(timepoint_session_loss)
                             avg_loss = np.sum(fit_measures) / len(fit_measures)
-                            timepoint_average_fit_measure[timepoint] = avg_loss
-                        timepoint_avg_loss_list = [timepoint_average_fit_measure[timepoint] for timepoint in timepoint_average_fit_measure]
-
+                            timepoint_avg_loss_list.append(avg_loss)
                         plot_timepoint_fit_measure(timepoint_loss_list=timepoint_avg_loss_list, num_timepoints=num_timepoints, sensor_name=sensor_name, glaser_region=glaser_region, pca_folder=pca_folder, pc_num=pc_num)
                     else:
                         for session_id in fit_measures_by_session_by_timepoint["session"]:

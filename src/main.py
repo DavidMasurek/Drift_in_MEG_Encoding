@@ -27,17 +27,17 @@ lock_event = "fixation" # "saccade" "fixation"
 crop_size = 112  # 224 112 (or 100)
 # Size 224 crops not available for subject 03
 
-ann_model = "Resnet50"  # "Alexnet", "Resnet50"
-module_name =  "avgpool" # "fc" # Alexnet features.12 has 9216 dimensions; Resnet "avgpool" has 2048 dimensions, "layer4.2.conv3" is last conv layer and has 100000+ flattened dimensions
+ann_model = "Alexnet"  # "Alexnet", "Resnet50"
+module_name =  "features.12" # "fc" # Alexnet features.12 has 9216 dimensions; Resnet "avgpool" has 2048 dimensions, "layer4.2.conv3" is last conv layer and has 100000+ flattened dimensions
 batch_size = 32
 
-pca_components = 80  # 400 for alexnet features.12 (~65% explained variance); 80 for resnet explain 72%
+pca_components = 400  # 400 for alexnet features.12 (~65% explained variance); 80 for resnet explain 72%
 
-best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 290, "timepoint_max": 329}, 
-                                            "02": {"timepoint_min": 290, "timepoint_max": 329},  # source: {"timepoint_min": 195, "timepoint_max": 235}, non source (is it ica?): "02": {"timepoint_min": 290, "timepoint_max": 330},
-                                            "03": {"timepoint_min": 290, "timepoint_max": 329},
-                                            "04": {"timepoint_min": 290, "timepoint_max": 329},
-                                            "05": {"timepoint_min": 290, "timepoint_max": 329},},
+best_timepoints_by_subject = {"fixation":  {"01": {"timepoint_min": 0, "timepoint_max": 650}, # default 290 to 329
+                                            "02": {"timepoint_min": 0, "timepoint_max": 650},  # source: {"timepoint_min": 195, "timepoint_max": 235}, non source (is it ica?): "02": {"timepoint_min": 290, "timepoint_max": 330},
+                                            "03": {"timepoint_min": 0, "timepoint_max": 650},
+                                            "04": {"timepoint_min": 0, "timepoint_max": 650},
+                                            "05": {"timepoint_min": 0, "timepoint_max": 650},},
                             # ! Saccade: Currently testing smaller windows due to sensor-level encoding differences.
                             # Best overall: 460 to 490
                               "saccade":   {"01": {"timepoint_min": 460, "timepoint_max": 490},  # Best: 465 to 495; Old range: "01": {"timepoint_min": 425, "timepoint_max": 530}
@@ -228,7 +228,7 @@ for run in range(run_pipeline_n_times):
             # Generate meg predictions 
             if generate_predictions_with_GLM:
                 glm_helper.predict_from_mapping_all_sessions(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
-                glm_helper.predict_from_mapping_all_sessions(fit_measure_storage_distinction="timepoint_sensor_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
+                #glm_helper.predict_from_mapping_all_sessions(fit_measure_storage_distinction="timepoint_sensor_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
 
                 #glm_helper.predict_from_mapping_all_sessions(fit_measure_storage_distinction=fit_measure_storage_distinction, predict_train_data=True, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
                 #glm_helper.predict_from_mapping_all_sessions(fit_measure_storage_distinction="timepoint_sensor_level", predict_train_data=False, all_sessions_combined=all_sessions_combined, shuffle_test_labels=shuffle_test_labels, downscale_features=downscale_features)
@@ -241,9 +241,11 @@ for run in range(run_pipeline_n_times):
         if visualization:
             visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
 
+            visualization_helper.visualize_timepoint_performance_across_session()
+
             #visualization_helper.visualize_session_distances()
 
-            visualization_helper.visualize_selected_sensor_positions()
+            #visualization_helper.visualize_selected_sensor_positions()
 
             # Visualize meg data with mne
             #visualization_helper.visualize_meg_epochs_mne()
@@ -262,7 +264,7 @@ for run in range(run_pipeline_n_times):
             #visualization_helper.visualize_GLM_results(only_distance=True)
             ###visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=[], var_explained=True)
             #visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_sensors_timepoint", by_timepoints=True, separate_plots=True)
-            #####visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=True)
+            #visualization_helper.visualize_GLM_results(fit_measure_type="var_explained_timepoint", by_timepoints=True, separate_plots=False)
             ###visualization_helper.visualize_GLM_results(fit_measure_type="pearson_r_timepoint", by_timepoints=True, separate_plots=True)
             #visualization_helper.visualize_GLM_results(only_distance=True, omit_sessions=["4","10"], var_explained=False)
 
