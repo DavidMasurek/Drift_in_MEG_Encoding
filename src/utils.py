@@ -1,5 +1,7 @@
 import os
 import sys
+import logging
+import random
 import json
 import cv2
 import h5py
@@ -13,12 +15,12 @@ import mne
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib import colors
-import logging
-import random
 from matplotlib.lines import Line2D  
+from matplotlib.gridspec import GridSpec
 from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes, zoomed_inset_axes, mark_inset
+import seaborn as sns
 from collections import defaultdict, Counter
 from typing import Tuple, Dict
 import time
@@ -2580,23 +2582,24 @@ class VisualizationHelper(GLMHelper):
         session_diff_1_10 = session_diffs["1"]["10"]
 
         logger.custom_info(f"Subject {self.subject_id}: Differences in days between recording of sessions 1 and 10: {session_diff_1_10}")
-
+        
 
     def visualize_timepoint_performance_across_session(self):
         """
         Visualizes the performance for each timepoint model averaged across sessions for all participants, for the full timespan and the zoom-in on the selected windows.
         """
         assert self.timepoint_min == 0 and self.timepoint_max == 650, "Function requires full range of timepoint encoding values."
+        min_idx_peak, max_idx_peak = 290, 329
         subject_ids = ["01", "02", "03", "04", "05"]
         n_subjects = len(subject_ids)
 
         for color_mean in ["dimgray"]:  # ["#8da0cb", "lightsteelblue", "lightseagreen", "lavender", "lightgray", "silver", "#FFC8A2", "peachpuff", "navajowhite"]
             # N rows for n subjects, each row with the full windowand the zoom in
-            fig, axes = plt.subplots(nrows=n_subjects, ncols=2,
-                                figsize=(10, 4 * n_subjects),
-                                sharex=False,
-                                sharey='col',
-                                dpi=1000)
+            fig, axes = plt.subplots(nrows=n_subjects, ncols=3,
+                                figsize=(15, 4 * n_subjects),
+                                sharex=False, sharey=False,
+                                dpi=100)
+            gs = GridSpec(n_subjects, 3, figure=fig, wspace=0.4, hspace=0.4)
 
             for subj_idx, subj_id in enumerate(subject_ids):
                 # Load preds (all timepoints)
@@ -2626,17 +2629,22 @@ class VisualizationHelper(GLMHelper):
                     timepoint_avg_loss_list.append(avg_loss)
 
                 # Begin plotting for subject
-                ax_full = axes[subj_idx][0]
-                ax_zoom = axes[subj_idx][1]
-                
-                # Each row is labeled with participant, columns are labeled once with Full window and zoom in
-                ax_full.set_ylabel(f'P{subj_id[1]}')
-                if subj_idx == 0:
-                    ax_full.set_title('Full Time Window')
-                    ax_zoom.set_title('Zoom In')
 
-            
-                # Full time window axis
+                # Get axes and manually manage sharing of y-axis so that the scale is shared within columns and between column 2 and 3
+                ax_full, ax_zoom, ax_sess = axes[subj_idx]
+                ax_full.set_ylabel(f'P{subj_id[1]}', fontsize=10)
+                if subj_idx > 0:
+                    ax_full.sharey(axes[0, 0])
+                    ax_zoom.sharey(axes[0, 1])
+                    ax_sess.sharey(axes[0, 1])
+                else:
+                    # Each row is labeled with participant, columns are labeled once with Full window and zoom in
+                    ax_full.set_title('Full Time Window', fontsize=12)
+                    ax_zoom.set_title('Zoom In', fontsize=12)
+                    ax_sess.set_title('Sessions Comparison Within Zoom In', fontsize=12)
+                    ax_sess.sharey(axes[0, 1])
+
+                # Full time window axis (left)
                 ax_full.bar(all_timepoints_in_ms, timepoint_avg_loss_list, width=1.8, color='royalblue', alpha=0.8)
                 #ax_full.plot(all_timepoints_in_ms, timepoint_avg_loss_list, color='royalblue')
                 ax_full.tick_params(left=False, bottom=False) 
@@ -2646,12 +2654,12 @@ class VisualizationHelper(GLMHelper):
                 ax_full.grid(color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
                 
                 # Show which range is zoomed in by shading or a rectangle
-                selected_timepoints_in_ms = all_timepoints_in_ms[290:330]
+                selected_timepoints_in_ms = all_timepoints_in_ms[min_idx_peak:max_idx_peak+1]
                 start_zoom, end_zoom = selected_timepoints_in_ms[0], selected_timepoints_in_ms[-1]
                 ax_full.axvspan(start_zoom, end_zoom, color='gray', alpha=0.3)
 
-                # Zoomed-in axis (right)
-                timepoint_avg_loss_list_zoom = timepoint_avg_loss_list[290:330]
+                # Zoomed-in axis (middle)
+                timepoint_avg_loss_list_zoom = timepoint_avg_loss_list[min_idx_peak:max_idx_peak+1]
                 ax_zoom.bar(selected_timepoints_in_ms, timepoint_avg_loss_list_zoom, width=1.9, color='royalblue', alpha=0.8)
                 #ax_zoom.plot(selected_timepoints_in_ms, timepoint_avg_loss_list[290:330], color='royalblue')
                 ax_zoom.tick_params(left=False, bottom=False) 
@@ -2668,11 +2676,62 @@ class VisualizationHelper(GLMHelper):
                     textcoords='data',
                     ha='left', va='center',
                     color=color_mean,
-                    alpha=0.75
                 )
 
-            fig.supxlabel("Time relative to fixation onset (ms)")
-            fig.supylabel("Variance Explained (R²)")
+                # Session comparison within zoomed in window (right)
+                # Average session preds over peak timepoints
+                session_avg_loss_list = []
+                for session in fit_measures_by_session_by_timepoint["session"]:
+                    fit_measures = []
+                    for timepoint_idx in range(min_idx_peak, max_idx_peak+1):
+                        timepoint_session_loss = fit_measures_by_session_by_timepoint["session"][session]["timepoint"][str(timepoint_idx)]
+                        fit_measures.append(timepoint_session_loss)
+                    avg_loss = np.sum(fit_measures) / len(fit_measures)
+                    session_avg_loss_list.append(avg_loss)
+
+                # Determine cutoff for session exclusion
+                avg_all_sessions = np.sum(session_avg_loss_list) / len(session_avg_loss_list)
+                std_all_sessions = np.std(session_avg_loss_list)
+                cutoff = avg_all_sessions - (std_all_sessions*1.5) 
+                cutoff = 0 if cutoff < 0 else cutoff  # the minimum cutoff is 0
+                # print(f"subject {subj_id} cutoff: {cutoff}")
+                # print(f"session_avg_loss_list: {session_avg_loss_list}")
+
+                session_ids_int = [int(session_id) for session_id in range(1, len(session_avg_loss_list)+1)]
+                ax_sess.bar(session_ids_int, session_avg_loss_list, width=0.9, color='royalblue', alpha=0.8)
+                ax_sess.set_xticks(session_ids_int)
+                ax_sess.tick_params(left=False, bottom=False) 
+                ax_sess.spines['top'].set_visible(False)
+                ax_sess.spines['right'].set_visible(False)
+                ax_sess.spines['bottom'].set_visible(False)
+                ax_sess.grid(color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+                
+                ax_sess.axhline(cutoff, color='indianred', linestyle='--', linewidth=1.25, alpha=0.75)
+                cutoff_annotation = f"cutoff≈{cutoff:.3f}" if cutoff != 0 else f"cutoff={cutoff:.3f}"
+                ax_sess.annotate(
+                    cutoff_annotation,
+                    xy=(session_ids_int[0], cutoff+0.001),   
+                    xytext=(session_ids_int[0]-0.5, cutoff+0.001),  
+                    textcoords='data',
+                    ha='left', va='center',
+                    color='indianred',
+                )
+
+            # Labels: y-axis: shared across all subfigures. x-axis: shared across columns 1 and 2, separate for 3
+            ax_full.set_xlabel("Time Relative To Fixation Onset (ms)", fontsize=12)
+            ax_zoom.set_xlabel("Time Relative To Fixation Onset (ms)", fontsize=12)
+            ax_sess.set_xlabel("Session ID", fontsize=12)
+            # fig.supxlabel("Time Relative To Fixation Onset (ms)", x=0.33, fontsize=12, ha='center')  # Shared for columns 1 and 2
+            # fig.supxlabel("Session ID", x=0.75, fontsize=12, ha='center')  # Shared for column 3
+            # fig.text(
+            #     0.33,  # x-position in figure space (normalized: 0 = left, 1 = right)
+            #     0.05,  # y-position in figure space (normalized: 0 = bottom, 1 = top)
+            #     "Time Relative To Fixation Onset (ms)",
+            #     ha='center',  # Center the text horizontally
+            #     fontsize=12
+            # )
+            # # fig.supxlabel("Time Relative To Fixation Onset (ms)", fontsize=12)
+            fig.supylabel("Variance Explained (R²)", fontsize=12)
             plt.tight_layout()
             
             plot_folder =  f"data_files/{self.lock_event}/visualizations/final_form/timepoint_encoding_all_sessions/subject_{self.subject_id}"
@@ -3563,41 +3622,65 @@ class VisualizationHelper(GLMHelper):
             if all_subjects:
                 # Generate a single plot, combining the results of all subjects
                 all_subject_ids = ["01", "02", "03", "04", "05"]
+                markers = ["o", "s", "D", "^", "v"]  # circle, square, diamond, triangle, inverted triangle
                 colormap = cm.viridis  
                 colors = colormap(np.linspace(0, 1, num=len(all_subject_ids)))
                 for normalization in self.normalizations:
                     plt.figure(figsize=(10, 6))
-                    for subject_idx, subject_id in enumerate(["01", "02", "03", "04", "05"]):
+                    ax = plt.gca()
+                    for subject_idx, subject_id in enumerate(all_subject_ids):
                         self_pred_measures = {"sessions": {}}
-                        storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{subject_id}/norm_{normalization}/"
-                        json_storage_file = f"var_explained_timepoints_dict.json"
+                        storage_folder = f"data_files/{self.lock_event}/{fit_measure_type}s/{self.ann_model}/{self.module_name}/subject_{subject_id}/norm_{normalization}/"
+                        json_storage_file = f"{fit_measure_type}s_dict.json"
                         json_storage_path = os.path.join(storage_folder, json_storage_file)
                         with open(json_storage_path, 'r') as file:
                             session_fit_measures_timepoints = json.load(file)
-                        session_fit_measures = self.average_timepoint_data_per_session(session_fit_measures_timepoints)
 
+                        # extract self session preds
+                        session_fit_measures = self.average_timepoint_data_per_session(session_fit_measures_timepoints)
+                        session_self_pred_fit_measures = self.resursive_defaultdict()
                         for session_id in session_fit_measures['session_mapping']:
                             fit_measure = session_fit_measures['session_mapping'][session_id]['session_pred'][session_id]
-                            self_pred_measures["sessions"][session_id] = fit_measure
-                        mean_across_sessions = np.mean(list(self_pred_measures["sessions"].values()))
+                            session_self_pred_fit_measures["sessions"][session_id] = fit_measure
+
+                        session_ids_ints = [int(session_id) for session_id in self_pred_measures["sessions"].keys()]
+                        session_vals = list(self_pred_measures["sessions"].values())
                         
-                        # Add values of current subject to the plot
                         color = colors[subject_idx]
-                        plt.plot(self_pred_measures["sessions"].keys(), self_pred_measures["sessions"].values(), color=color, label=f'Subject {subject_id}', linewidth=3)
-                        plt.axhline(mean_across_sessions, color=color, linestyle='--')
+                        # plt.plot(self_pred_measures["sessions"].keys(), self_pred_measures["sessions"].values(), color=color, label=f'Subject {subject_id}', linewidth=3)
+                        plt.plot(session_ids_ints, session_vals, 
+                                color=color,
+                                marker=markers[subject_idx],
+                                label=f'P{subject_id[1]}',
+                                linewidth=3,
+                                alpha=0.9
+                        )
 
-                    plt.xlabel('Session ID')
-                    plt.ylabel('Variance Explained')
-                    plt.grid(True)
-                    plt.legend(loc='upper right')
+                        # add mean
+                        mean_subj = np.mean(session_vals)
+                        ax.axhline(
+                            y=mean_subj,
+                            color=color,
+                            linestyle='--',
+                            alpha=0.7,
+                        )
 
-                    plt.title(f'Encoding performance for all sessions and subjects, averaged across timepoints. \n Norm {normalization}, {date.today()}')
-                    plt.grid(True)
+                    plt.xlabel('Session ID', fontsize=12)
+                    plt.ylabel('Variance Explained', fontsize=12)
+                    plt.xticks(session_ids_ints)
+                    plt.tick_params(left=False, bottom=False) 
+                    plt.grid(color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+                    plt.legend(loc='upper right', fontsize=10)
+
+                    ax = plt.gca()
+                    ax.spines['top'].set_visible(False)
+                    ax.spines['right'].set_visible(False)
 
                     # Save the plot to a file
-                    plot_folder = f"data_files/{self.lock_event}/visualizations/encoding_performance/all_subjects/norm_{normalization}"
-                    plot_file = f"var_explained_encoding_all_subjects_all_sessions_{normalization}.png"
+                    plot_folder = f"data_files/{self.lock_event}/visualizations/encoding_performance/subject_{self.subject_id}/norm_{normalization}"
+                    plot_file = f"new_var_explained_encoding_all_subjects_all_sessions.png"
                     self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+
             else:
                 for normalization in self.normalizations:
                     self_pred_measures = {}

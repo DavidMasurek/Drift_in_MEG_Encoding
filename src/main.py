@@ -241,11 +241,11 @@ for run in range(run_pipeline_n_times):
         if visualization:
             visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
 
-            visualization_helper.visualize_timepoint_performance_across_session()
-
             #visualization_helper.visualize_session_distances()
 
             #visualization_helper.visualize_selected_sensor_positions()
+
+            visualization_helper.visualize_timepoint_performance_across_session()
 
             # Visualize meg data with mne
             #visualization_helper.visualize_meg_epochs_mne()
@@ -257,7 +257,6 @@ for run in range(run_pipeline_n_times):
             # Visualize encoding model performance
             ###visualization_helper.visualize_self_prediction(var_explained=True, pred_splits=["train","test"], all_sessions_combined=all_sessions_combined)
             #####visualization_helper.visualize_self_prediction(fit_measure_type="var_explained_timepoint", pred_splits=["test"], all_sessions_combined=all_sessions_combined)
-            #####visualization_helper.visualize_self_prediction(fit_measure_type="var_explained_timepoint", pred_splits=["test"], all_sessions_combined=all_sessions_combined, all_subjects=True)
 
             # Visualize prediction results
             #visualization_helper.visualize_GLM_results(by_timepoints=False, only_distance=False, omit_sessions=[], separate_plots=True)

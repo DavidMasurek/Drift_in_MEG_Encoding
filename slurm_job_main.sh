@@ -4,7 +4,7 @@
 
 #SBATCH -p klab-cpu  # klab-cpu, klab-gpu 
 #SBATCH -n 1
-#SBATCH -c 16
+#SBATCH -c 32
 #SBATCH --mem 30G
 #SBATCH --gres=gpu:0  # 0, 1
 
