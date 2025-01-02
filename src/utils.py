@@ -13,6 +13,7 @@ import imageio
 from PIL import Image
 import mne
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 from matplotlib import cm
 from matplotlib import colors
 from matplotlib.lines import Line2D  
@@ -68,7 +69,7 @@ class BasicOperationsHelper:
         #logger.custom_debug(f"all_ms_values linspace: {self.all_ms_values}")
 
        
-    def perform_permutation_test(self, x_array, y_array, n_permutations=10000, direction:str="left", generate_plot:bool=False):
+    def perform_permutation_test(self, x_array, y_array, n_permutations=10000, direction:str="left", generate_plot:bool=False, final_plots:bool=False):
         assert direction in ["left", "right", "both"], f"Unrecognized direction argument: {direction}"
 
         def correlation_statistic(x,y):
@@ -127,6 +128,9 @@ class BasicOperationsHelper:
             #print(f"p_scipy: {p_scipy}")
 
             return p_value, permutation_fig, permutation_ax
+        elif final_plots:
+            # In the final plots for the thesis, the permutation plots are integrated into larger plots. We only need the specific values
+            return p_value, null_distribution_corrs, empirical_corr, p_0_05_corr
         else:
             return p_value
 
@@ -2574,7 +2578,7 @@ class VisualizationHelper(GLMHelper):
 
         ### Calculate sessions which should be omitted from drift analysis ###
         # TODO: Adjust session omittance in RDM drift etc based on this result
-        self.omit_sessions = self.determine_excluded_drift_sessions()
+        self.omit_sessions, self.avg_all_sessions = self.determine_excluded_drift_sessions(return_avg=True)
         
 
         # investigate session day differences
@@ -2584,9 +2588,126 @@ class VisualizationHelper(GLMHelper):
         logger.custom_info(f"Subject {self.subject_id}: Differences in days between recording of sessions 1 and 10: {session_diff_1_10}")
         
 
-    def visualize_timepoint_performance_across_session(self):
+    def visualize_drift_summary_subj_2_without_sess_4(self):
         """
-        Visualizes the performance for each timepoint model averaged across sessions for all participants, for the full timespan and the zoom-in on the selected windows.
+        Creates a summary drift plot similar to a column in visualize_drift_summary(), for subject 2 with (repeated) session 4 excluded.
+        """
+        assert self.timepoint_min == 290 and self.timepoint_max == 329, "Function requires peak timepoint range of 290-329."
+        normalization = "global_robust_scaling"
+        fig, axes = plt.subplots(nrows=1, ncols=2,
+                                figsize=(10, 4),
+                                sharex=False, sharey=False,
+                                dpi=100)
+
+    def visualize_drift_summary(self):
+        """
+        Visualizes drift and permutation test for all subjects.
+        """
+        assert self.timepoint_min == 290 and self.timepoint_max == 329, "Function requires peak timepoint range of 290-329."
+        subject_ids = ["01", "02", "03", "04", "05"]  # , "03", "04", "05"
+        n_subjects = len(subject_ids)
+        normalization = "global_robust_scaling"
+
+        fig, axes = plt.subplots(nrows=n_subjects, ncols=2,
+                                figsize=(10, 4 * n_subjects),
+                                sharex=False, sharey=False,
+                                dpi=100)
+                                
+        for subj_idx, subj_id in enumerate(subject_ids):   
+            ax_drift, ax_permut = axes[subj_idx]    
+    
+            # Each row is labeled with participant, columns are labeled once 
+            ax_drift.set_ylabel(f'P{subj_id[1]}', fontsize=10)    
+            if subj_idx == 0:
+                ax_drift.set_title('Cross-Session Prediction Performances By Distance', fontsize=12)
+                ax_permut.set_title('Permutation Test Results', fontsize=12)
+            else:
+                # share/align x-axis along permutation column
+                ax_permut.sharex(axes[0, 1])
+                ax_permut.sharey(axes[0, 1])
+
+            # Load timepoint-based variance explained
+            storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{subj_id}/norm_{normalization}/"
+            json_storage_file = f"var_explained_timepoints_dict.json"
+            json_storage_path = os.path.join(storage_folder, json_storage_file)
+            with open(json_storage_path, 'r') as file:
+                fit_measures_by_session_by_timepoint = json.load(file)
+            
+            # Exclude sessions with insufficient encoding performance
+            excluded_sessions = self.determine_excluded_drift_sessions(subject_id=subj_id)
+            fit_measures_by_session_by_timepoint = self.omit_selected_sessions_from_fit_measures(fit_measures_by_session=fit_measures_by_session_by_timepoint, omitted_sessions=excluded_sessions, sensors_seperated=False)
+
+            # Plot the drift for the all timepoint values combined/averaged aswell
+            fit_measures_by_distances_all_timepoints = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False, include_0_distance=True, subject_id=subj_id)
+           
+            x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances_all_timepoints, losses_averaged_within_distances=False)
+
+            # Calculate trend line, don't include the self predictions in the trend line calculation (i.e. filter x and y values where x = 0)
+            filtered_tuple_values = [x_y_pair for x_y_pair in zip(x_values, y_values) if x_y_pair[0] != 0]
+            filtered_x_values, filtered_y_values = zip(*filtered_tuple_values)
+            filtered_x_values = list(filtered_x_values)
+            filtered_y_values = list(filtered_y_values)
+
+            filtered_x_values_set = np.array(list(set(filtered_x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
+            slope, intercept, r_value, _, std_err = linregress(x=filtered_x_values, y=filtered_y_values)
+            trend_line = slope * filtered_x_values_set + intercept
+            r_value_str = "{:.3f}".format(r_value)  # limit to three decimals
+
+            # Plot scatter points and graph (left)
+            ax_drift.scatter(filtered_x_values, filtered_y_values, color='royalblue', s=20)
+            ax_drift.scatter(x_values[x_values == 0], y_values[x_values == 0], marker='s', s=20, edgecolors='gray', facecolors='none')  # , facecolors='gray')  # Different styling for x=0 (not relevant for drift correlation)
+            ax_drift.axhline(0, color='black', linestyle='--', linewidth=1, alpha=0.3)
+            ax_drift.plot(filtered_x_values_set, trend_line, color='green', linestyle='-', linewidth=2)
+
+            ax_drift.tick_params(left=False, bottom=False) 
+            ax_drift.spines['top'].set_visible(False)
+            ax_drift.spines['right'].set_visible(False)
+            ax_drift.grid(color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+            ax_drift.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{x:.3f}'))  # limit y-axis tick labels to 3 decimal places
+            
+            # Plot permutation test (right)
+            permutation_p_value, null_distribution_corrs, empirical_corr, p_0_05_corr = self.perform_permutation_test(filtered_x_values, filtered_y_values, n_permutations=10000, generate_plot=False, final_plots=True)
+           
+            # Null distribution of correlations
+            ax_permut.hist(null_distribution_corrs, bins=30, color='lightgray', density=True)
+            # Vertical line for the empirical correlation, zero correlation and dashed line for p 0.05 correlation
+            ax_permut.axvline(empirical_corr, color='green', linewidth=2)
+            ax_permut.axvline(0, color='black', linestyle='--', linewidth=1, alpha=0.7)
+            ax_permut.axvline(p_0_05_corr, color='red', linestyle='--', linewidth=2)
+
+            fontweight = 'bold' if permutation_p_value < 0.05 else 'normal'
+            textstr = f"r ≈ {r_value:>6.3f}\np ≈ {permutation_p_value:>6.3f}"
+            ax_permut.text(0.95, 0.95, textstr, transform=ax_permut.transAxes, fontsize=10,
+                   verticalalignment='top', horizontalalignment='right',
+                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.5),
+                   fontweight=fontweight,
+                   fontfamily="monospace")
+            ax_permut.grid(color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+
+
+            ax_permut.tick_params(left=False, bottom=False) 
+            ax_permut.spines['top'].set_visible(False)
+            ax_permut.spines['right'].set_visible(False)
+            ax_permut.spines['bottom'].set_visible(False)
+            # permutation_ax.set_title(f'Permutation Test for Subject {self.subject_id} \n r={r_value}, p={permutation_p_value}')
+            
+        
+        # column labels for x and y axis
+        ax_drift.set_xlabel(f'Distance In Days Between "Train" And "Test" Session', fontsize=12)
+        ax_permut.set_xlabel('Pearson\'s Correlation', fontsize=12)
+        fig.text(0.015, 0.5, "Variance Explained (R²)", fontsize=12, va='center', rotation='vertical')
+        fig.text(0.51, 0.5, "Permutations Probability Density", fontsize=12, va='center', rotation='vertical')
+
+        plt.subplots_adjust(wspace=0.2, left=0.11, right=0.95)#, right=0.9)  # add space for second y-axis label
+        #plt.tight_layout(rect=[0.02, 0, 0.095, 1])  # Leave space for y-axis labels
+
+        storage_folder = f"data_files/{self.lock_event}/visualizations/final_form/basic_drift_summary"  # storage folder for all plots in function
+        storage_filename = f"drift_plot_basic_summary.png"
+        self.save_plot_as_file(plt=fig, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+
+    def visualize_encoding_performance_summary(self):
+        """
+        Visualizes the performance for each timepoint model averaged across sessions for all participants, for the full timespan and the zoom-in on the selected windows, aswell as a session comparison within the zoom-in window.
         """
         assert self.timepoint_min == 0 and self.timepoint_max == 650, "Function requires full range of timepoint encoding values."
         min_idx_peak, max_idx_peak = 290, 329
@@ -2598,8 +2719,8 @@ class VisualizationHelper(GLMHelper):
             fig, axes = plt.subplots(nrows=n_subjects, ncols=3,
                                 figsize=(15, 4 * n_subjects),
                                 sharex=False, sharey=False,
-                                dpi=100)
-            gs = GridSpec(n_subjects, 3, figure=fig, wspace=0.4, hspace=0.4)
+                                dpi=1000)
+            # gs = GridSpec(n_subjects, 3, figure=fig, wspace=0.4, hspace=0.4)
 
             for subj_idx, subj_id in enumerate(subject_ids):
                 # Load preds (all timepoints)
@@ -2668,6 +2789,7 @@ class VisualizationHelper(GLMHelper):
                 ax_zoom.spines['bottom'].set_visible(False)
                 ax_zoom.grid(color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
                 mean_performance_zoom = np.mean(timepoint_avg_loss_list_zoom)
+                mean_performance_zoom = 0.000 if f"{mean_performance_zoom:.3f}" == f"-0.000" else mean_performance_zoom
                 ax_zoom.axhline(mean_performance_zoom, color=color_mean, linestyle='--', linewidth=1, alpha=0.45)
                 ax_zoom.annotate(
                     f"μ≈{mean_performance_zoom:.3f}",
@@ -2698,7 +2820,7 @@ class VisualizationHelper(GLMHelper):
                 # print(f"session_avg_loss_list: {session_avg_loss_list}")
 
                 session_ids_int = [int(session_id) for session_id in range(1, len(session_avg_loss_list)+1)]
-                ax_sess.bar(session_ids_int, session_avg_loss_list, width=0.9, color='royalblue', alpha=0.8)
+                ax_sess.bar(session_ids_int, session_avg_loss_list, width=0.95, color='royalblue', alpha=0.8)
                 ax_sess.set_xticks(session_ids_int)
                 ax_sess.tick_params(left=False, bottom=False) 
                 ax_sess.spines['top'].set_visible(False)
@@ -2734,7 +2856,7 @@ class VisualizationHelper(GLMHelper):
             fig.supylabel("Variance Explained (R²)", fontsize=12)
             plt.tight_layout()
             
-            plot_folder =  f"data_files/{self.lock_event}/visualizations/final_form/timepoint_encoding_all_sessions/subject_{self.subject_id}"
+            plot_folder =  f"data_files/{self.lock_event}/visualizations/final_form/timepoint_encoding_all_sessions"
             plot_file = f"timepoint_model_comparison_{color_mean}.png"
             self.save_plot_as_file(plt=fig, plot_folder=plot_folder, plot_file=plot_file)
             plt.close()
@@ -2835,14 +2957,14 @@ class VisualizationHelper(GLMHelper):
         plt.close()
 
 
-    def determine_excluded_drift_sessions(self):
+    def determine_excluded_drift_sessions(self, subject_id:str=None, return_avg:bool=False):
         """
         Calculates which sessions should be omitted from drift analysis for the current subject based on self-session encoding performances for sessions.
         Sessions which show a negative deviation from the mean of more than 1.5 stds will be excluded.
         """
         assert "global_robust_scaling" in self.normalizations, "Session omittance calculation will always be performed based on global_robust_scaling normalization (and timepoint variance)."
-        
-        storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{self.subject_id}/norm_global_robust_scaling/"
+        subject_id = self.subject_id if subject_id is None else subject_id
+        storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{subject_id}/norm_global_robust_scaling/"
         json_storage_file = f"var_explained_timepoints_dict.json"
         json_storage_path = os.path.join(storage_folder, json_storage_file)
         with open(json_storage_path, 'r') as file:
@@ -2867,14 +2989,16 @@ class VisualizationHelper(GLMHelper):
         cutoff = avg_all_sessions - (std_all_sessions*1.5)
         excluded_sessions = [session_id for session_id, session_encoding_val in avg_self_session_fit_measure_by_session.items() if session_encoding_val < cutoff or session_encoding_val < 0]
 
-        logger.custom_info(f"Subject {self.subject_id}: omitting sessions {excluded_sessions}")
-        logger.custom_info(f"avg_self_session_fit_measure_by_session: {avg_self_session_fit_measure_by_session}")
-        logger.custom_info(f"avg_all_sessions: {avg_all_sessions}")
-        logger.custom_info(f"std_all_sessions: {std_all_sessions}")
-        logger.custom_info(f"cutoff: {cutoff} \n")
-        
+        logger.custom_info(f"Subject {subject_id}: omitting sessions {excluded_sessions}")
+        # logger.custom_info(f"avg_self_session_fit_measure_by_session: {avg_self_session_fit_measure_by_session}")
+        # logger.custom_info(f"avg_all_sessions: {avg_all_sessions}")
+        # logger.custom_info(f"std_all_sessions: {std_all_sessions}")
+        # logger.custom_info(f"cutoff: {cutoff} \n")
 
-        return excluded_sessions
+        if return_avg:
+            return excluded_sessions, avg_all_sessions
+        else:
+            return excluded_sessions
 
 
     def investigate_source_df(self):
