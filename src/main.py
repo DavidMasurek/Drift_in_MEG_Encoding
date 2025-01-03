@@ -80,6 +80,8 @@ calculate_RSM_test_set_drift = False
 plot_distance_drift_all_subjects = False
 calculate_source_drift = False
 
+assert create_train_test_split is False, "Currently in final phase of plot generation. No new splits."
+
 if not calculate_source_drift:
     if "mean_centered_voxel_then_global_robust_scaling" in normalizations:
         raise ValueError(f"Normalization mean_centered_voxel_then_global_robust_scaling is only valid for source drift analysis.")
@@ -241,10 +243,7 @@ for run in range(run_pipeline_n_times):
         if visualization:
             visualization_helper = VisualizationHelper(normalizations=normalizations, subject_id=subject_id, chosen_channels=meg_channels, lock_event=lock_event, alphas=alphas, timepoint_min=timepoint_min, timepoint_max=timepoint_max, pca_features=use_pca_features, pca_components=pca_components, ann_model=ann_model, module_name=module_name, batch_size=batch_size, n_grad=n_grad, n_mag=n_mag, crop_size=crop_size, fractional_ridge=fractional_ridge, fractional_grid=fractional_grid, time_window_n_indices=time_window_n_indices)
 
-            ### Debug ###
-            # if visualization_helper.omit_sessions == [] and visualization_helper.avg_all_sessions > 0.01:
-            #     achieved_res = True
-            ### End Debug ###
+            #visualization_helper.visualize_timepoint_window_drift_subj_2()
 
             #visualization_helper.visualize_session_distances()
 
@@ -252,7 +251,9 @@ for run in range(run_pipeline_n_times):
 
             #visualization_helper.visualize_encoding_performance_summary()
 
-            visualization_helper.visualize_drift_summary()
+            #visualization_helper.visualize_drift_summary()
+
+            #visualization_helper.visualize_drift_summary_subj_2_without_sess_4()
 
             # Visualize meg data with mne
             #visualization_helper.visualize_meg_epochs_mne()
@@ -291,7 +292,7 @@ for run in range(run_pipeline_n_times):
             ###visualization_helper.new_visualize_model_perspective(before_preprocessing=True)  # plot_norms=normalizations
 
             # Visualize session means and stds
-            #####visualization_helper.visualize_meg_means_stds()
+            visualization_helper.visualize_meg_means_stds()
 
             #####visualization_helper.visualize_arousal_mean_over_sessions()
 

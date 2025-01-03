@@ -2588,16 +2588,195 @@ class VisualizationHelper(GLMHelper):
         logger.custom_info(f"Subject {self.subject_id}: Differences in days between recording of sessions 1 and 10: {session_diff_1_10}")
         
 
+    def visualize_timepoint_window_drift_subj_2(self):
+        """
+        Generates timepoint window comparison within the peak encoding timepoints for subject 2.
+        """
+        assert self.timepoint_min == 290 and self.timepoint_max == 329, "Function requires peak timepoint range of 290-329."
+        normalization = "global_robust_scaling"
+        subj_id = "02"
+        fig = plt.figure(figsize=(10, 8), dpi=100)
+
+        # Load timepoint-based variance explained
+        storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{subj_id}/norm_{normalization}/"
+        json_storage_file = f"var_explained_timepoints_dict.json"
+        json_storage_path = os.path.join(storage_folder, json_storage_file)
+        with open(json_storage_path, 'r') as file:
+            fit_measures_by_session_by_timepoint = json.load(file)
+        
+        assert self.omit_sessions == [], "There should be no excluded sessions for subject 2."
+
+        # Filter timepoint values for windows
+        fit_measures_by_distance_by_time_window = {"timewindow_start": {}}
+        num_timepoints = (self.timepoint_max - self.timepoint_min) + 1  
+        timepoint_window_start_idx = 0
+        while timepoint_window_start_idx < num_timepoints:
+            fit_measures_window_by_session = self._filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint,
+                                                                                timepoint_window_start_idx=timepoint_window_start_idx)
+            # Only consider full windows (i.e. don't use potential smaller last timepoint window)
+            if fit_measures_window_by_session is not None:
+                # Calculate distance based variance explained for current window
+                fit_measures_by_distances_window = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_window_by_session, timepoint_level_input=True, average_within_distances=False, include_0_distance=False)
+                fit_measures_by_distance_by_time_window["timewindow_start"][timepoint_window_start_idx] = {"fit_measures_by_distances": fit_measures_by_distances_window}
+            timepoint_window_start_idx += self.time_window_n_indices
+
+        # Plot all timewindows in the same plot (with different colors)     
+        n_windows = len(fit_measures_by_distance_by_time_window["timewindow_start"].keys())
+        colormap = cm.viridis  # cm.viridis  
+        colors = colormap(np.linspace(0, 1, num=n_windows))
+
+        for timepoint_idx, timepoint_window_start_idx in enumerate(fit_measures_by_distance_by_time_window["timewindow_start"]):
+            fit_measures_by_distances_window = fit_measures_by_distance_by_time_window["timewindow_start"][timepoint_window_start_idx]["fit_measures_by_distances"]
+            color = colors[timepoint_idx]
+            # self._plot_scattered_fit_measures_by_distance_with_trend(fit_measures_by_distances_window, ax1, color=color, include_0_distance=include_0_distance, timepoint_window_start_idx=timepoint_window_start_idx, plot_permutation_test=plot_permutation_test, curr_norm=curr_norm) 
+
+            # Insert values for current window and exclude self pred values (0 distances)
+            x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances_window, losses_averaged_within_distances=False, return_0_distances=False)
+            x_values_set = np.array(list(set(x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
+            slope, intercept, r_value, _, std_err = linregress(x=x_values, y=y_values)
+            trend_line = slope * x_values_set + intercept
+            permutation_p_value = self.perform_permutation_test(x_values, y_values, n_permutations=10000, generate_plot=False)
+
+            timepoint_start_ms = self.map_timepoint_idx_to_ms(timepoint_window_start_idx)
+            timepoint_end_ms = timepoint_start_ms + ((self.time_window_n_indices - 1) * 2)  # each timepoint is equivalent to 2ms, 5 timepoints result in an 8ms range
+            
+            if permutation_p_value < 0.05:
+                # bold values
+                correlation_and_p_str = f"($\\mathbf{{r≈{r_value:.3f}}}$, $\\mathbf{{p≈{permutation_p_value:.3f}}}$)"
+            else:
+                correlation_and_p_str = f"(r≈{r_value:.3f}, p≈{permutation_p_value:.3f})"
+            extra_spacing = "    " if timepoint_start_ms < 100 and timepoint_end_ms < 100 else ""  # align r and p values for shorter windows (2 instead of 3 digits)
+            label = f"{timepoint_start_ms} to {timepoint_end_ms}ms {extra_spacing}{correlation_and_p_str}" 
+           
+            # Plot scatter points and trend of curr window with respective color
+            plt.scatter(x_values, y_values, color=color, s=10, alpha=0.8)
+
+            if permutation_p_value < 0.05:
+                plt.plot(x_values_set, trend_line, color=color, label=label, linestyle='-', linewidth=4)  # Bold significant
+            else:
+                plt.plot(x_values_set, trend_line, color=color, label=label, linestyle='--', linewidth=4)  # Dashed non-significant
+            #plt.plot(x_values_set, trend_line, color=color, label=label, linestyle='-', linewidth=3)
+        
+        ax = plt.gca()
+        ax.axhline(0, color='black', linestyle='--', linewidth=1, alpha=0.3)
+        ax.tick_params(left=False, bottom=False) 
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.grid(color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{x:.3f}'))  # limit y-axis tick labels to 3 decimal places
+        
+        ax.set_xlabel(f'Distance In Days Between "Train" And "Test" Session', fontsize=12)
+        ax.set_ylabel("Variance Explained (R²)", fontsize=12)
+        lines, labels = ax.get_legend_handles_labels()
+        # ax.legend(lines, labels, bbox_to_anchor=(1.05, 1), borderaxespad=0., framealpha=0.7, facecolor='white')  # loc='upper right'
+        legend = ax.legend(
+            frameon=True,
+            bbox_transform=ax.transAxes,  
+            facecolor='white',            
+            edgecolor='black',            
+            fontsize=10,
+            framealpha=0.5,               
+            fancybox=True,              
+        )
+        legend.get_frame().set_boxstyle("round,pad=0.5")  # Rounded box styling
+        plt.tight_layout()
+
+        storage_folder = f"data_files/{self.lock_event}/visualizations/final_form/timepoint_drift"  
+        storage_filename = f"drift_plot_all_windows_comparison"
+        self.save_plot_as_file(plt=fig, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+        
+
     def visualize_drift_summary_subj_2_without_sess_4(self):
         """
         Creates a summary drift plot similar to a column in visualize_drift_summary(), for subject 2 with (repeated) session 4 excluded.
         """
         assert self.timepoint_min == 290 and self.timepoint_max == 329, "Function requires peak timepoint range of 290-329."
         normalization = "global_robust_scaling"
+        subj_id = "02"
         fig, axes = plt.subplots(nrows=1, ncols=2,
                                 figsize=(10, 4),
                                 sharex=False, sharey=False,
                                 dpi=100)
+        ax_drift, ax_permut = axes    
+        ax_drift.set_title('Cross-Session Prediction Performances By Distance', fontsize=12)
+        ax_permut.set_title('Permutation Test Results', fontsize=12)
+
+        # Load timepoint-based variance explained
+        storage_folder = f"data_files/{self.lock_event}/var_explained_timepoints/{self.ann_model}/{self.module_name}/subject_{subj_id}/norm_{normalization}/"
+        json_storage_file = f"var_explained_timepoints_dict.json"
+        json_storage_path = os.path.join(storage_folder, json_storage_file)
+        with open(json_storage_path, 'r') as file:
+            fit_measures_by_session_by_timepoint = json.load(file)
+        
+        # Exclude repeated session 4
+        excluded_sessions = ["4"]
+        fit_measures_by_session_by_timepoint = self.omit_selected_sessions_from_fit_measures(fit_measures_by_session=fit_measures_by_session_by_timepoint, omitted_sessions=excluded_sessions, sensors_seperated=False)
+
+        # Plot the drift for the all timepoint values combined/averaged aswell
+        fit_measures_by_distances_all_timepoints = self.calculate_fit_by_distances(fit_measures_by_session=fit_measures_by_session_by_timepoint, timepoint_level_input=True, average_within_distances=False, include_0_distance=True, subject_id=subj_id)
+        x_values, y_values = self.extract_x_y_arrays(fit_measures_by_distances_all_timepoints, losses_averaged_within_distances=False)
+
+        # Calculate trend line, don't include the self predictions in the trend line calculation (i.e. filter x and y values where x = 0)
+        filtered_tuple_values = [x_y_pair for x_y_pair in zip(x_values, y_values) if x_y_pair[0] != 0]
+        filtered_x_values, filtered_y_values = zip(*filtered_tuple_values)
+        filtered_x_values = list(filtered_x_values)
+        filtered_y_values = list(filtered_y_values)
+
+        filtered_x_values_set = np.array(list(set(filtered_x_values)))  # Required/Useful for non-averaged fit measures within distances: x values occur multiple times
+        slope, intercept, r_value, _, std_err = linregress(x=filtered_x_values, y=filtered_y_values)
+        trend_line = slope * filtered_x_values_set + intercept
+        r_value_str = "{:.3f}".format(r_value)  # limit to three decimals
+
+        # Plot scatter points and graph (left)
+        ax_drift.scatter(filtered_x_values, filtered_y_values, color='royalblue', s=20)
+        ax_drift.scatter(x_values[x_values == 0], y_values[x_values == 0], marker='s', s=20, edgecolors='gray', facecolors='none')  # , facecolors='gray')  # Different styling for x=0 (not relevant for drift correlation)
+        ax_drift.axhline(0, color='black', linestyle='--', linewidth=1, alpha=0.3)
+        ax_drift.plot(filtered_x_values_set, trend_line, color='green', linestyle='-', linewidth=2)
+
+        ax_drift.tick_params(left=False, bottom=False) 
+        ax_drift.spines['top'].set_visible(False)
+        ax_drift.spines['right'].set_visible(False)
+        ax_drift.grid(color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+        ax_drift.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{x:.3f}'))  # limit y-axis tick labels to 3 decimal places
+        
+        # Plot permutation test (right)
+        permutation_p_value, null_distribution_corrs, empirical_corr, p_0_05_corr = self.perform_permutation_test(filtered_x_values, filtered_y_values, n_permutations=10000, generate_plot=False, final_plots=True)
+        
+        # Null distribution of correlations
+        ax_permut.hist(null_distribution_corrs, bins=30, color='lightgray', density=True)
+        # Vertical line for the empirical correlation, zero correlation and dashed line for p 0.05 correlation
+        ax_permut.axvline(empirical_corr, color='green', linewidth=2)
+        ax_permut.axvline(0, color='black', linestyle='--', linewidth=1, alpha=0.7)
+        ax_permut.axvline(p_0_05_corr, color='red', linestyle='--', linewidth=2)
+
+        fontweight = 'bold' if permutation_p_value < 0.05 else 'normal'
+        textstr = f"r ≈ {r_value:>6.3f}\np ≈ {permutation_p_value:>6.3f}"
+        ax_permut.text(0.95, 0.95, textstr, transform=ax_permut.transAxes, fontsize=10,
+                verticalalignment='top', horizontalalignment='right',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.5),
+                fontweight=fontweight,
+                fontfamily="monospace")
+        ax_permut.grid(color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+
+
+        ax_permut.tick_params(left=False, bottom=False) 
+        ax_permut.spines['top'].set_visible(False)
+        ax_permut.spines['right'].set_visible(False)
+        #ax_permut.spines['bottom'].set_visible(False)
+    
+        # column labels for x and y axis
+        ax_drift.set_xlabel(f'Distance In Days Between "Train" And "Test" Session', fontsize=12)
+        ax_permut.set_xlabel('Pearson\'s Correlation', fontsize=12)
+        fig.text(0.015, 0.5, "Variance Explained (R²)", fontsize=12, va='center', rotation='vertical')
+        fig.text(0.51, 0.5, "Permutations Probability Density", fontsize=12, va='center', rotation='vertical')
+
+        plt.subplots_adjust(wspace=0.2, left=0.11, right=0.95, bottom=0.15)#, right=0.9)  # add space for second y-axis label
+        #plt.tight_layout(rect=[0.02, 0, 0.095, 1])  # Leave space for y-axis labels
+
+        storage_folder = f"data_files/{self.lock_event}/visualizations/final_form/basic_drift_summary"  # storage folder for all plots in function
+        storage_filename = f"drift_plot_basic_summary_subj_2_session_4_omitted.png"
+        self.save_plot_as_file(plt=fig, plot_folder=storage_folder, plot_file=storage_filename, plot_type="figure")
+
 
     def visualize_drift_summary(self):
         """
@@ -2611,7 +2790,7 @@ class VisualizationHelper(GLMHelper):
         fig, axes = plt.subplots(nrows=n_subjects, ncols=2,
                                 figsize=(10, 4 * n_subjects),
                                 sharex=False, sharey=False,
-                                dpi=100)
+                                dpi=1000)
                                 
         for subj_idx, subj_id in enumerate(subject_ids):   
             ax_drift, ax_permut = axes[subj_idx]    
@@ -3582,12 +3761,15 @@ class VisualizationHelper(GLMHelper):
         return r_value
 
     
-    def extract_x_y_arrays(self, fit_measures_by_distances:dict, losses_averaged_within_distances:bool):
+    def extract_x_y_arrays(self, fit_measures_by_distances:dict, losses_averaged_within_distances:bool, return_0_distances:bool=True):
         """
         Helper function to extract two arrays 'x_values' and 'y_values' from fit_measures_by_distances
         """
         # Sort by distance for readable plot
-        fit_measures_by_distances = {distance: fit_measures_by_distances[distance] for distance in sorted(fit_measures_by_distances, key=int)}
+        if return_0_distances:
+            fit_measures_by_distances = {distance: fit_measures_by_distances[distance] for distance in sorted(fit_measures_by_distances, key=int)}
+        else:
+            fit_measures_by_distances = {distance: fit_measures_by_distances[distance] for distance in sorted(fit_measures_by_distances, key=int) if int(distance) > 0}
 
         if losses_averaged_within_distances:
             x_values = np.array(list(fit_measures_by_distances.keys())).astype(int)
@@ -4397,22 +4579,8 @@ class VisualizationHelper(GLMHelper):
             plot_file = f"distance_drift_all_subjects_{fit_measure}.png"
             self.save_plot_as_file(fig, plot_folder=plot_folder, plot_file=plot_file)
 
-    def timepoint_window_drift(self, all_windows_one_plot:bool, subtract_self_pred:bool, sensor_level:bool, include_0_distance:bool, debugging:bool=False, regions_of_interest:list=None, source_pca_type:str=None, whiten:bool=False):
-        """
-        Plots drift for seperate timepoint windows, as well as for all windows combined.
-        """
-        if regions_of_interest is not None:
-            assert not sensor_level, "timepoint_window_drift was called on source data and sensor level."
 
-        whiten_folder = "/whiten" if whiten else ""
-        if source_pca_type == 'voxels':
-            pca_folder = f"/voxels_pca_reduced{whiten_folder}"
-        elif source_pca_type == 'voxels_and_timepoints':
-            raise ValueError("[timepoint_window_drift] does not work for timepoint pca.")
-        else:
-            pca_folder = ""
-
-        def filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint: dict, timepoint_window_start_idx:int):
+    def _filter_timepoint_dict_for_window(self, fit_measures_by_session_by_timepoint: dict, timepoint_window_start_idx:int):
             """
             Returns a copy of the input fit measure dict by timepoints that only contains the timepoints within the selected window
             """
@@ -4429,6 +4597,23 @@ class VisualizationHelper(GLMHelper):
                     assert current_window_size == self.time_window_n_indices, f"Time window size is incorrect. current_window_size: {current_window_size}, time_window_n_indices: {self.time_window_n_indices}"
             
             return fit_measures_by_session_by_chosen_timepoints
+
+
+    def timepoint_window_drift(self, all_windows_one_plot:bool, subtract_self_pred:bool, sensor_level:bool, include_0_distance:bool, debugging:bool=False, regions_of_interest:list=None, source_pca_type:str=None, whiten:bool=False):
+        """
+        Plots drift for seperate timepoint windows, as well as for all windows combined.
+        """
+        if regions_of_interest is not None:
+            assert not sensor_level, "timepoint_window_drift was called on source data and sensor level."
+
+        whiten_folder = "/whiten" if whiten else ""
+        if source_pca_type == 'voxels':
+            pca_folder = f"/voxels_pca_reduced{whiten_folder}"
+        elif source_pca_type == 'voxels_and_timepoints':
+            raise ValueError("[timepoint_window_drift] does not work for timepoint pca.")
+        else:
+            pca_folder = ""
+
 
         def plot_timepoint_window_drift_for_timepoint_fit_measures(fit_measures_by_session_by_timepoint:dict, sensor_name:str=None, glaser_region:str=None, pca_folder:str="", curr_norm:str=None) -> None:
             sensor_filename_addition = f"sensor_{sensor_name}_" if sensor_name is not None else ""
@@ -4454,7 +4639,7 @@ class VisualizationHelper(GLMHelper):
             timepoint_window_start_idx = 0
             while timepoint_window_start_idx < num_timepoints:
                 # Filter timepoint values for current window
-                fit_measures_window_by_session = filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint,
+                fit_measures_window_by_session = self._filter_timepoint_dict_for_window(fit_measures_by_session_by_timepoint=fit_measures_by_session_by_timepoint,
                                                                                     timepoint_window_start_idx=timepoint_window_start_idx)
                 # Only consider full windows (i.e. don't use potential smaller last timepoint window)
                 if fit_measures_window_by_session is not None:
