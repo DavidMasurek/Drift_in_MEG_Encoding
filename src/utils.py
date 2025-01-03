@@ -2588,6 +2588,82 @@ class VisualizationHelper(GLMHelper):
         logger.custom_info(f"Subject {self.subject_id}: Differences in days between recording of sessions 1 and 10: {session_diff_1_10}")
         
 
+    def visualize_session_summary_statistics_subj_2(self):
+        """
+        Visualizes mean and std over sessions for subj_2 seperate for, and averaged across, timepoints.
+        """
+        assert self.timepoint_min == 290 and self.timepoint_max == 329, "Function requires peak timepoint range of 290-329."
+        n_timepoints = 40
+        min_ms = self.map_timepoint_idx_to_ms(0)
+        max_ms = self.map_timepoint_idx_to_ms(39)
+        normalization = "global_robust_scaling"
+        subj_id = "02"
+        session_ids_int = [1,2,3,5,6,7,8,9,10,4]  # plots will have session 4 at final position for temporal dependency
+        session_ids_str = [str(session_id_int) for session_id_int in session_ids_int]
+        # Collect means and stds of sessions
+        mean_and_std_dict_by_timepoints = self.recursive_defaultdict()
+        mean_and_std_dict_timepoint_avg = self.recursive_defaultdict()
+        for session_id_int in session_ids_int:
+            session_id = str(session_id_int)
+            # Get session meg data (train and test split combined)
+            session_meg_data = []
+            for split in ["train", "test"]:
+                split_path = f"data_files/{self.lock_event}/meg_data/norm_{normalization}/subject_{subj_id}/session_{session_id}/{split}/meg_data.npy"  
+                split_data = np.load(split_path)
+                session_meg_data.extend(split_data)
+            session_meg_data = np.array(session_meg_data)
+
+            # Store mean and std separately for all timepoints
+            assert session_meg_data.shape[2] == 40, "Expected 40 timepoints." # epochs, sensors, timepoints
+            
+            for timepoint_idx in range(n_timepoints):
+                timepoint_mean = np.mean(session_meg_data[:,:,timepoint_idx])
+                timepoint_std = np.std(session_meg_data[:,:,timepoint_idx])
+
+                mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["means"][session_id_int] = timepoint_mean
+                mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx]["stds"][session_id_int] = timepoint_std
+
+            # Calculate mean and std across all timepoints in session
+            mean_and_std_dict_timepoint_avg["means"][session_id_int] = np.mean(session_meg_data[:,:,:])
+            mean_and_std_dict_timepoint_avg["stds"][session_id_int] = np.std(session_meg_data[:,:,:])
+        
+        colormap = cm.viridis    
+        colors = colormap(np.linspace(0, 1, num=n_timepoints))
+
+        for plot_type in ["means", "stds"]:
+            measure_name = "Mean Value" if plot_type == "means" else "Standard Deviation Value"
+            timepoints_ms = [self.map_timepoint_idx_to_ms(timepoint_idx) for timepoint_idx in mean_and_std_dict_by_timepoints["timepoint"].keys()]
+
+            fig = plt.figure(figsize=(10, 8), dpi=100)
+            for timepoint_idx in range(n_timepoints):
+                plt.plot(session_ids_str, list(mean_and_std_dict_by_timepoints["timepoint"][timepoint_idx][plot_type].values()), linestyle='-', linewidth=1.75, alpha=0.8, color=colors[timepoint_idx])  # label=f'{timepoints_ms[timepoint_number]} ms'
+            plt.plot(session_ids_str, list(mean_and_std_dict_timepoint_avg[plot_type].values()), label=f'Average across {min_ms} to {max_ms}ms', color="black", linewidth=6)
+           
+            x_label_str = "Session ID"
+            plt.xlabel(x_label_str, fontsize=12)
+            plt.ylabel(measure_name, fontsize=12)
+            
+            # Add colorbar legend for session gradient
+            sm = plt.cm.ScalarMappable(cmap=cm.viridis, norm=plt.Normalize(vmin=min_ms, vmax=max_ms))
+            ticks = np.append(np.arange(min_ms, max_ms, step=10, dtype=int),max_ms)
+            cbar = plt.colorbar(sm, orientation="vertical", ticks=ticks, aspect=25, shrink=0.7)
+            cbar.set_ticklabels([str(tick) for tick in ticks])  
+            cbar.set_label("Timepoints 80–158ms", fontsize=12, labelpad=20, rotation=270)
+
+            ax = plt.gca()
+            ax.tick_params(left=False, bottom=False) 
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.grid(color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+            ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f'{x:.3f}'))  # limit y-axis tick labels to 3 decimal places
+            
+            plt.tight_layout()
+            # Save plot
+            plot_folder = f"data_files/{self.lock_event}/visualizations/final_form/meg_session_comparison/"
+            plot_file = f"Session_Comparison_{plot_type}_subject_{subj_id}_norm_{normalization}.png"
+            self.save_plot_as_file(plt=plt, plot_folder=plot_folder, plot_file=plot_file)
+
+
     def visualize_timepoint_window_drift_subj_2(self):
         """
         Generates timepoint window comparison within the peak encoding timepoints for subject 2.
@@ -3119,9 +3195,9 @@ class VisualizationHelper(GLMHelper):
 
         # Add colorbar legend for session gradient
         sm = plt.cm.ScalarMappable(cmap=cm.viridis, norm=plt.Normalize(vmin=1, vmax=10))
-        cbar = plt.colorbar(sm, orientation="vertical", ticks=[1, 10])
-        cbar.set_ticklabels(['1', '10'])  
-        cbar.set_label("Sessions 1–10", fontsize=10, labelpad=0, rotation=270)
+        cbar = plt.colorbar(sm, orientation="vertical", ticks=[1,2,3,4,5,6,7,8,9,10], aspect=20, shrink=0.8)
+        cbar.set_ticklabels(['1','','','4','','','7','','','10'])  
+        cbar.set_label("Sessions 1–10", fontsize=10, labelpad=12, rotation=270)
 
         ax = plt.gca()
         ax.spines['top'].set_visible(False)
